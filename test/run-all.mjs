@@ -74,6 +74,8 @@ try {
   results.push(await run('API de evolución (F5): hijos, diff, cirugía, importar', [join(ROOT, 'test', 'api-evolucion.spec.mjs'), BASE]));
   results.push(await run('trono (F6): duelos, reto, liga, genealogía, dinastías', [join(ROOT, 'test', 'trono.spec.mjs')]));
   results.push(await run('API de trono (F6): duelos, trono, dinastías, explotadora', [join(ROOT, 'test', 'api-trono.spec.mjs'), BASE]));
+  results.push(await run('verdad (F7): frases, confianza, emoción, memoria, boletín, neuronas, registro', [join(ROOT, 'test', 'verdad.spec.mjs')]));
+  results.push(await run('API de la verdad (F7): moviola, boletín, diario, neuronas, bofetada', [join(ROOT, 'test', 'api-verdad.spec.mjs'), BASE]));
 } finally {
   server.kill();
 }

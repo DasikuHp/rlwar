@@ -128,3 +128,105 @@ no borren la unidad). Evento `neuron.name` con `corr`, `feature`, `m` (para la f
 - Boletín: determinista (misma semilla → mismas puntuaciones); Sniper L3 ≥ red vacía en puntería.
 - Neuronas: una unidad artificialmente igual a una entrada recibe su nombre; ruido → "sin nombre claro".
 - Registro: tope de eventos; retención por red; `evo/log.jsonl` rota.
+
+## 12. Precisiones de F7 (fijadas al escribir los tests; completan §1–§11 sin cambiarlos)
+
+### 12.1 Registro y ficheros
+- Fichero de partida `evo/games/<gameId>.json` = `{meta, events, trajectories}`. `meta = {gameId, kind:
+  duel|training|exam, duelId?, trainingId?, seed, soldiers, left, right, nets: [ids], winner, kills, throne?,
+  netSha: {id: sha de estructura}, ts}`. `trajectories` = las de spec/04 §9.2 (con `obs`), para la moviola.
+- `decision` en la sala: `data` = el registro completo de spec/03 §7 (`candidates`, `chosen`, `margin`, `adjust`,
+  `moves`, `chosenMove`, `moveAdjust`, `value`, `attention`, `attribution`, `logp`, `confidence`) **sin** `points`
+  si la sala es sin pantalla y **sin** `activationsSummary`. Tope: al llegar a 5 000 eventos la sala emite un
+  `error {message: 'tope de eventos', fallback: 'decisiones sin registro completo'}` (una vez) y desde ahí las
+  `decision` llevan solo `{phase, chosen, chosenMove, truncated: true}`.
+- `graze`: tras cada disparo, por cada enemigo vivo no alcanzado con `dist ≤ 1` u a la trayectoria:
+  `{soldierId, dist, shotEventId}` (actor = tirador).
+- `reward` y `emotion` los añade el aprendizaje (no la sala): `truth.rewardEvents(events, rewards, {playerId,
+  netId, tau})` y `truth.emotionEvents(events, emotions, {playerId, netId})` continúan la numeración de `id`
+  y se guardan con la partida de muestra (entreno: 1 de cada 20, `k % 20 === 0`) o de duelo.
+- `update` y `lesson` van a `evo/log.jsonl` (`{id, ts, type, netId, ...}`; `id` secuencial por proceso, `refs`
+  a las partidas del lote). `say` lo emite la sala cuando un agente habla: `{text, kind, confidence: {certainty,
+  experience, confidence, level}, refs}`. Una frase que no pasa `checkPhrase` no se dice: `error {message:
+  'frase no verificable', text, missing}`.
+- Retención: `pruneGames(netId, keep = 200)` tras cada `saveGame` (borra las más antiguas de esa red que no
+  sean duelos de trono). `appendLog` rota a `log.1.jsonl` cuando el fichero supera `maxBytes` (50 MB;
+  parámetro para el test).
+
+### 12.2 `checkPhrase` y `compose` (`evo/truth.js`)
+- Números: `/-?\d+(?:[.,]\d+)?/g` sobre el texto (coma = punto). Decimales `d` = cifras tras el separador
+  (0..2; más de 2 se recorta a 2). Un número casa si algún valor numérico de los eventos referenciados
+  (recorrido profundo de todo el evento, excepto `t`) cumple `round(v, d) === round(n, d)`. Un `#k` casa
+  solo si alguna `decision` referenciada tiene un candidato con `i === k` o un destino con índice `k`.
+- Nombres: tokens con mayúscula inicial que no abren frase (posición 0 o tras `.`, `!`, `?`, `:`) y todo
+  token con guion interior (`Orca-2`, `hydra-8a`). Casan si aparecen (sin distinguir mayúsculas) como
+  palabra entera en algún valor de texto de los eventos referenciados. `STOPWORDS` exportada.
+- `loadEvents(ref)` devuelve una lista de eventos para `{game, id}` (uno) o `{log, id}` (uno); vacío si no
+  existe → todo falla (`ok: false`). Devuelve `{ok, missing: {numbers: [tokens], names: [tokens]}}`.
+- `compose(template, slots)`: huecos `{clave}`; cada `slots[clave] = {value, ref}` con `ref` obligatoria →
+  `{text, refs (únicas, en orden), numbers, names, slots}`; lanza `Error('hueco sin evento: clave')` si falta
+  el hueco o su `ref`. `phrase(kind, netId, composed)` añade `kind`, `netId`, `t`.
+
+### 12.3 Confianza (§4)
+`confidenceOf({margin, games, recentShots})`: `certainty = clamp(margin, 0, 1)`; `recentAccuracy` = media de
+`recentShots` (últimos 20, 1 = mató) o 0.5 si está vacío; `experience = (1 − e^(−games/50))·(0.5 +
+0.5·recentAccuracy)`; `confidence = certainty·experience`; `level` = `novata` (< 0.15) · `media` · `veterana`
+(> 0.5); `sayProbability = 0.2 + 0.6·confidence`. El agente-red lo mete en `decision.confidence`.
+
+### 12.4 Emoción (§5)
+`emotionOf({V, A})` → `{hope, fear, joy, disappointment, surprise, V, advantage, valueSource: 'value'|'mean'|
+'none'}`; `V === null` → `hope = fear = 0`. `learnFromGames` devuelve `emotions: [{decisionEventId, …}]`
+(uno por decisión con ventaja).
+
+### 12.5 Memoria (§6)
+- Forma: `{episodes: [], rivals: {}, recentShots: []}`. Memoria vacía puede ser `[]` (hijos de F5) o faltar:
+  `memoryOf(genome)` la normaliza. No se hereda.
+- `updateMemory(memory, {netId, playerId, events, rewards?, extra?})`: primero `gamesAgo++` en los episodios
+  existentes; luego añade: `kill` → `pride`, `death` → `grudge`, `graze` con `dist < 1` → `fear`,
+  `friendlyFire` (propio) → `shame`; `extra` (de trono): `reign.start` → `pride`, `reign.end` → `grudge`,
+  `challenge` perdido → `grudge`. `intensity = min(1, |effective|)` de la recompensa de la decisión asociada
+  (`rewards.entries`) y 0.5 si no hay. `rivalId` = `netId` del rival (o `agentType`), `biome` de `game.start`,
+  `family` del tiro, `outcome` = tipo de evento. `recentShots` ← 1/0 por tiro propio (kill/no), últimos 20.
+  `rivals[rivalId]`: `games`, `wins`, `killsBy` (me mató), `killsOf` (le maté), `pride`, `grudge`, `respect =
+  (games − wins)/games` (0.5 sin partidas). Tope 300 episodios: se borra el de menor `intensity·0.9^gamesAgo`.
+- `recall(memory, ctx = {rivalId, biome, family, outcome}, n = 3)`: puntuación de §6; empate → más reciente.
+
+### 12.6 Boletín (§7): `runBulletin(subject, {onScene})`
+`subject` = genoma o `{type, level}` heurístico. Escenas de puntería (40, semillas 9001+i): sala sin pantalla
+1×1 con el examinado a la izquierda y un **jugador humano ficticio** a la derecha que dispara `y = 1000` (fuera
+del plano) si le toca primero; puntúa 1 si el primer disparo del examinado mata. Cobertura (30, 9002+i): igual,
+puntúa 1 si tras su primer movimiento `coverAfter < coverBefore`. Supervivencia (10, 9003+i): `playGame` vs
+Sniper L3, 2 soldados, lados alternos; `vivos/total`. Adaptación (12, 9004+i): vs Greedy L3 con 1..4 soldados
+(3 partidas por tamaño); `1 − (max − min)` de la tasa de victorias por tamaño. Devuelve `{aim, cover,
+survival, adaptation, details: {aim: [...], cover: [...], survival: [...], adaptation: {1: r, …}}, seeds}`.
+API: `POST /api/lab/nets/:id/bulletin` → `202 {jobId}` (`kind: 'exam'`), evento `exam` (SSE + log), se guarda
+en `evo/nets/<id>/bulletin.json`; `GET /api/lab/nets/:id/bulletin` → el último o `404`.
+
+### 12.7 Neuronas con nombre (§9)
+`nameNeurons(genome, samples, {m = 500, min = 50, threshold = 0.3})`, `samples = [{obs, decision?}]` (las
+más recientes primero; se usan como mucho `m`): para cada `dense`/memoria y cada unidad, correlación de
+Pearson de su activación (recalculada con `net.forward`) con cada entrada nombrada por `eyeLayout`: para
+bloques `ctx`, las entradas de contexto; para bloques `cand`/`move`, además las entradas por fila
+(`candidates`/`moves`) y las columnas `kill` / `suicide` (`decision.candidates[i].sim.type`). Con menos de
+`min` muestras → `{name: 'sin datos', corr: 0, m}`. Nombre = entrada con mayor `|corr|` si `> threshold`, si no
+`'sin nombre claro'`. `genome.names.neurons[blockId][i]` (texto del usuario) manda. Muestras de la API: las
+trayectorias de las partidas guardadas de la red (más recientes primero).
+
+### 12.8 Diario, cronista, moviola
+- Cada línea de `log.jsonl` lleva `id` (secuencial) para poder referenciarla (`{log, id}`).
+- `diary(netId)` = entradas `lesson | milestone | reign.start | reign.end | challenge | exam` de esa red, más
+  recientes primero, cada una con `text` compuesto con `compose` y plantilla fija en español (verificable) y
+  `refs: [{log, id}]`. `chronicle()` = `reign.* | challenge | dynasty` de todas las redes.
+- `GET /api/lab/games/:id/turns/:n/brain?player=<playerId>` → `{decision, activations, attention, approx}`:
+  la `decision` es la del evento `decision` con `turn === n` del jugador; las activaciones se recalculan
+  reproduciendo la trayectoria del soldado desde el principio con el genoma actual (`approx: true`) o con la
+  copia `evo/games/<id>.nets.json` (duelos de trono, `approx: false`).
+- `POST /api/lab/nets/:id/slap|caress {game, decisionEventId, amount = 1}` → evento `slap|caress {decisionEventId,
+  amount, term: 'slapCaress'}` en la partida y en el log; queda en `evo/nets/<id>/feedback.json` y el siguiente
+  sueño que contenga esa partida añade `∓amount·reward.slapCaress` a esa decisión (`assignRewards` admite
+  `extraTerms`). Devuelve `{ok, reward}`.
+- Registro por API: `GET /api/lab/log?limit=N` → `{entries}` (las últimas N, más reciente al final) y
+  `GET /api/lab/log/:id` → la entrada (404 si no existe). `GET /api/lab/nets/:id/feedback` → `{pending}` (bofetadas y
+  caricias aún no consumidas por un sueño). `GET /api/lab/nets/:id/neurons` → `{blocks: {blockId: [{index, name,
+  corr, feature, m, custom}]}, m}`; `PUT …/neurons/:blockId/:index {name}` (400 vacío, 404 bloque/índice).
+  `GET /api/lab/nets/:id/diary` → `{entries: [{kind, text, refs, t, netId}]}`; `GET /api/lab/chronicle` igual.

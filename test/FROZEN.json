@@ -4,6 +4,7 @@
   "test/api-lab.spec.mjs": "e9a5c4eee703e51223ec6c27eed73bda97060aab038933d3067243c82679cdef",
   "test/api-trainings.spec.mjs": "b9803e2fbb235407cbcc192bf428ea18c4a316144de13846350a50c2fc29a17a",
   "test/api-trono.spec.mjs": "534f9b7e82f1e4c3f6906d9013315cef75216cc1e8144889e51897fbd8d29f9f",
+  "test/api-verdad.spec.mjs": "68eedebb8a0fba8847c3809a5619ae366acc805e6db56fc94493b14b05ffd130",
   "test/aprendizaje-extra.spec.mjs": "2a48c48c1d52088e53e56fa754b4a419ed655f25da2bb343ccc1a2cdb49a2da8",
   "test/aprendizaje.spec.mjs": "25c7544b912e59aa3b067246cdebae1856db2855372627934364035e35c185ea",
   "test/client.spec.mjs": "65659173d8eca4e4291675bcadc8e9e64d1dbba5c77400c88be063e70119156a",
@@ -25,5 +26,6 @@
   "test/smoke.mjs": "708013b5e37bf82e4d13315978d0645238a15b3b229e2b9ab0335add182b6854",
   "test/tools.spec.mjs": "16ffcff2f467e99882d48a0969970bf3bca7faeaf95323cb7805a2bd52a53e68",
   "test/trono.spec.mjs": "c4d2f5e1d39089ba2e11f02347dd0c3b7069975a91cf5bb01c9bcd3ddbbec8ab",
-  "test/troops.spec.mjs": "f7f1f04c0b3a0d3d3743f687ce1619a22fa6646c248b7fb979490e2656526cc1"
+  "test/troops.spec.mjs": "f7f1f04c0b3a0d3d3743f687ce1619a22fa6646c248b7fb979490e2656526cc1",
+  "test/verdad.spec.mjs": "206aba0774472445da8b946bbf81ca83be81dc2ce587ced58f7c74ec027d0dcf"
 }

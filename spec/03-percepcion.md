@@ -41,8 +41,12 @@ Error analítico: para `function`, `Δy = f(ex') − f(sx') + sy − ey` (la cur
 ## 3. Observación (`observe(state, soldierId, genome, phase, cache) → obs`)
 - `obs = {ctx: {blockId: Float64Array}, cand: {blockId: Float64Array[]}, move: {blockId: Float64Array[]}, candidates, destinations}`.
 - `phase ∈ {'shoot','move'}`. En `'move'` el historial y los rasgos ya incluyen el disparo recién
-  hecho; en `'shoot'` los destinos no se calculan (Pies inactivos) y en `'move'` los candidatos
-  tampoco (Manos inactivas).
+  hecho; en `'shoot'` los destinos no se calculan (Pies inactivos: sus ojos van a **cero**) y en
+  `'move'` los candidatos tampoco (Manos inactivas: `eye.candidates`/`eye.simulator` a cero). Así
+  la red recibe siempre todas sus entradas y las cabezas inactivas se ignoran.
+- Radar: se marcha `k = 1, 2, …` con `P_k = soldado + k·0.25·dir`; el primer `P_k` dentro de un
+  obstáculo (rect sin ampliar, bordes incluidos) da `(k·0.25, 1)`; el primero fuera del plano da
+  `(k·0.25, 0)`.
 - Coste objetivo: < 1 ms sin simulador; simulador: ≈ 0.11 ms por candidato (medido) → N=24 ≈ 2.6 ms.
 
 ## 4. Destinos de movimiento
@@ -145,3 +149,94 @@ Tarea: un disparo por episodio, mapa real nuevo cada vez, 1–2 enemigos, 0–1 
   0.07–0.27 ms; con Mapa 2.3 ms (se abarata en la red real: el contexto se calcula una vez, no por
   candidato). `worker_threads`: 1 hilo 314 decisiones/s → 2 hilos ×1.9, 4 hilos ×3.0, 8 hilos ×6.6
   (24 núcleos).
+
+## 9. API exacta y ampliaciones de la sala (fijado antes de los tests de F3)
+
+### 9.1 `shared/percept.js`
+```js
+toLocal({x, y}, team) / toWorld({x, y}, team)      // x' = -x para el equipo derecho
+localToWorldExpr(exprLocal, mode, team)              // sustitución textual de §1 (identidad para el izquierdo)
+worldToLocalSlope(a, team)                           // pendiente de `a*x`: -a para el derecho
+FAMILY_ORDER = ['line', 'parabola', 'sine', 'ode1', 'artillery', 'wild']
+familyOf(shot) → {family, params}                    // clasifica un disparo ajeno (§9.3)
+generateCandidates(state, soldier, imagination, rng) → cands   // §5; cands[i].i === i
+applyAdjust(cand, sample) → cand'                    // §6 (recorte de artillería incluido)
+candidateFeatures(cand, ctx) → Float64Array(12)      // eye.candidates
+simulateCandidate(cand, ctx, fine) → {type, minDist, endX, endY, points, victimId, polyline}
+simulatorFeatures(sim, ctx) → Float64Array(10)
+moveDestinations(state, soldier) → [{i, to, stay, slid, cover, distEnemy, los, feat: Float64Array(9)}]
+observe(state, soldierId, genome, { phase, cands, moves, sims }) → obs (spec/02 §5) + {names}
+eyeLayout(block) → [{index, name}]                   // nombres en español de cada índice (catálogo)
+```
+- `state` es el `snapshot()` de la sala **ampliado** (§9.3). `ctx` = `contextFor` de `agents/lib.js`
+  más `team`. Todo vector se calcula en el marco local del soldado.
+- Cupo de la Imaginación: `count_f = floor(n·w_f/Σw)` y los restos por mayor parte fraccionaria
+  (empate → orden de `FAMILY_ORDER`). Rejilla por familia = producto cartesiano de sus listas
+  (× objetivos en `line`, `parabola`, `sine`; `wild` × sus 7 plantillas). Se baraja con Fisher–Yates
+  (`j = floor(rng()·(i+1))`, de atrás adelante) y se toman los `count_f` primeros; si la rejilla es
+  menor que el cupo, se repite desde el principio con `p1 += (rng()·2−1)·0.05`. Objetivos: enemigos
+  vivos ordenados por distancia (`nearest`: solo el primero); si no hay enemigos vivos, objetivo
+  virtual en `(sx'+20, sy)`.
+- Plantillas exactas de `expr` local: `line` `${s.toFixed(5)}*x` · `parabola`
+  `${s.toFixed(5)}*x+${k.toFixed(5)}*x^2` · `sine` `${s.toFixed(5)}*x+${A.toFixed(3)}*sin(x/${T.toFixed(3)})` ·
+  `ode1` `${a.toFixed(3)}*sin(x/${k.toFixed(3)})+${b.toFixed(3)}` · `artillery` `expr = -g.toFixed(4)`,
+  `angle` entero · `wild` plantillas de Chaos con `a.toFixed(3)` y `k.toFixed(2)`, `params = [a, k, idx]`.
+- `applyAdjust(cand, sample)`: `p_i' = p_i + scale_i·clip(sample_i, −3, 3)` con las escalas de §6;
+  se reconstruye `exprLocal`, `expr` y `angle` (artillería: `g ∈ [0.005, 0.3]`, `angle ∈ [−85, 85]`,
+  redondeado a entero).
+- Errores analíticos (`eye.candidates`): `tanh(Δy/3)`; si la fórmula da un valor no finito → 0.
+- `eye.mates`: los aliados sin disparo previo cuentan 0 en las fracciones de kill/fuego amigo/quieto y
+  1 en `minDist/10`.
+- `eye.moves` "pegado a obstáculo": el destino está dentro de algún rect ampliado en `BODY + 1`.
+- `eye.map` obstáculos: fracción de una rejilla 4×4 de puntos (centros de subceldas) dentro de algún
+  rect; estelas: los `points` de los 2 últimos disparos de cada equipo del `shotLog` (§9.3), último 1,
+  anterior 0.5, se toma el máximo.
+
+### 9.2 `shared/policy.js`
+```js
+softmaxT(scores, temperature) → probs
+sampleIndex(probs, rng) → i              // r = rng(); acumula; el último si sobra
+decideShot({ net, genome, state, soldierId, memory, team, rng, attribution, sims }) →
+  { choice: {mode, expr, angle, family, params, exprLocal}, decision, memory }
+decideMove({ net, genome, state, soldierId, memory, team, rng, shot }) →
+  { move: {x, y} | 'stay', decision, memory }
+attribute(net, obs, memory, chosen, phase) → [{blockId, name, drop, share}]
+```
+- `memory` = estado de las memorias de este soldado (spec/02 `zeroState()`); `team` =
+  `{blockId: Float64Array}` (media de los `h` de los compañeros vivos, o `null`).
+- Elección: `p = softmaxT(scores, traits.temperature)`; `chosen = sampleIndex(p, rng)`;
+  `margin = p[chosen] − max_{i≠chosen} p[i]`; `logp.choose = ln p[chosen]`.
+- Ajuste: `a_i = clip(μ_i + pulse·gauss(rng), −3, 3)` (se consume **un** `rng.gauss()` por
+  parámetro, en orden); `logp.adjust = Σ_i ln N(a_i; μ_i, pulse²)` con la densidad sin recortar.
+  Sin `hand.adjust`: `adjust = null`, `logp.adjust = null`.
+- Movimiento: igual sobre 9 destinos; con ajuste, desplazamiento `(0.5·a₁, 0.5·a₂)` y nuevo
+  `slideMove`; el registro guarda `moveAdjust` (spec/03 §7). Sin `foot.move`: `move = 'stay'`.
+- Sin `hand.value`: `value = null`. Atribución solo si `attribution:true`.
+- Orden de consumo del `rng` en `decideShot`: 1) `sampleIndex` 2) los `gauss` del ajuste.
+
+### 9.3 Ampliaciones de `server/rooms.js` (F3)
+- `room.shotLog` (máx. 40) y `snapshot().shotLog` (últimos 16; `points` solo en los últimos 4):
+  `{turn, playerId, soldierId, team, mode, expr, angle, family, params, result:{type, soldierId},
+  minDist, stayed, points}`; `family/params` del `choice` si los trae (redes) o de `familyOf`
+  (heurísticos y humanos: `a*x` → `line` `[a', 0, 0]` con `a'` en el marco del tirador; `ode1` →
+  `ode1` `[0,0,0]`; `ode2` → `artillery` `[g, angle, 0]`; otro `function` → `wild` `[0,0,0]`).
+  `minDist` = mínima distancia de los puntos del tiro a un enemigo vivo (antes de la baja).
+  `stayed` se rellena al resolver el movimiento de ese turno.
+- `soldiers[].turns` (veces que ha tenido el turno) y `snapshot().stats = {shots, shotsNoKill, remaps}`.
+- `players[].netId`, `players[].learn`; `addAgent('net', {netId, learn, team})` o `addAgent('net:<id>')`.
+- Evento SSE `decision` `{decision}` antes de `shot` (fase `shoot`) y antes de `move` (fase `move`);
+  `snapshot().lastDecision`. En sala sin pantalla no se emite, pero `room.decisions` (últimas 50) los guarda.
+- `players[].agentType === 'net'` en el snapshot; `name` = nombre de la red.
+
+### 9.4 `agents/net.js`, `agents/registry.js`, `evo/store.js`
+- `evo/store.js`: `netsDir()` (`evo/nets/`, o `GW_EVO_DIR`), `listNets() → [{id, name, emblem,
+  traits, stats, generation, paramCount, blocks, updatedAt}]`, `loadNet(id) → genome|null`,
+  `saveNet(genome) → {ok, id}` (valida `forPlay:false`; escritura atómica `tmp` + `rename`),
+  `deleteNet(id)`. Ids de fichero = `id` del genoma. Ficheros ilegibles se ignoran con aviso.
+- `registry.listAgents()` = 4 heurísticos + `{id:'net:<id>', name, icon:'🧠', description, net:true,
+  netId, emblem}`. `createAgent('net:<id>')` y `createAgent('net', {netId, genome?, learn})`.
+- `agents/net.js: create({netId, genome, learn = false})` → `{meta, chooseShot, chooseMove,
+  memoryFor(soldierId), trajectories}`; guarda `memory` por soldado y calcula `team` como media de
+  los `h` de los otros soldados vivos del mismo jugador (última escritura). `chooseShot` devuelve
+  `{mode, expr, angle, family, params, exprLocal, reason: '', decision}`; `chooseMove` devuelve
+  `{x, y, decision}` o `'stay'`. Ante cualquier excepción devuelve `0.1*x` y `decision.error`.

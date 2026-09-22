@@ -4,7 +4,7 @@ import { BLOCKS, LIMITS, validate, normalize, countParams, DEFAULT_TRAITS, TRAIT
 import { eyeLayout } from '../shared/percept.js';
 import { TEMPLATES } from '../shared/templates.js';
 import { listNets, loadNet, saveNet, deleteNet, entryOf } from './store.js';
-import { createTrainer } from './train.js';
+import { createTrainer, makeLearner } from './train.js';
 import { runDuel, LEARNING_MODES, SPEEDS } from './duel.js';
 import { challenge, throneView, foundDynasties, runGeneration, readThroneFull, genealogyView, registerBirth } from './throne.js';
 import { loadGame, appendLog, readLog, loadLogEntry, listGames, saveGame, loadGameNets, readFeedback, writeFeedback, netsDir } from './store.js';
@@ -172,6 +172,53 @@ function throneHooks() {
     onEvent: (ev) => { pushEvent('throne', { queen: readThroneFull().queen, event: ev.type, ...ev }); },
     startDuel: (opts) => startDuel(opts),
   };
+}
+
+// ---------- exhibiciones (spec/04 §10.3): salas creadas por POST /api/rooms ----------
+const exhibitionRival = (room, team) => {
+  const p = room.players.find((q) => q.team !== team);
+  if (!p) return null;
+  return p.agentType === 'net' && p.genome ? { type: 'net', genome: p.genome, name: p.name, learn: false } : { type: p.agentType, level: p.level || 2, temperature: p.temperature || 0 };
+};
+const logUpdate = (netId, room, r, extra = {}) => {
+  const refs = [{ game: room.gameId }];
+  appendLog({ type: 'update', kind: r.update.kind, netId, roomCode: room.code, games: extra.games, loss: r.update.loss, entropy: r.update.entropy, gradNorm: r.update.gradNorm, meanFitness: r.update.meanFitness, bestFitness: r.update.bestFitness, top: r.update.top, refs });
+  if (r.lesson) appendLog({ type: 'lesson', netId, roomCode: room.code, blockId: r.lesson.blockId, name: r.lesson.name, relChange: r.lesson.relChange, bulb: r.lesson.bulb, refs });
+  pushEvent('sleep', { netId, roomCode: room.code, games: extra.games, update: r.update });
+  if (r.lesson) pushEvent('lesson', { netId, roomCode: room.code, lesson: r.lesson });
+};
+export function onExhibitionOver(room) {
+  const nets = room.players.filter((p) => p.agentType === 'net' && p.netId);
+  if (!nets.length || !room.gameId) return;
+  const trajectories = {};
+  for (const p of nets) if (room.agents[p.id]) trajectories[p.id] = { netId: p.netId, soldiers: room.agents[p.id].trajectories };
+  const side = (team) => room.players.find((p) => p.team === team);
+  const idOf = (p) => (p ? p.netId || p.agentType || p.name : null);
+  const winner = room.result && room.result.winner ? idOf(side(room.result.winner)) : null;
+  saveGame({ gameId: room.gameId, kind: 'exhibition', roomCode: room.code, seed: room.seed, soldiers: room.soldiersPerPlayer, left: idOf(side('left')), right: idOf(side('right')), nets: [...new Set(nets.map((p) => p.netId))], winner, kills: Object.fromEntries(room.players.map((p) => [idOf(p), p.kills || 0])), ts: Date.now() }, room.events, trajectories);
+  const byNet = new Map();
+  for (const p of nets) (byNet.get(p.netId) || byNet.set(p.netId, []).get(p.netId)).push(p);
+  for (const [netId, players] of byNet) {
+    if (activeTraining(netId)) { appendLog({ type: 'exhibition.skipped', netId, roomCode: room.code, reason: 'la red está entrenando' }); continue; }
+    const disk = loadNet(netId);
+    if (!disk) continue;
+    const L = makeLearner(disk);
+    const games = players.map((p) => ({ events: room.events, trajectory: trajectories[p.id] || { netId, soldiers: {} }, playerId: p.id }));
+    L.addStats({ games: players.length }); // una exhibición suma partidas, nunca victorias ni bajas (spec/04 §7)
+    if (!players.some((p) => p.learn)) { L.absorb(games); L.save(); continue; }
+    const r = L.learn(games); // gradiente (o solo memoria si la red es de evolución)
+    L.save();
+    if (r) logUpdate(netId, room, r, { games: games.length });
+    if (L.method === 'evolution' || L.method === 'both') {
+      const rival = exhibitionRival(room, players[0].team);
+      (async () => {
+        const out = await L.evolve({ rival, seed: room.seed, soldiers: room.soldiersPerPlayer });
+        if (activeTraining(netId)) { appendLog({ type: 'exhibition.skipped', netId, roomCode: room.code, reason: 'empezó un entreno durante la evolución' }); return; }
+        L.save();
+        logUpdate(netId, room, out, { games: out.update.games });
+      })().catch((e) => pushEvent('error', { message: `exhibición ${room.code}: ${e.message}` }));
+    }
+  }
 }
 
 function startTraining(body) {

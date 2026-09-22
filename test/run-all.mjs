@@ -79,6 +79,7 @@ try {
   results.push(await run('arreglos del motor: fuego amigo, turno siempre cerrado, sala x10', [join(ROOT, 'test', 'arreglos-motor.spec.mjs'), BASE]));
   results.push(await run('arreglos del aprendizaje: cada partida es un mundo aparte', [join(ROOT, 'test', 'arreglos-partidas.spec.mjs')]));
   results.push(await run('arreglos del aprendizaje: gradiente, evolución o ambos', [join(ROOT, 'test', 'arreglos-metodo.spec.mjs')]));
+  results.push(await run('arreglos: exhibiciones que cuentan, se guardan y enseñan', [join(ROOT, 'test', 'arreglos-exhibicion.spec.mjs'), BASE]));
 } finally {
   server.kill();
 }

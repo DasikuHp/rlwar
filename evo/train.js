@@ -340,7 +340,7 @@ export function makeLearner(genome) {
     return out;
   };
   return {
-    net, genome: g, optim, learn, method, evolve,
+    net, genome: g, optim, learn, method, evolve, absorb,
     review: (games) => learn(games, { lrScale: 1 }),
     addStats: (s) => { g.stats.games += s.games || 0; g.stats.wins += s.wins || 0; g.stats.kills += s.kills || 0; g.stats.deaths += s.deaths || 0; },
     save: () => {

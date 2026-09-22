@@ -6,7 +6,7 @@ import { extname, join, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rooms, getRoom, createRoom } from './rooms.js';
 import { listAgents } from '../agents/registry.js';
-import { labApi } from '../evo/api.js';
+import { labApi, onExhibitionOver } from '../evo/api.js';
 import * as C from '../shared/constants.js';
 
 const PORT = Number(process.env.PORT) || 8787;
@@ -52,6 +52,7 @@ async function api(req, res, parts, url) {
     if (method === 'POST') {
       const b = await readBody(req);
       const room = createRoom(b.name, { soldiersPerPlayer: b.soldiers, seed: b.seed, speed: b.speed });
+      room.onGameOver = onExhibitionOver; // exhibición: cuenta, se guarda y, con learn:true, enseña (spec/04 §10.3)
       return json(res, 201, { code: room.code, name: room.name, soldiers: room.soldiersPerPlayer, seed: room.seed });
     }
     return json(res, 405, { error: 'Método no permitido' });

@@ -577,6 +577,8 @@ export class Room {
     if (this.gameId) for (const p of this.players) this.emit(this.winner ? (p.team === this.winner ? 'win' : 'lose') : 'draw', { playerId: p.id, soldierId: null, netId: p.netId || null }, { ...this.result });
     this.broadcast('gameover', { winner: this.winner, result: this.result });
     this.broadcast('state', this.snapshot());
+    // salas de exhibición (spec/04 §10.3): el laboratorio cuenta, guarda y, si toca, aprende de la partida
+    if (this.onGameOver) { try { this.onGameOver(this); } catch (e) { this.log(`⚠️ el laboratorio no pudo registrar la partida (${e.message})`); } }
   }
 
   rematch() {

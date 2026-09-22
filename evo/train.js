@@ -394,6 +394,18 @@ export function createTrainer(opts = {}) {
       saveNet(g);
       saveOptim(optim, dir);
     };
+    // partida de muestra (spec/04 §6, spec/07 §12.1): recompensa y emoción dentro del registro de la partida
+    const saveSample = (game, emotions) => {
+      const events = game.events.map((e) => ({ ...e }));
+      rewardEvents(events, game.rewards, { playerId: game.playerId, netId: g.id, tau: g.traits.teamSpirit, normalized: !!g.reward.normalize });
+      emotionEvents(events, emotions, { playerId: game.playerId, netId: g.id });
+      const gameId = events[0] ? events[0].game : `g-${game.seed}-t${t.id}`;
+      const start = events.find((e) => e.type === 'game.start');
+      const nets = start && start.data && Array.isArray(start.data.players) ? start.data.players.map((p) => p.netId).filter(Boolean) : [g.id];
+      const winner = game.win ? g.id : (start && start.data.players.find((p) => p.playerId !== game.playerId) || {}).netId || null;
+      saveGame({ gameId, kind: 'training', trainingId: t.id, seed: game.seed, soldiers: game.soldiers, left: start ? (start.data.players.find((p) => p.team === 'left') || {}).netId || null : null, right: start ? (start.data.players.find((p) => p.team === 'right') || {}).netId || null : null, nets: [...new Set(nets)], winner, kills: { [g.id]: game.kills }, rival: game.rivalKind, ts: Date.now() }, events, { [game.playerId]: game.trajectory });
+      t.sampleGames.push(gameId);
+    };
     const sleep = () => {
       if (!batch.length) return;
       const r = learnFromGames({ net, genome: g, games: batch, optim, cfg: lc });
@@ -403,15 +415,7 @@ export function createTrainer(opts = {}) {
       for (const game of batch) if (game.sample) byGame.set(game, new Set(Object.values(game.trajectory && game.trajectory.soldiers ? game.trajectory.soldiers : {}).flat().map((s) => s.decision && s.decision.eventId)));
       for (const [game, ids] of byGame) {
         const gi = batch.indexOf(game);
-        const events = game.events.map((e) => ({ ...e }));
-        rewardEvents(events, game.rewards, { playerId: game.playerId, netId: g.id, tau: g.traits.teamSpirit, normalized: !!g.reward.normalize });
-        emotionEvents(events, r.emotions.filter((em) => em.game === gi && ids.has(em.decisionEventId)), { playerId: game.playerId, netId: g.id }); // solo las de esta partida (spec/04 §10.1)
-        const gameId = events[0] ? events[0].game : `g-${game.seed}-t${t.id}`;
-        const start = events.find((e) => e.type === 'game.start');
-        const nets = start && start.data && Array.isArray(start.data.players) ? start.data.players.map((p) => p.netId).filter(Boolean) : [g.id];
-        const winner = game.win ? g.id : (start && start.data.players.find((p) => p.playerId !== game.playerId) || {}).netId || null;
-        saveGame({ gameId, kind: 'training', trainingId: t.id, seed: game.seed, soldiers: game.soldiers, left: start ? (start.data.players.find((p) => p.team === 'left') || {}).netId || null : null, right: start ? (start.data.players.find((p) => p.team === 'right') || {}).netId || null : null, nets: [...new Set(nets)], winner, kills: { [g.id]: game.kills }, rival: game.rivalKind, ts: Date.now() }, events, { [game.playerId]: game.trajectory });
-        t.sampleGames.push(gameId);
+        saveSample(game, r.emotions.filter((em) => em.game === gi && ids.has(em.decisionEventId))); // solo las de esta partida (spec/04 §10.1)
       }
       const refs = batch.map((game) => ({ game: game.events && game.events[0] ? game.events[0].game : null })).filter((x) => x.game);
       appendLog({ type: 'update', netId: g.id, trainingId: t.id, games: batch.length, loss: r.update.loss, entropy: r.update.entropy, gradNorm: r.update.gradNorm, top: r.update.top, refs });

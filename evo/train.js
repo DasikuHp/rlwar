@@ -317,9 +317,13 @@ export function makeLearner(genome) {
   const dir = join(netsDir(), g.id);
   const optim = loadOptim(net, dir);
   const method = g.learning.method || 'gradient';
+  // recompensas (con bofetadas pendientes) y memoria de las partidas que aún no se han mirado
+  const absorb = (games) => {
+    for (const game of games) if (!game.rewards) { const gameId = game.events && game.events[0] ? game.events[0].game : null; game.rewards = assignRewards({ reward: g.reward, teamSpirit: g.traits.teamSpirit, events: game.events, trajectory: game.trajectory, playerId: game.playerId, stats: g.reward.stats || (g.reward.stats = {}), extraTerms: gameId ? takeFeedback(g.id, gameId, g.reward.slapCaress ?? 1) : null }); absorbGame(g, game); }
+  };
   const learn = (games, { lrScale = 1 } = {}) => {
     const lc = { ...g.learning.gradient, lr: g.learning.gradient.lr * lrScale };
-    for (const game of games) if (!game.rewards) { const gameId = game.events && game.events[0] ? game.events[0].game : null; game.rewards = assignRewards({ reward: g.reward, teamSpirit: g.traits.teamSpirit, events: game.events, trajectory: game.trajectory, playerId: game.playerId, stats: g.reward.stats || (g.reward.stats = {}), extraTerms: gameId ? takeFeedback(g.id, gameId, g.reward.slapCaress ?? 1) : null }); absorbGame(g, game); }
+    absorb(games);
     if (method === 'evolution') return null; // la evolución no aprende partida a partida (spec/04 §10.2); la memoria sí
     const r = learnFromGames({ net, genome: g, games, optim, cfg: lc });
     applyImagination(g, r.imagination);

@@ -171,12 +171,16 @@ export function updateMemory(memory, { netId = null, playerId, events = [], rewa
     r.killsBy += myDeaths; r.killsOf += myKills; r.pride += myKills; r.grudge += myDeaths;
     r.respect = r.games ? (r.games - r.wins) / r.games : 0.5;
   }
+  trimEpisodes(memory);
+  return memory;
+}
+// tope de 300 episodios: se borra el de menor intensidad·0.9^gamesAgo (spec/07 §12.5)
+function trimEpisodes(memory) {
   while (memory.episodes.length > 300) {
     let worst = 0;
     for (let i = 1; i < memory.episodes.length; i++) if (episodeScore(memory.episodes[i]) < episodeScore(memory.episodes[worst])) worst = i;
     memory.episodes.splice(worst, 1);
   }
-  return memory;
 }
 export function recall(memory, ctx = {}, n = 3) {
   const score = (e) => episodeScore(e) * (1 + (ctx.rivalId && e.rivalId === ctx.rivalId ? 1 : 0) + (ctx.biome && e.biome === ctx.biome ? 0.5 : 0) + (ctx.family && e.family === ctx.family ? 0.5 : 0) + (ctx.outcome && e.outcome === ctx.outcome ? 0.5 : 0));

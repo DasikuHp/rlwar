@@ -81,6 +81,30 @@ el único punto de validación de disparos.
 | Extras | **Los 4**: boletín de habilidades (exámenes fijos con semilla → radar de puntería/cobertura/supervivencia/adaptación) · neuronas con nombre (detecta a qué reacciona cada neurona; renombrable) · moviola (repetición turno a turno con cerebro, candidatos y frase) · cirugía (congelar bloques; trasplantar un bloque de una red a otra). |
 | Encargo | "**Investiga cómo hacerlo humano y divertido manteniendo la lógica de RL**" → §6. |
 
+### Ronda 7 — ideas de la investigación y ojos extra ✅
+| Tema | Decisión |
+|---|---|
+| Ideas de aprendizaje | **Las 4**: recompensa normalizada + etiqueta + hitos anti-olvido · liga estilo AlphaStar (sala de la fama sorteada según contra quién aún pierde, partidas fantasma, retadora explotadora) · bofetada/caricia · 🎲 Imaginación que evoluciona. Recordatorio del usuario: "**que cualquiera pueda hacerlo**". |
+| Ideas de vida | **Las 4**: voz con reglas + memoria de rivales · emociones calculadas del RL · sueño + bombilla + lección · rasgos heredables (temperatura, espíritu de equipo). Recordatorio: "**lo más humano**". |
+| Ojos extra | **Los 4**: Historial · Radar (bigotes) · Reloj · Compañeros. |
+| Versiones | **git local** (sin remoto). Hecho: commit base `0082bd5` (suite en verde); `referencia/`, los PID, el token de sesión del CLI y `$null` quedan ignorados; `.gitattributes` fija LF para que las huellas SHA-256 de los tests congelados sean estables. |
+
+### Ronda 8 — detalle, instinto, exhibiciones, duelos ✅
+| Tema | Decisión |
+|---|---|
+| Capas de detalle | **3 niveles de vista**: **Aprendiz** (bloques con buenos valores por defecto, 2–3 deslizadores clave) · **Artesano** (más ajustes) · **Científico** (todo: tasa de aprendizaje, descuento, ruido de mutación…). Se cambia en cualquier momento; **nada se bloquea**, solo cambia cuánto ves. Cada ajuste lleva explicación con ejemplo. |
+| 🧠 Instinto | Capa densa (activaciones: relu, tanh, sigmoide, leaky, gelu, seno, lineal) + **los 4**: Uniones (juntar/sumar/multiplicar) · Atajos (residual) · Normalización · **Atención** (se ve en quién se fijó; vale para cualquier número de candidatos, enemigos o aliados). |
+| Exhibición contra heurísticos | **Interruptor "aprender de esta partida", apagado por defecto** (respeta "solo entrena contra tus redes"). El selector de tropas lista los heurísticos **y** tus redes. |
+| Ver un duelo | **Eliges la velocidad** (x1 / x10 / turbo); en turbo, marcador al instante y cualquier partida se abre en la moviola. |
+
+### Ronda 9 — humanos, extras, duración ✅
+| Tema | Decisión |
+|---|---|
+| Humanos y movimiento | **Clic tras disparar**: aparece un círculo de 2u; clic en el destino (si no es válido, desliza) o "quedarme"; unos segundos de margen y, si no eliges, te quedas quieto. Los agentes externos por API envían `move` junto al disparo. |
+| Más extras | **Los 4**: diario de la red · exportar/importar (validado: una red rota no rompe nada) · pesos a mano y congelar cables (nivel Científico) · cronista de temporadas (trono y dinastías). |
+| **Exacto y real** | "Necesito que sea exacto y real" → **regla verificable**: cada frase (voz, lección, diario, cronista) lleva referencias a los eventos registrados de los que sale. Cada número y cada nombre que aparece en ella debe estar en esos eventos. Un test lo comprueba; nada se inventa. |
+| Duración del entreno | **Las 3 formas**: por nº de partidas · por tiempo · "hasta que deje de mejorar" (se para si la curva no sube en X partidas). Siempre se puede parar a mano y se guarda lo aprendido. |
+
 ## 4. Diseño resultante (borrador, se cierra al acabar las preguntas)
 
 ### 4.1 Tropas (F0)
@@ -96,7 +120,7 @@ devuelve `move` opcional (compatible hacia atrás); validación en el motor, jun
 ### 4.3 La red (genoma) — bloques del editor
 | Parte | Bloques |
 |---|---|
-| 👁 Ojos | ✅ 🗺 Mapa (instantánea de posiciones) · 📊 Rasgos (features compactas) · 🔮 Simulador (opcional, por candidato) · resumen de obstáculos. 💡 más: Historial (últimos disparos propios y del rival y su resultado), Radar/bigotes (distancias en K direcciones), Reloj (turno, disparos hasta empate), Compañeros (rasgos de aliados agregados). |
+| 👁 Ojos | ✅ 🗺 Mapa (instantánea de posiciones) · 📊 Rasgos (features compactas) · 🔮 Simulador (opcional, por candidato) · resumen de obstáculos · Historial (últimos disparos propios y del rival y su resultado) · Radar/bigotes (distancias en K direcciones) · Reloj (turno, disparos hasta el empate, renovación de mapa) · Compañeros (rasgos de aliados agregados). |
 | 🧠 Instinto | 💡 Capa densa (neuronas + activación: relu, tanh, sigmoide, leaky, gelu…), uniones (juntar / sumar cables), atajos (cables que saltan capas). |
 | 🌀 Memoria | ✅ Eco · GRU · LSTM · Memoria de equipo. |
 | ✋ Manos | ✅ 🎯 Elegir (puntúa cada candidato de disparo) · ✏ Ajustar (pendiente / curva / ángulo). |
@@ -192,6 +216,25 @@ destinos de movimiento) + panel lateral con puntuaciones y razonamiento. 💡 At
   partida) · escenas fijas del motor (2u, deslizar, obstáculos, `fire()` único validador).
 - **Orden** ✅: cerrar el diseño → spec con contratos exactos → lista de tests → código por fases.
   Nada se programa sin estar decidido.
+- **Ronda 10** ✅: **Fable escribe toda la spec**, también los contratos compartidos (formatos, API,
+  eventos, lo que ve la interfaz), en la carpeta **`spec/` por áreas** (00-arquitectura, 01-motor,
+  02-red, 03-percepcion, 04-aprendizaje, 05-evolucion, 06-trono, 07-verdad, 08-interfaz).
+  **Interfaz secuencial**: Opus empieza cada pieza de interfaz cuando la pieza crítica que usa está
+  terminada; nunca se construye sobre algo que aún puede cambiar. Orden: el usuario **no** quiere
+  rebanada vertical ("por si queda cutre y luego construimos sobre eso").
+- **Ronda 11** ✅:
+  - **Orden: fases completas F1→F7 + experimento desechable**, "si los experimentos no son caros".
+    Antes de fijar la spec de percepción y aprendizaje, Fable hace un experimento **barato**
+    (scripts Node pequeños en `experimentos/`, con tiempo acotado) que mide cómo aprende una red en
+    este juego. Su código se borra; solo quedan números y conclusiones en la spec. Si se encarece:
+    parar y preguntar.
+  - **Sin puerta de aprendizaje**: F4 se cierra con los tests matemáticos y de tareas conocidas en
+    verde.
+  - **Lo menos importante lo hace Opus ya** ("hazlo tú ya, todo lo que puedas"), empezando por F0,
+    con tests primero.
+  - **Briefing para Fable**: `spec/README.md` + prompt para pegar. El usuario abre una sesión nueva
+    con Fable ("no quiero que envíes subagentes Fable, hay que ahorrar tokens"). A Fable se le manda
+    **hacer todo lo crítico**. "**No quiero fallos, este proyecto es importante para mí.**"
 - **Antes de tocar código**: leer enteros `rooms.js`, `app.js`, `render.js` y los tests actuales.
 
 ## 6. Investigación (en curso, 2026-09-22)
@@ -216,7 +259,7 @@ destinos de movimiento) + panel lateral con puntuaciones y razonamiento. 💡 At
 | **Explicar redes** (TF Playground, Greydanus, MarI/O) | Grosor del cable = abs(peso), color = signo; mapas de calor por neurona; saliencia por tapado: el 67.7% de los alumnos detectó qué miraba de verdad un agente sobreajustado. | Cables por peso + pulso por activación · "**estaba mirando…**" por tapado (N+1 pasadas) · neuronas autonombradas por su entrada más correlacionada | Smilkov et al. — https://arxiv.org/pdf/1708.03788 · Greydanus et al. — https://arxiv.org/abs/1711.00138 |
 | **Otros** | Forza Drivatar (confianza por decisión + capa de retoque del diseñador) · OpenAI Five "espíritu de equipo" τ · Galactic Arms Race (las armas evolucionan según lo que se usa) · avisos: Hello Neighbor (prometió aprendizaje que no se veía), Evolution de Keiwan ("sandbox sin metas"). | **τ heredable** egoísta↔equipo · **🎲 Imaginación que evoluciona** (las plantillas de disparo evolucionan según lo que eligen las redes) · no prometer aprendizaje que no se vea · el trono y las dinastías dan la meta | aiandgames.com · https://arxiv.org/pdf/1912.06680 · https://dl.acm.org/doi/abs/10.1145/1810136.1810137 |
 
-### 6.2 Cómo encaja en el diseño (💡 pendiente de aprobar)
+### 6.2 Cómo encaja en el diseño (✅ aprobadas todas en la ronda 7)
 1. **Voz** (§4.8) = base de reglas estilo Valve sobre el estado real + diario de sucesos y libro de
    rivalidades estilo Nemesis + emociones calculadas de señales RL (V, ventaja, entropía). Todo real y
    con cohesión; sin LLM.

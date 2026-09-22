@@ -48,6 +48,8 @@ function connect(roomCode) {
 }
 
 function onState(st) {
+  // una respuesta que no es un snapshot de sala se ignora (antes lanzaba y apagaba el modo espectador)
+  if (!st || !st.phase || !Array.isArray(st.players) || !Array.isArray(st.soldiers)) return;
   R.state = st;
   if (st.phase === 'lobby') { showLobby(st); return; }
   $('join').hidden = true; $('game').hidden = false;

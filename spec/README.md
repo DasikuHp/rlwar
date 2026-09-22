@@ -137,9 +137,8 @@ servidor) · regresión (la suite actual).
 - **F5 evolución** hecho (evo/labels.js, mutate.js, diff.js, children.js; /api/lab/nets/:id/children, /jobs,
   /diff, /frozen, /weights, /transplant; SSE job y children; spec/05 §10). Desbloqueado para Opus: panel de
   hijos con pre-torneo y ranking, vista de diferencias con mapa de calor, cirugía (spec/08 §4).
-- **F6 trono**: código hecho y API verificada en vivo (duelos turbo/x1/x10, reto al trono, sala de la fama,
-  liga, genealogía, dinastías, explotadora). Pendiente: OK del usuario para 5 aserciones defectuosas de
-  trono.spec (congelado) → commit. Desbloqueado para Opus: trono y duelos (spec/08 §5), sala de la fama, árbol.
+- **F6 trono** hecho (duelos turbo/x1/x10, reto al trono, sala de la fama, liga, genealogía, dinastías,
+  explotadora; spec/06 §6). Desbloqueado para Opus: trono y duelos (spec/08 §5), sala de la fama, árbol genealógico.
 - Siguiente: F7 verdad.
 
 ## 7. Cierre de cada sesión

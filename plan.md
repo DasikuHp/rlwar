@@ -36,8 +36,12 @@ E:\grafwar
 │   ├── solver.js    Trazado RK4 en 3 modos (function traslada +c por el soldado;
 │   │                ode1 condición inicial; ode2 + ángulo -85..85) + colisiones
 │   │                (HIT_RADIUS 0.7, obstáculos con margen, bordes, verticalidad)
-│   └── constants.js PLANO -25..25/-15..15, TURN_TIME 60s (15s FAST), STALL 8 / MAX 90,
-│                    SOLDIERS_PER_PLAYER 2, MAX_PLAYERS 8, TEAMS, MODES
+│   ├── constants.js PLANO -25..25/-15..15, TURN_TIME 60s (15s FAST), STALL 8 / MAX 90,
+│   │                SOLDIERS_PER_PLAYER 2, MAX_PLAYERS 8, TEAMS, MODES; F1: MOVE_RADIUS 2,
+│   │                BODY 0.5, MIN_SEPARATION 1, MOVE_TIME 8s (0.4s FAST), rejilla polar
+│   ├── rng.js       F1: makeRng(seed) (mulberry32) → rng() con .int/.pick/.gauss/.seed
+│   └── geometry.js  F1: slideMove() — validez del destino (5 reglas) y deslizamiento al
+│                    punto válido más cercano (spec/01 §3)
 ├── server/
 │   ├── server.js    HTTP estático + REST + SSE, sin librerías. POST /api/rooms
 │   │                acepta {name, soldiers} (1..4 por jugador, como el original)
@@ -47,10 +51,13 @@ E:\grafwar
 │   │                chat con {t, text, playerId?, soldierId?, kind: say|think};
 │   │                say() → bocadillo; banter intro al empezar + burla al matar;
 │   │                **habla-antes-de-disparar** (sayTimer 1300ms/400ms FAST);
-│   │                snapshot() completo para agentes y cliente
+│   │                snapshot() completo para agentes y cliente. F1: etapa `move` del
+│   │                turno (fire.move | POST /move | chooseMove | vencimiento), Room.move()
+│   │                único validador, seed + rng en todo, headless (step()/play())
+│   ├── headless.js  F1: playGame({seed,left,right,soldiers}) sin pantalla → result, chat…
 │   └── mapgen.js    3 biomas con nombre: 🏰 Fortaleza (muro central alto: mata
 │                    rectas, premia parábolas), 🌵 Llanura (abierta, de Sniper),
-│                    🏚️ Ruinas (dispersa). placeSide() aguanta N soldados
+│                    🏚️ Ruinas (dispersa). placeSide() aguanta N soldados. genMap(n, rng)
 ├── agents/          Interfaz: create({level,temperature}).chooseShot(
 │   │                {soldiers,obstacles,soldier,history,chat,temperature,state})
 │   │                → {mode, expr, angle?, reason?, say?} (say/reason opcionales)
@@ -96,8 +103,11 @@ E:\grafwar
 │   ├── launch-selfplay.mjs Crea sala 4v4 con pareja aleatoria, start y abre el
 │   │                        navegador (lo que ejecuta Graphwar.bat)
 │   └── room-debug.mjs
-├── test/            run-all.mjs (servidor propio 8791 + 3 specs → TODO OK ✔)
-│                    parser.spec / smoke (agente vs CPU) / agents.spec (self-play)
+├── test/            run-all.mjs (comprueba FROZEN.json y levanta servidor 8791 → TODO OK ✔)
+│                    parser.spec / smoke / agents.spec / client.spec / troops.spec (F0) /
+│                    tools.spec (freeze+mutants) / motor.spec (F1). FROZEN.json = huellas SHA-256
+├── tools/           freeze.mjs (congela tests) · mutants.mjs (prueba de mutantes) ·
+│                    launch-selfplay.mjs · room-debug.mjs
 ├── Graphwar.bat     Doble clic: servidor si hace falta + partida IA vs IA +
 │                    navegador. Cero terminal.
 ├── package.json     start / selfplay(:fast) / test(:parser,:agents) / spectate

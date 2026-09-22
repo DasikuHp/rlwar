@@ -1,7 +1,7 @@
 // Agente Sniper: puntería de tirador (línea directa) con pulso humano: a más nivel,
 // más clava la mejor opción, pero a veces falla como la IA evolutiva del original.
 import { MODES } from '../shared/constants.js';
-import { search, contextFor, directShots, avoidRepeats, pickWeighted, addMissNoise, withVoice } from './lib.js';
+import { search, contextFor, directShots, avoidRepeats, pickWeighted, addMissNoise, withVoice, coverMove } from './lib.js';
 
 export const meta = {
   id: 'sniper', name: 'Sniper', icon: '🎯',
@@ -20,9 +20,9 @@ export function create({ level = 2, temperature = 0 } = {}) {
   const weights = lvl === 3 ? [0.8, 0.12, 0.08] : lvl === 2 ? [0.6, 0.25, 0.15] : [0.4, 0.35, 0.25];
   return {
     meta,
-    chooseShot({ soldiers, obstacles, soldier, history = [] }) {
+    chooseShot({ soldiers, obstacles, soldier, history = [], rng = Math.random }) {
       const ctx = contextFor(soldiers, obstacles, soldier);
-      const cands = directShots(ctx, { jitter: tmp * 0.2, count: 1 });
+      const cands = directShots(ctx, { jitter: tmp * 0.2, count: 1, rng });
       // arcos finos sobre las pendientes directas (para salvar obstáculos)
       for (const e of ctx.enemies) {
         const dx = e.x - soldier.x;
@@ -39,13 +39,19 @@ export function create({ level = 2, temperature = 0 } = {}) {
           cands.push({ mode: MODES.FUNCTION, expr: `${(slope * (1 - i * 0.003)).toFixed(5)}*x` });
         }
       }
-      const ranked = search(ctx, avoidRepeats(cands, history), { topN: 4 });
+      const ranked = search(ctx, avoidRepeats(cands, history, rng), { topN: 4 });
       const sigma = [0, 0.05, 0.025, 0.012][lvl] + tmp * 0.03;
       const shot = addMissNoise(
-        pickWeighted(ranked, weights, tmp) || { mode: MODES.FUNCTION, expr: '0.1*x' },
+        pickWeighted(ranked, weights, tmp, rng) || { mode: MODES.FUNCTION, expr: '0.1*x' },
         sigma,
+        rng,
       );
-      return withVoice(shot, ctx, SAY);
+      return withVoice(shot, ctx, SAY, 0.6, rng);
+    },
+    // esquiva: el destino menos visto; si ya está tan tapado como el mejor, se queda (spec/01 §5)
+    chooseMove({ soldiers, soldier, moveOptions }) {
+      if (!soldiers.some((s) => s.alive && s.team !== soldier.team)) return 'stay';
+      return coverMove(moveOptions, { stayIfCovered: true, farther: true });
     },
   };
 }

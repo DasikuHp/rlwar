@@ -1,9 +1,13 @@
-// Lógica de salas: jugadores, turnos, resolución de disparos, fin de partida.
+// Lógica de salas: jugadores, turnos, resolución de disparos, movimiento, fin de partida.
+// F1 (spec/01): movimiento tras disparar (etapa `move`), semilla (`rng`) y modo sin pantalla (`headless`).
 import { simulateShot } from '../shared/solver.js';
 import { tryCompile } from '../shared/parser.js';
+import { slideMove } from '../shared/geometry.js';
+import { makeRng } from '../shared/rng.js';
 import * as C from '../shared/constants.js';
 import { genMap } from './mapgen.js';
 import { createAgent, agentMeta, DEFAULT_AGENT } from '../agents/registry.js';
+import { contextFor, moveOptions } from '../agents/lib.js';
 
 const FAST = process.env.GW_FAST === '1';
 
@@ -12,18 +16,22 @@ const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const randCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
 
 export class Room {
-  constructor(name = 'Sala', { soldiersPerPlayer = C.SOLDIERS_PER_PLAYER } = {}) {
+  constructor(name = 'Sala', { soldiersPerPlayer = C.SOLDIERS_PER_PLAYER, seed = null, headless = false } = {}) {
     this.code = randCode();
     this.name = String(name || 'Sala').slice(0, 40);
     // como el original (MAX_SOLDIERS_PER_PLAYER = 4): batallas de 2 a 4x4
     this.soldiersPerPlayer = Math.max(1, Math.min(4, Number(soldiersPerPlayer) || C.SOLDIERS_PER_PLAYER));
+    this.headless = !!headless;   // sin temporizadores ni broadcast: la partida avanza con step()/play()
+    this.rng = makeRng(seed);     // toda la aleatoriedad de la partida (mapa, orden, agentes, banter)
+    this.seed = this.rng.seed;
     this.createdAt = Date.now();
     this.phase = 'lobby'; // lobby | playing | over
     this.players = [];    // {id, name, token, team, isBot, soldiers}
     this.soldiers = [];   // {id, ownerId, team, x, y, alive, lastExpr}
     this.obstacles = [];
-    this.turn = null;     // {playerId, soldierId, deadline}
+    this.turn = null;     // {playerId, soldierId, stage: 'shoot'|'move', deadline, radius?}
     this.lastShot = null; // {playerId, expr, mode, result, ts} (los puntos van por el evento 'shot')
+    this.lastMove = null; // {playerId, soldierId, from, to, requested, slid, stayed, reason, ts}
     this.chat = [];
     this.winner = null;
     this.listeners = new Set();
@@ -36,9 +44,13 @@ export class Room {
     this.shots = 0;         // disparos totales de la partida
     this.shotsNoKill = 0;   // disparos seguidos sin bajas
     this.remaps = 0;        // veces que se renovó el mapa por estancamiento
+    this.agents = {};       // agente en proceso por jugador (se crean al empezar; guardan estado)
+    this.pending = {};      // por jugador: {agent, choice} del turno en curso (para chooseMove)
+    this.animEnd = 0;       // cuándo termina la animación del último disparo (ms)
   }
 
   broadcast(ev, data) {
+    if (this.headless) return;
     for (const res of this.listeners) {
       try { res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* ignorar */ }
     }
@@ -60,12 +72,13 @@ export class Room {
 
   banter(player, soldier, list, vars = {}) {
     if (!list || !list.length || !soldier) return;
-    let text = list[Math.floor(Math.random() * list.length)];
+    let text = list[this.rng.int(list.length)];
     for (const [k, v] of Object.entries(vars)) text = text.replaceAll(`{${k}}`, v);
     this.say(player, soldier, text);
   }
 
   addPlayer(name, team = 'auto') {
+    if (this.headless) return { error: 'Sala sin pantalla: solo agentes' };
     if (this.phase !== 'lobby') return { error: 'La partida ya empezó' };
     if (this.players.length >= C.MAX_PLAYERS) return { error: 'Sala llena' };
     const counts = { [C.TEAMS.LEFT]: 0, [C.TEAMS.RIGHT]: 0 };
@@ -116,7 +129,7 @@ export class Room {
     const teams = new Set(this.players.map((p) => p.team));
     if (this.players.length < 2 || teams.size < 2) return { error: 'Se necesita al menos un jugador en cada equipo (puedes añadir un CPU)' };
     const n = this.soldiersPerPlayer;
-    const map = genMap(n);
+    const map = genMap(n, this.rng);
     this.obstacles = map.obstacles;
     this.soldiers = [];
     for (const p of this.players) {
@@ -131,6 +144,12 @@ export class Room {
     this.phase = 'playing';
     this.winner = null;
     this.lastShot = null;
+    this.lastMove = null;
+    this.agents = {};
+    this.pending = {};
+    for (const p of this.players) {
+      if (p.isBot) this.agents[p.id] = createAgent(p.agentType, { level: p.level || 2, temperature: p.temperature || 0 });
+    }
     // orden de turnos intercalando equipos
     const L = this.players.filter((p) => p.team === C.TEAMS.LEFT);
     const R = this.players.filter((p) => p.team === C.TEAMS.RIGHT);
@@ -139,7 +158,7 @@ export class Room {
       if (L[i]) this.order.push(L[i]);
       if (R[i]) this.order.push(R[i]);
     }
-    this.orderPos = Math.floor(Math.random() * this.order.length); // empieza cualquiera
+    this.orderPos = this.rng.int(this.order.length); // empieza cualquiera
     this.cursor = {};
     this.history = [];
     this.shots = 0;
@@ -172,10 +191,11 @@ export class Room {
       if (!soldiersAlive.length) continue;
       this.cursor[p.id] = (this.cursor[p.id] || 0) + 1;
       const soldier = soldiersAlive[(this.cursor[p.id] - 1) % soldiersAlive.length];
-      this.turn = { playerId: p.id, soldierId: soldier.id, deadline: Date.now() + C.TURN_TIME };
+      this.turn = { playerId: p.id, soldierId: soldier.id, stage: 'shoot', deadline: Date.now() + C.TURN_TIME };
       this.broadcast('state', this.snapshot());
+      if (this.headless) return; // sin pantalla: step() ejecuta el turno cuando toque
       this.timer = setTimeout(() => {
-        if (this.turn && this.turn.playerId === p.id) {
+        if (this.turn && this.turn.playerId === p.id && this.turn.stage === 'shoot') {
           this.log(`⏰ ${p.name} no disparó a tiempo`);
           this.turn = null;
           this.nextTurn();
@@ -187,23 +207,45 @@ export class Room {
     this.gameOver();
   }
 
+  // Sin pantalla: ejecuta un turno completo (elegir → disparar → mover → siguiente) de forma síncrona
+  step() {
+    if (this.phase !== 'playing' || !this.turn) return null;
+    const player = this.players.find((p) => p.id === this.turn.playerId);
+    if (!player || !player.isBot) return null;
+    this.agentTurn(player);
+    return this.lastShot;
+  }
+
+  play({ maxTurns = 400 } = {}) {
+    for (let i = 0; i < maxTurns && this.phase === 'playing'; i++) this.step();
+    if (this.phase === 'playing') this.gameOver(true);
+    return this.result;
+  }
+
+  moveOptionsFor(soldier) {
+    return moveOptions(contextFor(this.soldiers, this.obstacles, soldier));
+  }
+
   agentTurn(player) {
-    if (this.phase !== 'playing' || !this.turn || this.turn.playerId !== player.id) return;
+    if (this.phase !== 'playing' || !this.turn || this.turn.playerId !== player.id || this.turn.stage !== 'shoot') return;
     const soldier = this.soldiers.find((s) => s.id === this.turn.soldierId);
     if (!soldier) return;
+    const agent = this.agents[player.id] || (this.agents[player.id] = createAgent(player.agentType, { level: player.level || 2, temperature: player.temperature || 0 }));
     let choice;
     try {
-      const agent = createAgent(player.agentType, { level: player.level || 2, temperature: player.temperature || 0 });
       choice = agent.chooseShot({
         soldiers: this.soldiers, obstacles: this.obstacles, soldier,
         history: this.history.slice(-12),
         chat: this.chat.slice(-12).map((c) => c.text), // lo que dijo el rival: le llega de verdad
         temperature: player.temperature || 0,
+        rng: this.rng,
+        moveOptions: this.moveOptionsFor(soldier),
         state: this.snapshot(),
       });
     } catch (e) {
       this.log(`⚠️ ${player.name} falló al calcular (${e.message})`);
     }
+    this.pending[player.id] = { agent, choice };
     if (choice && choice.reason) this.say(player, soldier, `💭 ${choice.reason}`, 'think');
     // habla primero y dispara después: da tiempo a leer el bocadillo
     const doFire = () => {
@@ -212,14 +254,16 @@ export class Room {
     };
     if (choice && choice.say) {
       this.say(player, soldier, choice.say);
+      if (this.headless) return doFire();
       clearTimeout(this.sayTimer);
       this.sayTimer = setTimeout(doFire, FAST ? 400 : 1300);
     } else doFire();
   }
 
-  fire(playerId, { mode = C.MODES.FUNCTION, expr = '', angle = 0 } = {}) {
+  fire(playerId, { mode = C.MODES.FUNCTION, expr = '', angle = 0, move = undefined } = {}) {
     if (this.phase !== 'playing') return { error: 'La partida no está en curso' };
     if (!this.turn || this.turn.playerId !== playerId) return { error: 'No es tu turno' };
+    if (this.turn.stage === 'move') return { error: 'Ya disparaste: elige destino o espera' };
     const soldier = this.soldiers.find((s) => s.id === this.turn.soldierId);
     const shooter = this.players.find((p) => p.id === playerId);
     if (!soldier || !shooter) return { error: 'Soldado o jugador inválido' };
@@ -263,7 +307,6 @@ export class Room {
     this.log(message);
 
     this.lastShot = { playerId, soldierId: soldier.id, expr: String(expr).slice(0, 200), mode, result: shot.result, ts: Date.now() };
-    this.turn = null;
     clearTimeout(this.timer);
     this.history.push(String(expr));
     if (this.history.length > 40) this.history.shift();
@@ -272,29 +315,104 @@ export class Room {
     this.broadcast('shot', { shot: { ...this.lastShot, points: shot.points, shooterTeam: soldier.team } });
 
     const animMs = Math.min(9000, Math.max(700, (shot.points.length * C.NETWORK_STEP / C.SHOT_SPEED) * 1000));
-    this.afterTimer = setTimeout(() => {
-      this.turn = null;
-      // anti-estancamiento: nadie muere en muchos disparos → renovar mapa o terminar por empate técnico
-      if (this.shots >= C.MAX_SHOTS) {
-        this.log('⏳ Límite de disparos alcanzado');
-        return this.gameOver(true);
+    this.animEnd = Date.now() + (this.headless ? 0 : animMs);
+
+    // ---- movimiento tras disparar (spec/01 §2) ----
+    if (move !== undefined) {
+      // pre-decidido en el mismo cuerpo (agente por API o humano que ya eligió)
+      this.turn = { ...this.turn, stage: 'move', radius: C.MOVE_RADIUS };
+      const m = this.move(playerId, move);
+      return { ok: true, result: shot.result, move: m.move };
+    }
+    if (shooter.isBot) {
+      // agente en proceso: chooseMove ahora mismo (ve el resultado), o el move de chooseShot, o quieto
+      this.turn = { ...this.turn, stage: 'move', radius: C.MOVE_RADIUS };
+      const pend = this.pending[playerId] || {};
+      let requested = 'stay';
+      try {
+        if (pend.agent && typeof pend.agent.chooseMove === 'function' && soldier.alive) {
+          requested = pend.agent.chooseMove({
+            soldiers: this.soldiers, obstacles: this.obstacles, soldier,
+            shot: { ...this.lastShot, points: shot.points }, moveOptions: this.moveOptionsFor(soldier),
+            history: this.history.slice(-12), rng: this.rng, state: this.snapshot(),
+          });
+        } else if (pend.choice && pend.choice.move !== undefined) requested = pend.choice.move;
+      } catch (e) {
+        this.log(`⚠️ ${shooter.name} falló al moverse (${e.message})`);
+        requested = 'stay';
       }
-      if (this.shotsNoKill >= C.STALL_SHOTS) {
-        this.shotsNoKill = 0;
-        this.remaps++;
-        const map = genMap(this.soldiersPerPlayer);
-        this.log(`🔄 Nadie muere desde hace ${C.STALL_SHOTS} disparos: mapa renovado (${this.remaps})`);
-        this.log(`🗺️ Mapa: ${map.name}`);
-        this.reposition(map);
+      const m = this.move(playerId, requested == null ? 'stay' : requested);
+      return { ok: true, result: shot.result, move: m.move };
+    }
+    // humano o agente externo: ventana para elegir destino (spec/01 §2.2)
+    this.turn = { playerId, soldierId: soldier.id, stage: 'move', deadline: this.animEnd + C.MOVE_TIME, radius: C.MOVE_RADIUS };
+    this.broadcast('state', this.snapshot());
+    this.timer = setTimeout(() => {
+      if (this.phase === 'playing' && this.turn && this.turn.playerId === playerId && this.turn.stage === 'move') {
+        this.move(playerId, null, { timeout: true });
       }
-      this.nextTurn();
-    }, animMs + C.NEXT_TURN_DELAY);
+    }, animMs + C.MOVE_TIME + 50);
     return { ok: true, result: shot.result };
+  }
+
+  // Único validador del movimiento (spec/01 §4). `requested` = {x,y} | 'stay' | null.
+  move(playerId, requested, { timeout = false } = {}) {
+    if (this.phase !== 'playing') return { error: 'La partida no está en curso' };
+    if (!this.turn || this.turn.playerId !== playerId) return { error: 'No es tu turno' };
+    if (this.turn.stage !== 'move') return { error: 'Primero dispara; después eliges destino' };
+    const soldier = this.soldiers.find((s) => s.id === this.turn.soldierId);
+    const player = this.players.find((p) => p.id === playerId);
+    if (!soldier || !player) return { error: 'Soldado o jugador inválido' };
+    if (!soldier.alive) return { error: 'Ese soldado ya está muerto' };
+    const from = { x: soldier.x, y: soldier.y };
+    const r = slideMove({ from, requested, soldiers: this.soldiers, obstacles: this.obstacles, selfId: soldier.id });
+    soldier.x = r.to.x;
+    soldier.y = r.to.y;
+    const asked = requested && typeof requested === 'object' && Number.isFinite(requested.x) && Number.isFinite(requested.y) && r.reason !== 'invalid'
+      ? { x: requested.x, y: requested.y } : null;
+    this.lastMove = {
+      playerId, soldierId: soldier.id, from, to: { x: r.to.x, y: r.to.y }, requested: asked,
+      slid: r.slid, stayed: r.stayed, reason: timeout ? 'timeout' : r.reason, ts: Date.now(),
+    };
+    if (r.stayed) this.log(`🦶 ${player.name} se queda quieto${timeout ? ' (se acabó el tiempo)' : ''}`);
+    else this.log(`${r.slid ? '↪️' : '🦶'} ${player.name} se mueve a (${r.to.x.toFixed(1)}, ${r.to.y.toFixed(1)})${r.slid ? ' (deslizado)' : ''}`);
+    this.finishTurn();
+    return { ok: true, move: this.lastMove };
+  }
+
+  // Cierra el turno tras el movimiento: evento `move`, y el siguiente turno cuando acabe la animación
+  finishTurn() {
+    clearTimeout(this.timer);
+    this.turn = null;
+    this.broadcast('move', { move: this.lastMove });
+    if (this.headless) return this.afterShot();
+    const animLeft = Math.max(0, this.animEnd - Date.now());
+    clearTimeout(this.afterTimer);
+    this.afterTimer = setTimeout(() => this.afterShot(), animLeft + C.NEXT_TURN_DELAY);
+  }
+
+  afterShot() {
+    if (this.phase !== 'playing') return;
+    this.turn = null;
+    // anti-estancamiento: nadie muere en muchos disparos → renovar mapa o terminar por empate técnico
+    if (this.shots >= C.MAX_SHOTS) {
+      this.log('⏳ Límite de disparos alcanzado');
+      return this.gameOver(true);
+    }
+    if (this.shotsNoKill >= C.STALL_SHOTS) {
+      this.shotsNoKill = 0;
+      this.remaps++;
+      const map = genMap(this.soldiersPerPlayer, this.rng);
+      this.log(`🔄 Nadie muere desde hace ${C.STALL_SHOTS} disparos: mapa renovado (${this.remaps})`);
+      this.log(`🗺️ Mapa: ${map.name}`);
+      this.reposition(map);
+    }
+    this.nextTurn();
   }
 
   // Renueva obstáculos y recoloca a los soldados vivos (los muertos permanecen)
   reposition(pre = null) {
-    const map = pre || genMap(this.soldiersPerPlayer);
+    const map = pre || genMap(this.soldiersPerPlayer, this.rng);
     this.obstacles = map.obstacles;
     for (const p of this.players) {
       const alive = (p.soldiers || []).filter((s) => s.alive);
@@ -346,10 +464,14 @@ export class Room {
 
   rematch() {
     if (this.phase !== 'over') return { error: 'La partida no ha terminado' };
+    // semilla nueva derivada del rng de la sala: una serie de revanchas también es reproducible
+    this.rng = makeRng(this.rng.int(2 ** 31));
+    this.seed = this.rng.seed;
     for (const s of this.soldiers) s.alive = true;
     for (const p of this.players) { p.kills = 0; p.deaths = 0; }
     this.phase = 'lobby';
     this.lastShot = null;
+    this.lastMove = null;
     this.history = [];
     this.shots = 0;
     this.shotsNoKill = 0;
@@ -368,7 +490,7 @@ export class Room {
   snapshot() {
     return {
       code: this.code, name: this.name, phase: this.phase, winner: this.winner,
-      turn: this.turn, lastShot: this.lastShot, result: this.result || null,
+      turn: this.turn, lastShot: this.lastShot, lastMove: this.lastMove, result: this.result || null,
       players: this.players.map((p) => ({
         id: p.id, name: p.name, team: p.team, isBot: p.isBot,
         agentType: p.agentType || null, level: p.level || null, temperature: p.temperature ?? null,
@@ -379,7 +501,10 @@ export class Room {
       obstacles: this.obstacles,
       chat: this.chat.slice(-40),
       history: this.history.slice(-12),
-      config: { turnTime: C.TURN_TIME, plane: { xMin: -25, xMax: 25, yMin: -15, yMax: 15 } },
+      config: {
+        turnTime: C.TURN_TIME, plane: { xMin: -25, xMax: 25, yMin: -15, yMax: 15 },
+        seed: this.seed, moveRadius: C.MOVE_RADIUS, moveTime: C.MOVE_TIME, body: C.BODY, minSeparation: C.MIN_SEPARATION,
+      },
     };
   }
 }

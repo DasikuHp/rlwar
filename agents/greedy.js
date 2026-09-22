@@ -1,6 +1,6 @@
 // Agente Greedy: líneas directas + plantillas aleatorias. Nivel = cuántos candidatos prueba.
 import { MODES } from '../shared/constants.js';
-import { search, contextFor, directShots, randomTemplates, avoidRepeats, pickWeighted, addMissNoise, withVoice } from './lib.js';
+import { search, contextFor, directShots, randomTemplates, avoidRepeats, pickWeighted, addMissNoise, withVoice, greedyMove } from './lib.js';
 
 export const meta = {
   id: 'greedy', name: 'Greedy', icon: '🧠',
@@ -19,19 +19,26 @@ export function create({ level = 2, temperature = 0 } = {}) {
   const weights = lvl === 3 ? [0.7, 0.2, 0.1] : lvl === 2 ? [0.55, 0.3, 0.15] : [0.4, 0.35, 0.25];
   return {
     meta,
-    chooseShot({ soldiers, obstacles, soldier, history = [] }) {
+    chooseShot({ soldiers, obstacles, soldier, history = [], rng = Math.random }) {
       const ctx = contextFor(soldiers, obstacles, soldier);
       const cands = avoidRepeats(
-        [...directShots(ctx, { jitter: 0.05 + tmp * 0.15, count: 6 }), ...randomTemplates(12 + lvl * 12)],
+        [...directShots(ctx, { jitter: 0.05 + tmp * 0.15, count: 6, rng }), ...randomTemplates(12 + lvl * 12, rng)],
         history,
+        rng,
       );
       const ranked = search(ctx, cands, { topN: 4 });
       const sigma = [0, 0.03, 0.015, 0.008][lvl] + tmp * 0.02;
       const shot = addMissNoise(
-        pickWeighted(ranked, weights, tmp) || { mode: MODES.FUNCTION, expr: '0.1*x' },
+        pickWeighted(ranked, weights, tmp, rng) || { mode: MODES.FUNCTION, expr: '0.1*x' },
         sigma,
+        rng,
       );
-      return withVoice(shot, ctx, SAY);
+      return withVoice(shot, ctx, SAY, 0.6, rng);
+    },
+    // esquiva: quiere disparar rectas → el destino con línea de tiro más cercano al enemigo (spec/01 §5)
+    chooseMove({ soldiers, soldier, moveOptions }) {
+      if (!soldiers.some((s) => s.alive && s.team !== soldier.team)) return 'stay';
+      return greedyMove(moveOptions);
     },
   };
 }

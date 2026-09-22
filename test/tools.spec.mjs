@@ -89,6 +89,16 @@ await check('run-all --check-only: sale 1 si una huella no coincide y 0 si coinc
   assert.equal(good.status, 0, good.stdout + good.stderr);
 });
 
+await check('freeze --check: sale 1 si una huella no coincide y 0 si coinciden', () => {
+  const root = tmp();
+  mkdirSync(join(root, 'test'));
+  writeFileSync(join(root, 'test', 'a.spec.mjs'), 'ok\n');
+  writeFileSync(join(root, 'test', 'FROZEN.json'), JSON.stringify({ 'test/a.spec.mjs': hashText('otro\n') }));
+  assert.equal(run([join(ROOT, 'tools', 'freeze.mjs'), '--root', root, '--check']).status, 1);
+  writeFileSync(join(root, 'test', 'FROZEN.json'), JSON.stringify({ 'test/a.spec.mjs': hashText('ok\n') }));
+  assert.equal(run([join(ROOT, 'tools', 'freeze.mjs'), '--root', root, '--check']).status, 0);
+});
+
 // ---------- mutants: generador ----------
 const TOY = [
   '// suma: a + b (esto es un comentario con + y < y true)',
@@ -135,6 +145,11 @@ await check('applyMutant: cambia solo ese sitio y el resultado sigue siendo dist
   assert.ok(out.includes('return a - b;'));
   assert.ok(out.includes('return -x;'), 'el resto intacto');
   assert.equal(out.split('\n').length, TOY.split('\n').length);
+});
+
+await check('generateMutants: la línea shebang (#!/usr/bin/env node) no se muta', () => {
+  const ms = generateMutants('#!/usr/bin/env node\nexport const k = 1 + 2;\n');
+  assert.ok(ms.length > 0 && ms.every((m) => m.line === 2), JSON.stringify(ms.map((m) => m.line)));
 });
 
 await check('generateMutants es determinista y no genera mutantes en un fichero vacío', () => {

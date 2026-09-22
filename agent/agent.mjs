@@ -103,7 +103,9 @@ async function main() {
           console.log(st.winner === s.team ? '🏆 ¡Ganamos!' : '😖 Perdimos.');
           return;
         }
-        if (st.turn && st.turn.playerId === s.playerId) {
+        if (st.turn && st.turn.playerId === s.playerId && st.turn.stage === 'move') {
+          await api(`/api/rooms/${s.code}/move`, 'POST', { playerId: s.playerId, stay: true }); // F1: tras disparar, destino
+        } else if (st.turn && st.turn.playerId === s.playerId) {
           const cand = searchShot(st, st.turn.soldierId, tries);
           console.log(`🎯 Disparo: [${cand.mode}] ${cand.expr}${cand.angle != null ? ` (ángulo ${Number(cand.angle).toFixed(0)}°)` : ''}`);
           const r = await api(`/api/rooms/${s.code}/fire`, 'POST', { playerId: s.playerId, ...cand });

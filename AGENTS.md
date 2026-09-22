@@ -34,7 +34,19 @@ Base: `http://localhost:8787`
 | POST | `/api/rooms/:code/chat` | `{playerId, text}` | chat |
 | GET | `/api/rooms/:code/events` | — | SSE: `hello`,`state`,`shot`,`chat`,`gameover` |
 
-`mode` ∈ `function` (`y=`), `ode1` (`y'=`), `ode2` (`y''=`, con `angle` en grados -85..85).
+| POST | `/api/rooms/:code/move` | `{playerId, x, y}` o `{playerId, stay:true}` | `{ok, move}` — destino tras disparar (F1) |
+
+`mode` ∈ `function` (`y=`), `ode1` (`y'=`), `ode2` (`y''=`, con `angle` en grados -85..85; el ángulo positivo **sube** en los dos lados).
+
+### Movimiento tras disparar (F1, `spec/01-motor.md`)
+Después de cada disparo, el soldado que disparó puede moverse hasta **2 u** (círculo). Dos vías:
+- **con el disparo**: `fire` admite `move: {x, y}` o `move: "stay"` (se aplica al instante);
+- **después de ver el tiro**: si `fire` no lleva `move`, el turno pasa a `state.turn.stage === "move"`
+  (con `deadline` y `radius`); envía `POST /move` antes del plazo o te quedas quieto.
+Un destino inválido (dentro de un obstáculo, fuera del plano, a menos de 1 u de otro soldado, o al otro
+lado de un muro) **se desliza** al punto válido más cercano. `state.lastMove` y el evento SSE `move`
+(`{move:{from,to,requested,slid,stayed}}`) cuentan qué pasó. `POST /api/rooms` admite `seed` (partida
+reproducible; `state.config.seed` la expone siempre).
 El `state` incluye `players[]` (con `agentType`, `kills`, `deaths`, `alive`), `soldiers[]`, `obstacles[]`,
 `history[]` (últimas expresiones disparadas, para no repetir), `turn` con `deadline` y `result` al terminar.
 
@@ -49,14 +61,20 @@ export const meta = { id: 'miagente', name: 'MiAgente', icon: '🚀', descriptio
 export function create({ level = 2 } = {}) {
   return {
     meta,
-    chooseShot({ soldiers, obstacles, soldier, history }) {
+    chooseShot({ soldiers, obstacles, soldier, history, rng, moveOptions }) {
       const ctx = contextFor(soldiers, obstacles, soldier);
-      const cands = avoidRepeats([...directShots(ctx), ...randomTemplates(30)], history);
-      return best(ctx, cands);           // {mode, expr, angle?}
+      const cands = avoidRepeats([...directShots(ctx, { rng }), ...randomTemplates(30, rng)], history, rng);
+      return best(ctx, cands);           // {mode, expr, angle?, move?}  (move opcional: {x,y} | 'stay')
+    },
+    // opcional (F1): se llama tras ver el resultado del tiro; gana sobre `move` de chooseShot
+    chooseMove({ soldiers, obstacles, soldier, shot, moveOptions, history, rng }) {
+      return moveOptions[1].to;          // moveOptions: 9 destinos ya deslizados {i,to,stay,slid,cover,distEnemy,los}
     },
   };
 }
 ```
+`rng` es una función `() → [0,1)` con semilla (usa `rng()` en vez de `Math.random()` para que
+"misma semilla = misma partida" se cumpla también con tu agente).
 Añádelo a `MODULES` en `agents/registry.js` y ya aparece en `GET /api/agents`, en la arena (`arena/selfplay.mjs --agents ...`) y en las salas.
 
 ### Cómo jugar bien (estrategia)

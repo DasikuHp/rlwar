@@ -1,9 +1,12 @@
 // Núcleo compartido de agentes: utilidades de simulación y búsqueda sobre el motor
 // (`shared/parser.js` + `shared/solver.js`). Cualquier agente usa esto, y los agentes
 // remotos (p. ej. un LLM por HTTP) pueden replicarlo importando este mismo módulo.
+// Toda aleatoriedad recibe un `rng` (función () → [0,1)); por defecto Math.random (spec/01 §5).
 import { tryCompile } from '../shared/parser.js';
 import { simulateShot } from '../shared/solver.js';
-import { STEP, MAX_STEPS, MODES, TEAMS } from '../shared/constants.js';
+import { slideMove } from '../shared/geometry.js';
+import { gaussFrom } from '../shared/rng.js';
+import { STEP, MAX_STEPS, MODES, TEAMS, MOVE_RADIUS, MOVE_DIRS } from '../shared/constants.js';
 
 export const COARSE = { ds: 0.05, maxSteps: 2500 };
 
@@ -63,14 +66,14 @@ export function best(ctx, cands, opts) {
 }
 
 // Disparos rectos hacia cada enemigo que esté por delante (jitter 0 = puntería exacta)
-export function directShots(ctx, { jitter = 0.05, count = 6 } = {}) {
+export function directShots(ctx, { jitter = 0.05, count = 6, rng = Math.random } = {}) {
   const out = [];
   for (const e of ctx.enemies) {
     const dx = e.x - ctx.soldier.x;
     if (Math.sign(dx) !== ctx.dir) continue;
     const slope = (e.y - ctx.soldier.y) / dx;
     for (let i = 0; i < count; i++) {
-      const a = slope * (1 + (Math.random() * 2 - 1) * jitter * i);
+      const a = slope * (1 + (rng() * 2 - 1) * jitter * i);
       out.push({ mode: MODES.FUNCTION, expr: `${a.toFixed(5)}*x` });
     }
   }
@@ -78,7 +81,7 @@ export function directShots(ctx, { jitter = 0.05, count = 6 } = {}) {
 }
 
 // Evita repetir disparos que ya fallaron (memoria corta del agente)
-export function avoidRepeats(cands, history = []) {
+export function avoidRepeats(cands, history = [], rng = Math.random) {
   if (!history.length) return cands;
   const recent = new Set(history.slice(-10));
   const filtered = cands.filter((c) => !recent.has(c.expr));
@@ -87,18 +90,18 @@ export function avoidRepeats(cands, history = []) {
   const extra = cands.filter((c) => recent.has(c.expr)).slice(0, 10).map((c) => ({
     ...c,
     expr: c.mode === MODES.FUNCTION
-      ? `${c.expr}+${((Math.random() * 2 - 1) * 0.003).toFixed(4)}`
+      ? `${c.expr}+${((rng() * 2 - 1) * 0.003).toFixed(4)}`
       : c.expr,
   }));
   return [...filtered, ...extra];
 }
 
 // Plantillas de funciones variadas, parametrizadas al azar
-export function randomTemplates(n = 40) {
+export function randomTemplates(n = 40, rng = Math.random) {
   const out = [];
   for (let i = 0; i < n; i++) {
-    const a = (Math.random() * 2 - 1) * 6;
-    const k = 0.5 + Math.random() * 12;
+    const a = (rng() * 2 - 1) * 6;
+    const k = 0.5 + rng() * 12;
     const list = [
       `${a.toFixed(3)}*x`,
       `${a.toFixed(3)}*x^2/${k.toFixed(2)}`,
@@ -109,7 +112,7 @@ export function randomTemplates(n = 40) {
       `${a.toFixed(3)}*sqrt(abs(x))`,
       `${a.toFixed(3)}*x+${(a / k).toFixed(3)}*sin(x/${(k * 2).toFixed(2)})`,
     ];
-    out.push({ mode: MODES.FUNCTION, expr: list[Math.floor(Math.random() * list.length)] });
+    out.push({ mode: MODES.FUNCTION, expr: list[Math.floor(rng() * list.length)] });
   }
   return out;
 }
@@ -138,10 +141,10 @@ export function describeShot(choice, ctx) {
 
 // Voz del agente: razón táctica (registro) + frase corta hablada (bocadillo).
 // `say` sale con probabilidad p para no spamear; el servidor la muestra ANTES de disparar.
-export function withVoice(shot, ctx, sayPool, p = 0.6) {
+export function withVoice(shot, ctx, sayPool, p = 0.6, rng = Math.random) {
   shot.reason = describeShot(shot, ctx);
-  if (sayPool && sayPool.length && Math.random() < p) {
-    shot.say = sayPool[Math.floor(Math.random() * sayPool.length)];
+  if (sayPool && sayPool.length && rng() < p) {
+    shot.say = sayPool[Math.floor(rng() * sayPool.length)];
   }
   return shot;
 }
@@ -149,45 +152,94 @@ export function withVoice(shot, ctx, sayPool, p = 0.6) {
 // Elección ponderada entre los mejores: como la IA original (evolutiva y falible),
 // el nivel alto suele clavar la mejor opción pero a veces falla. Sin esto, el que
 // calcula la pendiente exacta gana siempre y las partidas duran 3 disparos.
-export function pickWeighted(ranked, weights = [0.7, 0.2, 0.1], temperature = 0) {
+export function pickWeighted(ranked, weights = [0.7, 0.2, 0.1], temperature = 0, rng = Math.random) {
   const n = Math.min(ranked.length, weights.length);
   if (!n) return null;
   const tmp = Math.max(0, Math.min(1, Number(temperature) || 0));
   const flat = tmp * 0.5; // la temperatura aplana los pesos: más sorpresa
   const w = weights.slice(0, n).map((x) => x * (1 - flat) + flat / n);
   const sum = w.reduce((a, b) => a + b, 0) || 1;
-  let r = Math.random() * sum;
+  let r = rng() * sum;
   for (let i = 0; i < n; i++) { r -= w[i]; if (r <= 0) return ranked[i].cand; }
   return ranked[n - 1].cand;
 }
 
 // Ruido gaussiano decente sin dependencias
-export function gauss() {
-  let u = 0, v = 0;
-  while (!u) u = Math.random();
-  while (!v) v = Math.random();
-  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+export function gauss(rng = Math.random) {
+  return gaussFrom(rng);
 }
 
 // Error de ejecución (pulso humano): perturba la pendiente DESPUÉS de elegir,
 // porque elegir entre 3 kills perfectos sigue matando siempre. Solo modo función.
-export function addMissNoise(shot, sigma) {
+export function addMissNoise(shot, sigma, rng = Math.random) {
   if (!sigma || !shot || shot.mode !== 'function') return shot;
   const m = String(shot.expr).match(/^(-?\d+(?:\.\d+)?)\*x/);
   if (!m) return shot;
-  const a = Number(m[1]) * (1 + gauss() * sigma);
+  const a = Number(m[1]) * (1 + gauss(rng) * sigma);
   return { ...shot, expr: shot.expr.replace(/^(-?\d+(?:\.\d+)?)\*x/, `${a.toFixed(5)}*x`) };
 }
 export function searchShot(state, soldierId, tries = 40, opts = {}) {
+  const rng = opts.rng || Math.random;
   const soldier = state.soldiers.find((s) => s.id === soldierId);
   if (!soldier) return { mode: MODES.FUNCTION, expr: '0.1*x' };
   const ctx = contextFor(state.soldiers, state.obstacles, soldier);
   const cands = avoidRepeats([
-    ...directShots(ctx, { jitter: 0.03, count: 5 }),
-    ...randomTemplates(tries),
-  ], state.history || []);
+    ...directShots(ctx, { jitter: 0.03, count: 5, rng }),
+    ...randomTemplates(tries, rng),
+  ], state.history || [], rng);
   for (let i = 0; i < 8; i++) {
-    cands.push({ mode: MODES.ODE2, expr: (-0.02 - Math.random() * 0.12).toFixed(4), angle: (Math.random() * 2 - 1) * 60 });
+    cands.push({ mode: MODES.ODE2, expr: (-0.02 - rng() * 0.12).toFixed(4), angle: (rng() * 2 - 1) * 60 });
   }
   return best(ctx, cands, opts);
+}
+
+// ---------- movimiento (spec/01 §3 y §5) ----------
+
+// Línea de tiro: segmento recto a→b sin cruzar ningún obstáculo (muestreo cada 0.25 u)
+export function los(a, b, obstacles) {
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  const n = Math.max(1, Math.ceil(len / 0.25));
+  for (let k = 1; k <= n; k++) {
+    const t = k / n, x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t;
+    for (const o of obstacles) if (x >= o.x && x <= o.x + o.w && y >= o.y && y <= o.y + o.h) return false;
+  }
+  return true;
+}
+
+// Los 9 destinos (quedarse + 8 direcciones a MOVE_RADIUS), ya deslizados, con rasgos:
+// cover = enemigos vivos con línea de tiro al destino · distEnemy = distancia al enemigo vivo más
+// cercano (null si no hay) · los = línea de tiro desde el destino a ese enemigo
+export function moveOptions(ctx) {
+  const from = { x: ctx.soldier.x, y: ctx.soldier.y };
+  const out = [];
+  for (let i = 0; i <= MOVE_DIRS; i++) {
+    let to, slid;
+    if (i === 0) { to = { x: from.x, y: from.y }; slid = false; }
+    else {
+      const th = (i - 1) * (2 * Math.PI / MOVE_DIRS);
+      const r = slideMove({ from, requested: { x: from.x + MOVE_RADIUS * Math.cos(th), y: from.y + MOVE_RADIUS * Math.sin(th) }, soldiers: ctx.soldiers, obstacles: ctx.obstacles, selfId: ctx.soldier.id });
+      to = r.to; slid = r.slid;
+    }
+    let cover = 0, distEnemy = null, nearest = null;
+    for (const e of ctx.enemies) {
+      const d = Math.hypot(e.x - to.x, e.y - to.y);
+      if (distEnemy === null || d < distEnemy) { distEnemy = d; nearest = e; }
+      if (los(to, e, ctx.obstacles)) cover++;
+    }
+    out.push({ i, to, stay: i === 0, slid, cover, distEnemy, los: nearest ? los(to, nearest, ctx.obstacles) : false });
+  }
+  return out;
+}
+
+// Reglas de esquiva de los heurísticos (spec/01 §5). Devuelven {x,y} o 'stay'.
+export function coverMove(options, { stayIfCovered = false, farther = true } = {}) {
+  const ranked = options.slice().sort((a, b) => a.cover - b.cover || (farther ? b.distEnemy - a.distEnemy : a.distEnemy - b.distEnemy) || a.i - b.i);
+  const bestOpt = ranked[0];
+  if (stayIfCovered && options[0].cover === bestOpt.cover) return 'stay';
+  return bestOpt.stay ? 'stay' : { x: bestOpt.to.x, y: bestOpt.to.y };
+}
+export function greedyMove(options) {
+  const withLos = options.filter((o) => o.cover > 0).sort((a, b) => a.distEnemy - b.distEnemy || a.i - b.i);
+  const pick = withLos.length ? withLos[0] : options.slice().sort((a, b) => a.cover - b.cover || a.i - b.i)[0];
+  return pick.stay ? 'stay' : { x: pick.to.x, y: pick.to.y };
 }

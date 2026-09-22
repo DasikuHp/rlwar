@@ -44,7 +44,9 @@ async function main() {
       console.log('PASS ✔');
       return;
     }
-    if (st.turn && st.turn.playerId === myId) {
+    if (st.turn && st.turn.playerId === myId && st.turn.stage === 'move') {
+      await api(`/api/rooms/${code}/move`, 'POST', { playerId: myId, stay: true }); // F1: tras disparar, elegir destino
+    } else if (st.turn && st.turn.playerId === myId) {
       const cand = searchShot(st, st.turn.soldierId, 30);
       const r = await api(`/api/rooms/${code}/fire`, 'POST', { playerId: myId, ...cand });
       if (r.error) console.log('  (fire error:', r.error, ')');

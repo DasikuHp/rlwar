@@ -1,12 +1,13 @@
 // Generación procedural de mapas: obstáculos y posiciones de soldados.
 import { PLANE, SOLDIERS_PER_PLAYER } from '../shared/constants.js';
 
-const rand = (a, b) => a + Math.random() * (b - a);
 const overlaps = (a, b, pad = 1.5) =>
   a.x - pad < b.x + b.w && a.x + a.w + pad > b.x && a.y - pad < b.y + b.h && a.y + a.h + pad > b.y;
 
-export function genMap(numSoldiers = SOLDIERS_PER_PLAYER) {
-  const roll = Math.random();
+// `rng`: función () → [0,1) (con semilla desde la sala; por defecto Math.random)
+export function genMap(numSoldiers = SOLDIERS_PER_PLAYER, rng = Math.random) {
+  const rand = (a, b) => a + rng() * (b - a);
+  const roll = rng();
   const biome = roll < 0.35 ? 'fortaleza' : roll < 0.7 ? 'ruinas' : 'llanura';
   const names = { fortaleza: '🏰 Fortaleza', ruinas: '🏚️ Ruinas', llanura: '🌵 Llanura' };
   const obstacles = [];

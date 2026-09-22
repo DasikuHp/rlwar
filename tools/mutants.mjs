@@ -53,6 +53,7 @@ export function scan(src) {
   let i = 0;
   const push = (type, start, end) => { toks.push({ type, value: src.slice(start, end), start, end }); i = end; };
   const lastSig = () => { for (let k = toks.length - 1; k >= 0; k--) if (toks[k].type !== 'ws' && toks[k].type !== 'comment') return toks[k]; return null; };
+  if (src.startsWith('#!')) { let j = src.indexOf('\n'); if (j < 0) j = n; push('comment', 0, j); } // shebang
   while (i < n) {
     const c = src[i], d = src[i + 1];
     if (c === ' ' || c === '\t' || c === '\n' || c === '\r') { let j = i; while (j < n && /[ \t\r\n]/.test(src[j])) j++; push('ws', i, j); continue; }

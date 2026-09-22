@@ -49,8 +49,8 @@ async function api(req, res, parts, url) {
     if (method === 'GET') return json(res, 200, { rooms: roomList() });
     if (method === 'POST') {
       const b = await readBody(req);
-      const room = createRoom(b.name, { soldiersPerPlayer: b.soldiers });
-      return json(res, 201, { code: room.code, name: room.name, soldiers: room.soldiersPerPlayer });
+      const room = createRoom(b.name, { soldiersPerPlayer: b.soldiers, seed: b.seed });
+      return json(res, 201, { code: room.code, name: room.name, soldiers: room.soldiersPerPlayer, seed: room.seed });
     }
     return json(res, 405, { error: 'Método no permitido' });
   }
@@ -89,6 +89,7 @@ async function api(req, res, parts, url) {
     case 'addagent': return json(res, 200, room.addAgent(body.type, body));
     case 'start': return json(res, 200, room.start(pid || body.playerId));
     case 'fire': return json(res, 200, room.fire(pid, body));
+    case 'move': return json(res, 200, room.move(pid, body.stay ? 'stay' : { x: body.x, y: body.y }));
     case 'chat': return json(res, 200, room.addChat(pid, body.text));
     case 'rematch': return json(res, 200, room.rematch());
     default: return json(res, 404, { error: 'Endpoint desconocido' });

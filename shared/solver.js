@@ -33,7 +33,9 @@ function hitSoldier(soldiers, shooterId, x, y) {
 export function simulateShot({ mode, f, start, dir, angle = 0, soldiers = [], obstacles = [], shooterId = null, ds = STEP, maxSteps = MAX_STEPS }) {
   const points = [[start.x, start.y]];
   let x = start.x, y = start.y;
-  let v = Math.tan(angle);
+  // pendiente inicial dy/dx: el ángulo positivo SUBE en los dos lados (spec/01 §7b); para el
+  // equipo derecho (dir = -1) x decrece, así que dy/dx debe ser negativa para subir
+  let v = dir * Math.tan(angle);
   let c = null;
 
   const finish = (type, soldierId = null, ex = x, ey = y) => {

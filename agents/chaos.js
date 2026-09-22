@@ -28,19 +28,25 @@ export function create({ temperature = 0 } = {}) {
   const tmp = Math.max(0, Math.min(1, Number(temperature) || 0));
   return {
     meta,
-    chooseShot({ soldiers, obstacles, soldier, history = [] }) {
+    chooseShot({ soldiers, obstacles, soldier, history = [], rng = Math.random }) {
       const ctx = contextFor(soldiers, obstacles, soldier);
       const cands = [];
       const n = Math.round(60 * (1 + tmp));
       for (let i = 0; i < n; i++) {
-        const a = (Math.random() * 2 - 1) * 8;
-        const k = 1 + Math.random() * 20;
-        cands.push({ mode: MODES.FUNCTION, expr: WILD[Math.floor(Math.random() * WILD.length)](a.toFixed(3), k.toFixed(2)) });
+        const a = (rng() * 2 - 1) * 8;
+        const k = 1 + rng() * 20;
+        cands.push({ mode: MODES.FUNCTION, expr: WILD[Math.floor(rng() * WILD.length)](a.toFixed(3), k.toFixed(2)) });
       }
       for (let i = 0; i < 10; i++) {
-        cands.push({ mode: MODES.ODE1, expr: `${((Math.random() * 2 - 1) * 3).toFixed(3)}*sin(x/${(1 + Math.random() * 12).toFixed(2)})+${((Math.random() * 2 - 1) * 2).toFixed(2)}` });
+        cands.push({ mode: MODES.ODE1, expr: `${((rng() * 2 - 1) * 3).toFixed(3)}*sin(x/${(1 + rng() * 12).toFixed(2)})+${((rng() * 2 - 1) * 2).toFixed(2)}` });
       }
-      return withVoice(best(ctx, avoidRepeats(cands, history), { topN: 6 }), ctx, SAY, 0.8);
+      return withVoice(best(ctx, avoidRepeats(cands, history, rng), { topN: 6 }), ctx, SAY, 0.8, rng);
+    },
+    // esquiva caótica: uno de los 9 al azar (spec/01 §5)
+    chooseMove({ soldiers, soldier, moveOptions, rng = Math.random }) {
+      if (!soldiers.some((s) => s.alive && s.team !== soldier.team)) return 'stay';
+      const o = moveOptions[Math.floor(rng() * 9)];
+      return o.stay ? 'stay' : { x: o.to.x, y: o.to.y };
     },
   };
 }

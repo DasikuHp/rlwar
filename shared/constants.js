@@ -16,6 +16,20 @@ export const SOLDIERS_PER_PLAYER = 2;
 // Anti-estancamiento: si nadie muere en N disparos se renueva el mapa; y hay un tope duro de disparos
 export const STALL_SHOTS = FAST ? 4 : 8;
 export const MAX_SHOTS = FAST ? 40 : 90;
+// Movimiento tras disparar (spec/01 §1)
+export const MOVE_RADIUS = 2;         // radio máximo del movimiento (u)
+export const BODY = 0.5;              // cuerpo del soldado: distancia mínima a obstáculos y bordes
+export const MIN_SEPARATION = 1.0;    // distancia mínima entre centros de dos soldados vivos
+export const MOVE_TIME = FAST ? 400 : 8000;  // ms de margen para elegir destino tras ver el tiro
+export const SLIDE_R_STEP = 0.05;     // paso radial de la rejilla polar del deslizamiento
+export const SLIDE_DEG_STEP = 5;      // paso angular (grados) de la rejilla polar
+export const MOVE_DIRS = 8;           // direcciones de los destinos candidatos (0° = +x)
+// Límites del laboratorio (spec/00 §6): nada que llegue de fuera puede colgar el servidor
+export const LIMITS = {
+  blocks: 64, wires: 256, units: 512, params: 2_000_000,
+  candidatesMin: 4, candidatesMax: 64, moves: 9,
+  genomeBytes: 48 * 1024 * 1024, nets: 500, gamesPerNet: 200, eventsPerGame: 5000,
+};
 export const TEAMS = { LEFT: 'left', RIGHT: 'right' };
 export const MODES = { FUNCTION: 'function', ODE1: 'ode1', ODE2: 'ode2' };
 export const MODE_LABELS = { function: 'y =', ode1: "y' =", ode2: "y'' =" };

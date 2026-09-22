@@ -37,7 +37,9 @@ el único punto de validación de disparos.
   tropas por bando (o Aleatorio) + 1–4 soldados; test congelado antes del código (11/11); mutantes
   9/10 (el superviviente es un recorte redundante); probado en vivo. Arreglado `client.spec`, que
   estaba en rojo y fuera de la batería (`af67185`). Suite **5/5**. **Sesión 1 de Fable (2026-09-22): experimento hecho, contratos `spec/00`–`08`
-  escritos; siguiente: revisión del usuario → herramientas (freeze, mutants) → F1.**
+  aprobados; herramientas `tools/freeze.mjs` + `tools/mutants.mjs` (test propio, 7 tests congelados en
+  `test/FROZEN.json`); F1 motor (movimiento, semilla, sin pantalla, ángulo y'') con `test/motor.spec.mjs`
+  congelado antes del código y suite 8/8 en verde. Siguiente: F2 (red: genoma + nn).**
 - F0 **a medias**: `plan.md` escrito; **falta** el selector de tropas en la UI. *(superado: ver
   arriba)*
 - F1–F5 sin empezar: no hay `move` en `rooms.js`, no existe `evo/`.

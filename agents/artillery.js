@@ -1,7 +1,7 @@
 // Agente Artillery: usa ecuaciones de 2º orden (y'' = -g) con búsqueda de ángulo,
 // perfecto para disparar parábolas por encima de los obstáculos.
 import { MODES } from '../shared/constants.js';
-import { best, contextFor, search, withVoice } from './lib.js';
+import { best, contextFor, search, withVoice, coverMove } from './lib.js';
 
 export const meta = {
   id: 'artillery', name: 'Artillery', icon: '🎆',
@@ -18,13 +18,13 @@ const GRAVITIES = [0.02, 0.04, 0.07, 0.12, 0.2, 0.35];
 
 export function create({ temperature = 0 } = {}) {
   const tmp = Math.max(0, Math.min(1, Number(temperature) || 0));
-  const finish = (shot, ctx) => {
-    if (tmp > 0) shot.angle = Math.max(-85, Math.min(85, shot.angle + (Math.random() * 2 - 1) * tmp * 8));
-    return withVoice(shot, ctx, SAY);
+  const finish = (shot, ctx, rng) => {
+    if (tmp > 0) shot.angle = Math.max(-85, Math.min(85, shot.angle + (rng() * 2 - 1) * tmp * 8));
+    return withVoice(shot, ctx, SAY, 0.6, rng);
   };
   return {
     meta,
-    chooseShot({ soldiers, obstacles, soldier }) {
+    chooseShot({ soldiers, obstacles, soldier, rng = Math.random }) {
       const ctx = contextFor(soldiers, obstacles, soldier);
       // fase 1: rejilla gruesa de (ángulo, gravedad)
       let cands = [];
@@ -50,8 +50,13 @@ export function create({ temperature = 0 } = {}) {
         if (next.length && next[0].score > ranked[0].score) ranked = next;
         if (ranked[0].score >= 1000) break;
       }
-      if (ranked.length) return finish(ranked[0].cand, ctx);
-      return finish(best(ctx, [{ mode: MODES.ODE2, expr: '-0.05', angle: 25 }]), ctx);
+      if (ranked.length) return finish({ ...ranked[0].cand }, ctx, rng);
+      return finish(best(ctx, [{ mode: MODES.ODE2, expr: '-0.05', angle: 25 }]), ctx, rng);
+    },
+    // esquiva: lo más tapado y, a igualdad, lo más lejos (dispara por encima) (spec/01 §5)
+    chooseMove({ soldiers, soldier, moveOptions }) {
+      if (!soldiers.some((s) => s.alive && s.team !== soldier.team)) return 'stay';
+      return coverMove(moveOptions, { stayIfCovered: false, farther: true });
     },
   };
 }

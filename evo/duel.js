@@ -90,10 +90,15 @@ export function defaultLearner(netId) {
   };
 }
 
-let duelSeq = 1;
+// un id por duelo, único también entre reinicios y procesos (spec/06 §7.2): d<ms base 36><pid>-<n>
+let duelSeq = 0;
+export function newDuelId() {
+  const pid = (typeof process !== 'undefined' ? process.pid : 0) % 1296;
+  return `d${Date.now().toString(36)}${pid.toString(36).padStart(2, '0')}-${++duelSeq}`;
+}
 export async function runDuel(opts = {}) {
   const { a, b, learning = 'mix', speed = 'turbo', soldiers = 'random', seed = 0, throne = false, queen = null, onGame = null, shouldStop = null, saveGames = true } = opts;
-  const id = opts.id || `d${duelSeq++}`;
+  const id = opts.id || newDuelId();
   const rec = { id, a, b, status: 'running', learning, speed, throne, soldiers, seed, games: [], wins: { [a]: 0, [b]: 0 }, killDiff: 0, winner: null, tie: false, ms: 0, roomCodes: [], startedAt: Date.now() };
   if (opts.onStart) opts.onStart(rec);
   const stop = () => !!(shouldStop && shouldStop());

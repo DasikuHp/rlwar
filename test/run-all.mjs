@@ -81,6 +81,7 @@ try {
   results.push(await run('arreglos del aprendizaje: gradiente, evolución o ambos', [join(ROOT, 'test', 'arreglos-metodo.spec.mjs')]));
   results.push(await run('arreglos: exhibiciones que cuentan, se guardan y enseñan', [join(ROOT, 'test', 'arreglos-exhibicion.spec.mjs'), BASE]));
   results.push(await run('arreglos: bofetada y caricia con efecto inmediato', [join(ROOT, 'test', 'arreglos-bofetada.spec.mjs'), BASE]));
+  results.push(await run('arreglos: trono protegido, retos anulados, ids de duelo únicos', [join(ROOT, 'test', 'arreglos-trono.spec.mjs'), BASE]));
 } finally {
   server.kill();
 }

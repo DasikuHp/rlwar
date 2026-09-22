@@ -5,8 +5,8 @@ import { eyeLayout } from '../shared/percept.js';
 import { TEMPLATES } from '../shared/templates.js';
 import { listNets, loadNet, saveNet, deleteNet, entryOf } from './store.js';
 import { createTrainer, makeLearner, feedbackTarget, feedbackFromGame } from './train.js';
-import { runDuel, LEARNING_MODES, SPEEDS } from './duel.js';
-import { challenge, throneView, foundDynasties, runGeneration, readThroneFull, genealogyView, registerBirth } from './throne.js';
+import { runDuel, newDuelId, LEARNING_MODES, SPEEDS } from './duel.js';
+import { challenge, throneView, foundDynasties, runGeneration, readThroneFull, genealogyView, registerBirth, vacateNet } from './throne.js';
 import { loadGame, appendLog, readLog, loadLogEntry, listGames, saveGame, loadGameNets, readFeedback, writeFeedback, readApplied, appendApplied, netsDir } from './store.js';
 import { nameNeurons, diaryPhrase, memoryOf } from './truth.js';
 import { runBulletin } from './exam.js';
@@ -65,10 +65,9 @@ function trainingView(t, full = false) {
 }
 // ---------- duelos (spec/06 §1, §6.5) ----------
 const duels = new Map();
-let duelSeq = 1;
 const duelView = (d) => ({ id: d.id, a: d.a, b: d.b, status: d.status, learning: d.learning, speed: d.speed, throne: d.throne, soldiers: d.soldiers, seed: d.seed, games: d.games, wins: d.wins, killDiff: d.killDiff, winner: d.winner, tie: d.tie, ms: d.ms, roomCodes: d.roomCodes, startedAt: d.startedAt });
 function startDuel(opts) {
-  const id = `d${duelSeq++}`;
+  const id = newDuelId();
   const holder = { id, rec: { id, a: opts.a, b: opts.b, status: 'running', learning: opts.learning, speed: opts.speed, throne: !!opts.throne, soldiers: opts.soldiers, seed: opts.seed, games: [], wins: {}, killDiff: 0, winner: null, tie: false, ms: 0, roomCodes: [], startedAt: Date.now() }, stop: false };
   duels.set(id, holder);
   holder.promise = runDuel({ ...opts, id, onStart: (rec) => { holder.rec = rec; }, shouldStop: () => holder.stop, onGame: (k, game, rec) => { holder.rec = rec; pushEvent('duel', { id, game, wins: rec.wins }); } })
@@ -97,19 +96,19 @@ function startGenerationJob(body) {
   return job;
 }
 function startExamJob(genome) {
-  const job = { id: `j${jobSeq++}`, kind: 'exam', status: 'running', progress: { done: 0, total: 92 }, result: null, error: null, netId: genome.id, createdAt: Date.now() };
+  const job = { id: `j${jobSeq++}`, kind: 'exam', status: 'running', progress: { done: 0, total: 96 }, result: null, error: null, netId: genome.id, createdAt: Date.now() };
   jobs.set(job.id, job);
   (async () => {
     try {
       let done = 0;
-      const res = await runBulletin(genome, { onScene: () => { done++; if (done % 10 === 0) { job.progress = { done, total: 92 }; pushEvent('job', jobView(job)); } } });
+      const res = await runBulletin(genome, { onScene: () => { done++; if (done % 10 === 0) { job.progress = { done, total: 96 }; pushEvent('job', jobView(job)); } } });
       const out = { netId: genome.id, ts: Date.now(), aim: res.aim, cover: res.cover, survival: res.survival, adaptation: res.adaptation, details: res.details, seeds: res.seeds };
       const dir = join(netsDir(), genome.id);
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       const file = join(dir, 'bulletin.json'), tmp = file + '.tmp';
       writeFileSync(tmp, JSON.stringify(out)); renameSync(tmp, file);
       const logId = appendLog({ type: 'exam', netId: genome.id, aim: res.aim, cover: res.cover, survival: res.survival, adaptation: res.adaptation, seeds: res.seeds });
-      job.status = 'done'; job.progress = { done: 92, total: 92 }; job.result = { ...out, logId };
+      job.status = 'done'; job.progress = { done: 96, total: 96 }; job.result = { ...out, logId };
       pushEvent('job', jobView(job));
       pushEvent('exam', { netId: genome.id, aim: res.aim, cover: res.cover, survival: res.survival, adaptation: res.adaptation, logId });
     } catch (e) { job.status = 'error'; job.error = e.message; pushEvent('job', jobView(job)); pushEvent('error', { message: `examen de ${genome.id}: ${e.message}` }); }
@@ -445,6 +444,7 @@ export async function labApi(req, res, parts, url) {
       if (!b.ok) return bad(b.status, b.error);
       const t = readThroneFull();
       if (!t.dynasties.A || !t.dynasties.B) return bad(400, 'Primero funda las dos casas (POST /api/lab/dynasties)');
+      for (const h of ['A', 'B']) if (!t.dynasties[h].champion) return bad(400, `La casa ${t.dynasties[h].name} no tiene campeona: vuelve a fundarla con POST /api/lab/dynasties?house=${h}`);
       if (activeTraining(t.dynasties.A.champion) || activeTraining(t.dynasties.B.champion)) return bad(409, 'Una campeona está entrenando');
       const job = startGenerationJob(b.value || {});
       return json(res, 202, { jobId: job.id, status: job.status });
@@ -453,6 +453,7 @@ export async function labApi(req, res, parts, url) {
       const t = readThroneFull();
       const house = t.dynasties[seg[1]];
       if (!house) return bad(404, `Casa no encontrada: ${seg[1]}`);
+      if (!house.champion) return bad(400, `La casa ${house.name} no tiene campeona: vuelve a fundarla con POST /api/lab/dynasties?house=${seg[1]}`);
       const b = await body();
       if (!b.ok) return bad(b.status, b.error);
       const v = b.value || {};
@@ -544,7 +545,16 @@ export async function labApi(req, res, parts, url) {
     if (seg.length === 2) {
       if (method === 'GET') return json(res, 200, { genome, paramCount: countParams(genome), warnings: validate(genome).warnings });
       if ((method === 'DELETE' || method === 'PUT') && activeTraining(id)) return bad(409, `La red ${id} está entrenando: para el entreno antes de editarla o borrarla.`);
-      if (method === 'DELETE') return json(res, 200, { ok: deleteNet(id) });
+      if (method === 'DELETE') {
+        // la reina y las campeonas no se borran por accidente (spec/08 §4, spec/06 §7.1)
+        const isQueen = th.queen === id, houses = ['A', 'B'].filter((h) => th.dynasties[h] && th.dynasties[h].champion === id);
+        if ((isQueen || houses.length) && url.searchParams.get('force') !== '1') {
+          return bad(409, isQueen ? `${genome.name} es la reina: si de verdad quieres dejar el trono vacío, bórrala con ?force=1.` : `${genome.name} es la campeona de ${houses.map((h) => th.dynasties[h].name).join(' y ')}: si de verdad quieres dejar la casa sin campeona, bórrala con ?force=1.`);
+        }
+        const ok = deleteNet(id);
+        if (ok && (isQueen || houses.length)) vacateNet(id, { onEvent: (ev) => pushEvent(ev.type === 'dynasty' ? 'dynasty' : 'throne', ev.type === 'dynasty' ? { house: ev.house, event: ev.event, ...ev } : { queen: null, event: ev.type, ...ev }) });
+        return json(res, 200, { ok });
+      }
       if (method === 'PUT') {
         const b = await body();
         if (!b.ok) return bad(b.status, b.error);

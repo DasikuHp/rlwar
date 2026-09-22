@@ -186,7 +186,7 @@ Aprobados por el usuario ("arréglalo tú"). Completan §1–§6 sin cambiar lo 
     casa responde 400 ("la casa no tiene campeona: vuelve a fundarla con `?house=`").
 - Si la reina ya no existe (su fichero desapareció por otra vía), `challenge()` cierra su reinado con
   `ended: 'missing'` y sienta a la retadora (`result: 'seated'`).
-- Un duelo de reto que termina en error o sin ninguna partida jugada **anula** el reto: se registra en
+- Un duelo de reto que termina en error, o que se para sin haber jugado ninguna partida, **anula** el reto: se registra en
   `challenges` con `result: 'void'` (y `error`), nadie gana ni defiende (los reinados no cambian) y el evento
   `challenge` lleva `result: 'void'`.
 

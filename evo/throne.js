@@ -57,6 +57,18 @@ export async function challenge({ challenger, learning = 'mix', speed = 'turbo',
     emit({ type: 'reign.start', netId: challenger, queen: challenger, ts });
     return { result: 'seated', queen: challenger };
   }
+  if (!loadNet(t.queen)) {
+    // la reina ya no existe (spec/06 §7.1): se cierra su reinado y se sienta la retadora, sin duelo
+    const ts = now(), gone = t.queen;
+    const old = t.reigns[t.reigns.length - 1];
+    if (old && !old.to) { old.to = ts; old.ended = 'missing'; }
+    t.queen = challenger; t.since = ts;
+    t.reigns.push({ netId: challenger, from: ts, to: null, defenses: 0, won: 0, lost: 0 });
+    writeThrone(t);
+    emit({ type: 'reign.end', netId: gone, queen: challenger, reason: 'missing', ts });
+    emit({ type: 'reign.start', netId: challenger, queen: challenger, ts });
+    return { result: 'seated', queen: challenger };
+  }
   const queen = t.queen;
   const duelOpts = { a: challenger, b: queen, learning, speed, seed: Number.isInteger(seed) ? seed : randomSeed(), throne: true, queen };
   const started = hooks.startDuel ? hooks.startDuel(duelOpts) : null;
@@ -64,6 +76,15 @@ export async function challenge({ challenger, learning = 'mix', speed = 'turbo',
   if (hooks.onDuelStart) hooks.onDuelStart({ duelId, queen, challenger });
   const rec = started ? await started.promise : await (hooks.runDuel || runDuelDefault)(duelOpts);
   t = readThroneFull();
+  if (!rec || rec.status === 'error' || (rec.status === 'stopped' && !(Array.isArray(rec.games) && rec.games.length))) {
+    // un duelo que falla o no juega nada no decide nada: reto anulado (spec/06 §7.1)
+    const ts = now(), cid = `c${t.challenges.length + 1}`;
+    const error = (rec && rec.error) || 'el duelo no jugó ninguna partida';
+    t.challenges.push({ id: cid, challenger, queen, duelId: rec ? rec.id : duelId, result: 'void', error, ts });
+    writeThrone(t);
+    emit({ type: 'challenge', id: cid, challenger, queen, duelId: rec ? rec.id : duelId, result: 'void', error, ts });
+    return { result: 'void', queen, duelId: rec ? rec.id : duelId };
+  }
   recordDuelInLeague(t, rec);
   const ts = now();
   const result = rec.tie ? 'tie' : rec.winner === challenger ? 'challenger' : 'queen';
@@ -85,6 +106,23 @@ export async function challenge({ challenger, learning = 'mix', speed = 'turbo',
     emit({ type: 'challenge', id: cid, challenger, queen, duelId: rec.id, result, ts });
   }
   return { result, queen: t.queen, duelId: rec.id };
+}
+
+// al borrar con force a la reina o a una campeona (spec/06 §7.1): su reinado se cierra / la casa queda sin campeona
+export function vacateNet(netId, hooks = {}) {
+  const t = readThroneFull(), ts = Date.now();
+  const out = { queen: false, houses: [] };
+  if (t.queen === netId) {
+    const reign = t.reigns[t.reigns.length - 1];
+    if (reign && !reign.to) { reign.to = ts; reign.ended = 'deleted'; }
+    t.queen = null; t.since = null; out.queen = true;
+  }
+  for (const h of ['A', 'B']) if (t.dynasties[h] && t.dynasties[h].champion === netId) { t.dynasties[h].champion = null; out.houses.push(h); }
+  if (!out.queen && !out.houses.length) return out;
+  writeThrone(t);
+  const events = [...(out.queen ? [{ type: 'reign.end', netId, queen: null, reason: 'deleted', ts }] : []), ...out.houses.map((h) => ({ type: 'dynasty', house: h, event: 'champion.deleted', netId, ts }))];
+  for (const ev of events) { appendLog(ev); if (hooks.onEvent) hooks.onEvent(ev); }
+  return out;
 }
 
 // ---------- dinastías ----------
@@ -118,7 +156,9 @@ export async function runGeneration(body = {}, hooks = {}) {
   delete training.netId; delete training.antagonistId;
   const childrenCfg = { n: 4, mutation: null, pretournament: { games: 4, soldiers: 'random' }, ...(body.children || {}) };
   const duelCfg = { learning: 'frozen', speed: 'turbo', soldiers: 'random', ...(body.duel || {}) };
-  const runDuel = hooks.runDuel || runDuelDefault;
+  if (!t.dynasties.A.champion || !t.dynasties.B.champion) throw httpError(400, `La casa ${t.dynasties.A.champion ? 'B' : 'A'} no tiene campeona: vuelve a fundarla con ?house=`);
+  // los duelos de la generación pasan por el registro del API (ids únicos, SSE) si lo hay (spec/06 §7.2)
+  const runDuel = hooks.runDuel || (hooks.startDuel ? (opts) => hooks.startDuel(opts).promise : runDuelDefault);
   let done = 0; const total = 6;
   const progress = () => { done++; if (hooks.onProgress) hooks.onProgress(done, total); };
   const result = { trainings: {}, children: {}, promoted: {}, duelId: null, winner: null, tie: false, A: null, B: null };

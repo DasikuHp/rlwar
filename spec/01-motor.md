@@ -157,3 +157,24 @@ trayectoria sube (`y` crece) igual que el soldado izquierdo espejado. Los heurí
 - Heurísticos: cada regla de §5 sobre una escena fija (p. ej. Sniper a la vista de 2 enemigos con un
   muro a 1.5 u → se mueve tras el muro).
 - Regresión: la suite actual sigue en verde.
+
+## 9. Arreglos tras la revisión de Opus (2026-09-23, `spec/revision-opus.md` C2 y A5)
+Aprobados por el usuario ("arréglalo tú"). Completan §2–§7 sin cambiar lo que ya decían.
+
+### 9.1 Fuego amigo (`suicide`)
+- El tiro que alcanza a un aliado mata **solo a ese aliado** (evento `friendlyFire` con actor = tirador y `death`
+  con actor = aliado). **El tirador sigue vivo y se mueve igual** (§2.4), como en el original: en
+  `referencia/graphwar/src/Graphwar/Function.java` el soldado que dispara nunca cuenta como alcanzado.
+- Antes, el tirador moría también y `move()` devolvía error sin cerrar el turno: la sala viva se quedaba en
+  `stage:'move'` para siempre y la partida sin pantalla se paraba hasta `maxTurns`.
+
+### 9.2 El turno nunca se queda abierto
+- Si al resolver la etapa `move` el soldado del turno ya no está vivo (por cualquier causa), `move()` **cierra el
+  turno sin mover**: `lastMove = {…, to: from, stayed: true, slid: false, reason: 'dead'}`, evento `move` y
+  `nextTurn` como siempre. Vale para agentes en proceso, humanos, agentes por API y vencimientos. Sin error.
+- Invariante que prueban los tests: una partida sin pantalla solo termina "por límite" (`result.byLimit`) si ha
+  llegado a `MAX_SHOTS` disparos.
+
+### 9.3 `POST /api/rooms {speed}`
+- `speed` ∈ {1, 10} (otro valor → 1). Con `speed: 10` la sala solo admite agentes: `join` responde
+  `{error: 'Sala x10: solo agentes'}` (§9.5 de spec/04). `config.speed` lo expone.

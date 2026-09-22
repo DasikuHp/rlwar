@@ -7,6 +7,7 @@
   "test/api-verdad.spec.mjs": "68eedebb8a0fba8847c3809a5619ae366acc805e6db56fc94493b14b05ffd130",
   "test/aprendizaje-extra.spec.mjs": "2a48c48c1d52088e53e56fa754b4a419ed655f25da2bb343ccc1a2cdb49a2da8",
   "test/aprendizaje.spec.mjs": "25c7544b912e59aa3b067246cdebae1856db2855372627934364035e35c185ea",
+  "test/arreglos-motor.spec.mjs": "08cfab2932dad827c00c6215c805cc2b04ff3e60124b5b793413a6d33bbac736",
   "test/client.spec.mjs": "65659173d8eca4e4291675bcadc8e9e64d1dbba5c77400c88be063e70119156a",
   "test/entrenador-extra-b.spec.mjs": "fd6daa5e4ebe0eccfdc2408a7dca249fb34524794d1b2980d8d491a303addf8f",
   "test/entrenador-extra.spec.mjs": "cec48ae69fe22a2ae66db3ad80e5962768905efb64f53d83abcff1058edbbbea",

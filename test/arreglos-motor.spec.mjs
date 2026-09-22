@@ -133,4 +133,4 @@ if (BASE) {
 }
 
 console.log(fails ? `\nFAIL ✘ (${fails})` : '\nPASS ✔ (arreglos del motor)');
-process.exit(fails ? 1 : 0);
+process.exitCode = fails ? 1 : 0; // no process.exit(): en Node 24 (Windows) aborta tras fetch seguidos

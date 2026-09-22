@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Graphwar Agents ⚔️</title>
+<link rel="stylesheet" href="/css/style.css">
+<style>
+  .overlay { display: flex; align-items: center; justify-content: center; }
+  .panel { width: 90vw; max-width: 600px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <!-- Pantalla de entrada -->
+  <div id="join" class="overlay">
+    <div class="panel">
+      <h1>GRAPHWAR<span class="accent">.agents</span></h1>
+      <p class="subtitle">Artillería con funciones matemáticas · juega contra humanos o agentes IA</p>
+      <input id="joinName" placeholder="Tu nombre" maxlength="24" value="Jugador">
+      <div class="row">
+        <button id="btnCreate">Crear sala</button>
+        <select id="soldiersPick" title="Soldados por jugador">
+          <option value="2">2 por jugador</option>
+          <option value="3">3 por jugador</option>
+          <option value="4" selected>4 por jugador ⚔️</option>
+        </select>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <input id="joinCode" placeholder="CÓDIGO" maxlength="4" style="text-transform:uppercase">
+        <button id="btnJoin">Unirse</button>
+        <button id="btnSpectate" title="Ver la sala sin jugar">👀</button>
+      </div>
+      <div class="row" style="margin-top:8px">
+        <button id="btnSelfplay">🤖 Ver IA vs IA (self-play)</button>
+      </div>
+      <div id="lobby" hidden>
+        <p>Código de sala: <b id="roomCode" class="accent"></b> (compártelo)</p>
+        <div class="row" id="lobbyControls">
+          <select id="teamPick"><option value="auto">Equipo: automático</option><option value="left">Izquierdo (cyan)</option><option value="right">Derecho (naranja)</option></select>
+          <button id="btnAddBot">+ CPU</button>
+          <button id="btnStart" class="primary">¡Empezar!</button>
+        </div>
+        <ul id="lobbyPlayers"></ul>
+      </div>
+      <div id="joinError" class="error"></div>
+      <p id="lobbyHint" class="dim" style="font-size:12px"></p>
+      <p class="hint">Sintaxis: y = 0.5*x , y' = -y/3 , y'' = -0.05 (con ángulo). Funciones: sin cos tan sqrt ln log abs exp atan</p>
+    </div>
+  </div>
+
+  <!-- Juego -->
+  <div id="game" hidden>
+    <header>
+      <span class="logo">GRAPHWAR<span class="accent">.agents</span></span>
+      <span id="hdrRoom" class="dim"></span>
+      <div id="turnBox"><span id="turnText"></span><div id="turnBarWrap"><div id="turnBar"></div></div></div>
+      <span id="phaseText" class="dim"></span>
+    </header>
+    <main>
+      <aside id="sideLeft">
+        <h3>Equipos</h3>
+        <ul id="playerList"></ul>
+        <h3>Funciones</h3>
+        <ul id="exprList"></ul>
+      </aside>
+      <div id="canvasWrap"><canvas id="board"></canvas><div id="toast"></div></div>
+      <aside id="sideRight">
+        <h3>Registro</h3>
+        <ul id="chat"></ul>
+        <form id="chatForm"><input id="chatInput" placeholder="Escribe..." autocomplete="off"></form>
+      </aside>
+    </main>
+    <footer>
+      <div id="modeTabs">
+        <button data-mode="function" class="active">y =</button>
+        <button data-mode="ode1">y' =</button>
+        <button data-mode="ode2">y'' =</button>
+      </div>
+      <span id="angleBox" hidden>ángulo <input id="angle" type="range" min="-85" max="85" value="20"><b id="angleVal">20°</b></span>
+      <input id="expr" placeholder="sin(x/5)*3" autocomplete="off" spellcheck="false">
+      <button id="btnFire" class="primary">Disparar ▶</button>
+    </footer>
+  </div>
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

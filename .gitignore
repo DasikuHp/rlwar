@@ -1,0 +1,11 @@
+# Referencia: clon de catabriga/graphwar (GPL-3, solo lectura) con su propio .git
+referencia/
+# Ficheros de ejecución
+.server.pid
+.graphwar-bat-pid
+test/_battery.log
+node_modules/
+# Fichero vacío accidental (redirección de PowerShell en bash)
+$null
+# Sesión del CLI de agente (contiene token)
+agent/.agent-session.json

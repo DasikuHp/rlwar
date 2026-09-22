@@ -1,0 +1,16 @@
+{
+  "name": "graphwar-agents",
+  "version": "1.0.0",
+  "description": "Graphwar multijugador web con API para agentes IA. Inspirado en Graphwar (catabriga/graphwar, GPL-3).",
+  "type": "module",
+  "scripts": {
+    "start": "node server/server.js",
+    "selfplay": "node arena/selfplay.mjs",
+    "selfplay:fast": "node arena/selfplay.mjs --agents sniper,greedy,artillery,chaos --games 6 --spawn-fast",
+    "test": "node test/run-all.mjs",
+    "test:parser": "node test/parser.spec.mjs",
+    "test:agents": "node test/agents.spec.mjs",
+    "spectate": "node tools/room-debug.mjs"
+  },
+  "license": "GPL-3.0-or-later"
+}

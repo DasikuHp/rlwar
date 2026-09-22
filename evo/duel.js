@@ -3,7 +3,7 @@
 import { hash32 } from '../shared/rng.js';
 import { playGame } from '../server/headless.js';
 import { createRoom } from '../server/rooms.js';
-import { loadNet, saveGame, saveGameNets } from './store.js';
+import { loadNet, saveGame, saveGameNets, appendLog } from './store.js';
 import { makeLearner } from './train.js';
 
 export const LEARNING_MODES = ['frozen', 'hot', 'mix'];
@@ -84,6 +84,8 @@ export function defaultLearner(netId) {
     review: (games) => L.review(games),
     save: () => L.save(),
     addStats: (s) => L.addStats(s),
+    method: L.method,
+    evolve: (o) => L.evolve(o),
     genome: L.genome,
   };
 }
@@ -126,6 +128,19 @@ export async function runDuel(opts = {}) {
   }
   if (learnEnabled && (learning === 'frozen' || learning === 'mix') && played.length) {
     for (const netId of [a, b]) { const L = learnerOf(netId); L.review(played.map((out) => gameFor(out, netId))); L.save(); }
+  }
+  // redes con evolución: al acabar el duelo, un paso de evolución contra la rival tal como quedó (spec/04 §10.2)
+  if (learnEnabled && played.length) {
+    const evolvers = [a, b].filter((netId) => { const L = learnerOf(netId); return L.evolve && (L.method === 'evolution' || L.method === 'both'); });
+    const endOf = (netId) => { const L = learnerOf(netId); return L.genome ? JSON.parse(JSON.stringify({ ...L.genome, weights: L.net ? L.net.serialize() : L.genome.weights })) : loadNet(netId); };
+    const rivals = Object.fromEntries(evolvers.map((netId) => [netId, endOf(netId === a ? b : a)]));
+    for (const netId of evolvers) {
+      const L = learnerOf(netId);
+      const out = await L.evolve({ rival: { type: 'net', genome: rivals[netId], name: rivals[netId].name, learn: false }, seed, soldiers });
+      L.save();
+      appendLog({ type: 'update', kind: 'evolution', netId, duelId: id, games: out.update.games, meanFitness: out.update.meanFitness, bestFitness: out.update.bestFitness, top: out.update.top });
+      if (out.lesson) appendLog({ type: 'lesson', netId, duelId: id, blockId: out.lesson.blockId, name: out.lesson.name, relChange: out.lesson.relChange, bulb: out.lesson.bulb });
+    }
   }
   Object.assign(rec, duelScore(rec.games, a, b, { throne, queen }));
   rec.status = rec.games.length === plan.length ? 'done' : 'stopped';

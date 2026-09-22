@@ -59,7 +59,7 @@ const sseClients = new Set();
 function pushEvent(ev, data) { for (const res of sseClients) { try { res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* ignorar */ } } }
 const activeTraining = (netId) => [...trainings.values()].find((t) => t.netId === netId && ['queued', 'running', 'paused'].includes(t.status)) || null;
 function trainingView(t, full = false) {
-  const v = { id: t.id, netId: t.netId, status: t.status, games: t.games, updates: t.updates, startedAt: t.startedAt, error: t.error };
+  const v = { id: t.id, netId: t.netId, status: t.status, games: t.games, updates: t.updates, steps: t.steps || 0, startedAt: t.startedAt, error: t.error };
   if (full) Object.assign(v, { elapsedMs: t.startedAt ? Date.now() - t.startedAt : 0, curve: t.curve.slice(-500), sampleGames: t.sampleGames || [], rooms: t.rooms, lastLesson: t.lastLesson, config: { ...t.config, genome: undefined } });
   return v;
 }

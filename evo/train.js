@@ -171,6 +171,49 @@ export function applyEvolution(net, { theta, epsList, sigma }, fitness, cfg = {}
   return { fitness, mean: fitness.reduce((s, f) => s + f, 0) / fitness.length, best: Math.max(...fitness) };
 }
 
+// ---------- evolución jugada de verdad (spec/04 §10.2) ----------
+const yieldLoop = () => new Promise((r) => setImmediate(r));
+async function playHeadless(spec) { await yieldLoop(); return playOne(spec); } // cede el bucle: el servidor sigue respondiendo
+// recompensa efectiva media por decisión de la red que aprende en una partida (la magnitud de la curva)
+function meanEffectiveOf(g, res, stats) {
+  const tr = res && res.trajectories ? res.trajectories[res.playerId] : null;
+  if (!tr) return 0;
+  const r = assignRewards({ reward: g.reward, teamSpirit: g.traits.teamSpirit, events: res.events, trajectory: tr, playerId: res.playerId, stats });
+  return r.entries.length ? r.entries.reduce((s, e) => s + e.effective, 0) / r.entries.length : 0;
+}
+// cambio relativo por bloque entre `before` y los pesos actuales de la red
+function blockChanges(net, before) {
+  const after = net.getFlat(); const perBlock = {}; let off = 0;
+  for (const p of net.paramList()) {
+    const b = perBlock[p.blockId] || (perBlock[p.blockId] = { name: BLOCKS[net.genome.blocks.find((x) => x.id === p.blockId).type].name, d2: 0, w2: 0 });
+    for (let i = 0; i < p.array.length; i++) { b.d2 += (after[off + i] - before[off + i]) ** 2; b.w2 += before[off + i] ** 2; }
+    off += p.array.length;
+  }
+  let top = null;
+  for (const [id, b] of Object.entries(perBlock)) { b.relChange = Math.sqrt(b.d2) / Math.max(1e-8, Math.sqrt(b.w2)); delete b.d2; delete b.w2; if (!top || b.relChange > top.relChange) top = { blockId: id, name: b.name, relChange: b.relChange }; }
+  return { perBlock, top };
+}
+export async function evolutionRound({ net, genome, rival, soldiers = 1, seeds = [1], cfg = {}, rng = Math.random, play = playHeadless }) {
+  const g = normalize(genome);
+  const plan = planEvolution(net, { ...cfg, frozen: cfg.frozen ?? g.frozen }, rng);
+  const frozenStats = JSON.stringify(g.reward.stats || {}); // todas las copias se miden con la misma normalización
+  const scratch = compile(g);
+  const specs = [];
+  for (const cand of plan.candidates) {
+    scratch.setFlat(cand);
+    const me = { type: 'net', genome: { ...g, weights: scratch.serialize() }, learn: true };
+    seeds.forEach((seed, j) => specs.push({ seed, left: j % 2 === 0 ? me : rival, right: j % 2 === 0 ? rival : me, soldiers: typeof soldiers === 'function' ? soldiers(j) : soldiers }));
+  }
+  const results = await Promise.all(specs.map((spec) => play(spec)));
+  const n = Math.max(1, seeds.length);
+  const fitness = plan.candidates.map((_, i) => { let s = 0; for (let j = 0; j < seeds.length; j++) s += meanEffectiveOf(g, results[i * seeds.length + j], JSON.parse(frozenStats)); return s / n; });
+  const before = net.getFlat();
+  const r = applyEvolution(net, plan, fitness, cfg);
+  const { perBlock, top } = blockChanges(net, before);
+  const lesson = top ? { blockId: top.blockId, name: top.name, relChange: top.relChange, bulb: top.relChange > g.learning.sleep.lessonThreshold } : null;
+  return { fitness, lesson, update: { kind: 'evolution', population: plan.candidates.length, sigma: plan.sigma, games: specs.length, meanFitness: r.mean, bestFitness: r.best, perBlock, top } };
+}
+
 // ---------- aprender de partidas ----------
 // entries = [{game, entry}]: un episodio por (partida, soldado); dos partidas nunca se mezclan (spec/04 §10.1)
 function episodesFromRewards(entries) {
@@ -223,7 +266,7 @@ export function learnFromGames({ net, genome, games, optim, cfg = {} }) {
   const update = applyUpdate(net, pg.grads, optim, { lr: lc.lr, clipNorm: lc.clipNorm, optimizer: lc.optimizer, frozen: g.frozen });
   const threshold = g.learning.sleep.lessonThreshold;
   const lesson = update.top ? { blockId: update.top.blockId, name: update.top.name, relChange: update.top.relChange, bulb: update.top.relChange > threshold } : null;
-  return { imagination, emotions, episodes: episodes.map((ep) => ({ game: ep.game, soldierId: ep.soldierId, steps: ep.steps.length })), update: { loss: pg.stats.loss, entropy: pg.stats.entropy, valueLoss: pg.stats.valueLoss, gradNorm: update.gradNorm, clipped: update.clipped, perBlock: update.perBlock, top: update.top, steps: pg.stats.steps }, lesson, rewards: { steps, meanEffective: steps ? sumEff / steps : 0 }, stats: pg.stats };
+  return { imagination, emotions, episodes: episodes.map((ep) => ({ game: ep.game, soldierId: ep.soldierId, steps: ep.steps.length })), update: { kind: 'gradient', loss: pg.stats.loss, entropy: pg.stats.entropy, valueLoss: pg.stats.valueLoss, gradNorm: update.gradNorm, clipped: update.clipped, perBlock: update.perBlock, top: update.top, steps: pg.stats.steps }, lesson, rewards: { steps, meanEffective: steps ? sumEff / steps : 0 }, stats: pg.stats };
 }
 
 // ---------- estado de Adam en disco y aprendiz reutilizable (entrenador y duelos) ----------
@@ -273,16 +316,27 @@ export function makeLearner(genome) {
   const net = compile(g);
   const dir = join(netsDir(), g.id);
   const optim = loadOptim(net, dir);
+  const method = g.learning.method || 'gradient';
   const learn = (games, { lrScale = 1 } = {}) => {
     const lc = { ...g.learning.gradient, lr: g.learning.gradient.lr * lrScale };
     for (const game of games) if (!game.rewards) { const gameId = game.events && game.events[0] ? game.events[0].game : null; game.rewards = assignRewards({ reward: g.reward, teamSpirit: g.traits.teamSpirit, events: game.events, trajectory: game.trajectory, playerId: game.playerId, stats: g.reward.stats || (g.reward.stats = {}), extraTerms: gameId ? takeFeedback(g.id, gameId, g.reward.slapCaress ?? 1) : null }); absorbGame(g, game); }
+    if (method === 'evolution') return null; // la evolución no aprende partida a partida (spec/04 §10.2); la memoria sí
     const r = learnFromGames({ net, genome: g, games, optim, cfg: lc });
     applyImagination(g, r.imagination);
     g.weights = net.serialize();
     return r;
   };
+  // paso de evolución tras un duelo o una exhibición (spec/04 §10.2): copias contra esa misma rival
+  const evolve = async ({ rival, seed = 0, soldiers = 1, play } = {}) => {
+    const ev = g.learning.evolution;
+    const seeds = Array.from({ length: Math.max(1, ev.gamesPerCandidate || 1) }, (_, j) => seed + 100003 + j);
+    const sold = (j) => (soldiers === 'random' ? 1 + makeRng(seed + 100003 + j).int(4) : soldiers);
+    const out = await evolutionRound({ net, genome: g, rival, soldiers: sold, seeds, cfg: { ...ev, frozen: g.frozen }, rng: makeRng(seed + 7), play });
+    g.weights = net.serialize();
+    return out;
+  };
   return {
-    net, genome: g, optim, learn,
+    net, genome: g, optim, learn, method, evolve,
     review: (games) => learn(games, { lrScale: 1 }),
     addStats: (s) => { g.stats.games += s.games || 0; g.stats.wins += s.wins || 0; g.stats.kills += s.kills || 0; g.stats.deaths += s.deaths || 0; },
     save: () => {
@@ -343,12 +397,12 @@ export function createTrainer(opts = {}) {
     learn: opts.learn || {},
   };
   const tr = {
-    id: `t${trainerSeq++}`, netId: cfg.netId, config: cfg, status: 'queued', games: 0, updates: 0, curve: [], rooms: [], sampleGames: [], startedAt: null, lastLesson: null, error: null,
+    id: `t${trainerSeq++}`, netId: cfg.netId, config: cfg, status: 'queued', games: 0, updates: 0, steps: 0, curve: [], rooms: [], sampleGames: [], startedAt: null, lastLesson: null, error: null,
     _stop: false, _paused: false, on,
     stop() { this._stop = true; this._paused = false; if (['queued', 'running', 'paused'].includes(this.status)) { this.status = 'stopped'; emit('training', this.info()); } },
     pause() { if (this.status === 'running') { this._paused = true; this.status = 'paused'; emit('training', this.info()); } },
     resume() { if (this.status === 'paused') { this._paused = false; this.status = 'running'; emit('training', this.info()); } },
-    info() { return { id: this.id, netId: this.netId, status: this.status, games: this.games, updates: this.updates, startedAt: this.startedAt }; },
+    info() { return { id: this.id, netId: this.netId, status: this.status, games: this.games, updates: this.updates, steps: this.steps, startedAt: this.startedAt }; },
     async start() { return run(this); },
   };
   async function run(t) {
@@ -448,17 +502,19 @@ export function createTrainer(opts = {}) {
       const trajectories = {}; for (const p of room.players) if (p.agentType === 'net') trajectories[p.id] = { netId: p.netId, soldiers: room.agents[p.id].trajectories };
       return { playerId: me.id, ...gameSummary({ result: room.result, events: room.events, trajectories }, me.id) };
     };
-    const record = (k, res) => {
+    // registra una partida de la red real; opts: intoBatch (lote del gradiente), kind y semilla/soldados propios
+    const record = (k, res, opts = {}) => {
       const traj = res.trajectories[res.playerId];
       const gameId = res.events && res.events[0] ? res.events[0].game : null;
       const rewards = assignRewards({ reward: g.reward, teamSpirit: g.traits.teamSpirit, events: res.events, trajectory: traj, playerId: res.playerId, stats: g.reward.stats || (g.reward.stats = {}), extraTerms: gameId ? takeFeedback(g.id, gameId, g.reward.slapCaress ?? 1) : null });
       absorbGame(g, { playerId: res.playerId, events: res.events, rewards });
       const eff = rewards.entries.length ? rewards.entries.reduce((s, e) => s + e.effective, 0) / rewards.entries.length : 0;
-      batch.push({ events: res.events, trajectory: traj, playerId: res.playerId, rewards, sample: k % 20 === 0, k, seed: cfg.seed + k, soldiers: res.soldiers, rivalKind: res.rivalKind, rivalId: res.rivalId || null, win: res.win, kills: res.kills, deaths: res.deaths });
+      const item = { events: res.events, trajectory: traj, playerId: res.playerId, rewards, sample: opts.sample ?? k % 20 === 0, k, seed: opts.seed ?? cfg.seed + k, soldiers: opts.soldiers ?? res.soldiers, rivalKind: res.rivalKind, rivalId: res.rivalId || null, win: res.win, kills: res.kills, deaths: res.deaths };
+      if (opts.intoBatch !== false) batch.push(item);
       t.games++;
       g.stats.games++; g.stats.wins += res.win; g.stats.kills += res.kills; g.stats.deaths += res.deaths;
       wins.push(res.win);
-      const point = { game: t.games, reward: eff, win: res.win, kills: res.kills, deaths: res.deaths, seed: cfg.seed + k, rival: res.rivalKind };
+      const point = { game: t.games, reward: eff, win: res.win, kills: res.kills, deaths: res.deaths, seed: item.seed, rival: res.rivalKind, ...(opts.kind ? { kind: opts.kind } : {}) };
       t.curve.push(point); if (t.curve.length > 5000) t.curve.shift();
       emit('curve', { id: t.id, trainingId: t.id, netId: g.id, point });
       if (wins.length >= 20) {
@@ -472,6 +528,7 @@ export function createTrainer(opts = {}) {
           appendLog({ type: 'milestone', netId: g.id, trainingId: t.id, kind: 'winrate', value: rate, n: 20, snapshot: milestoneN });
         }
       }
+      return item;
     };
     const doneBy = () => {
       const d = cfg.duration;
@@ -486,19 +543,57 @@ export function createTrainer(opts = {}) {
       }
       return null;
     };
+    // ---- cómo aprende (spec/04 §10.2): gradiente, evolución o ambos ----
+    const method = g.learning.method || 'gradient';
+    const evoCfg = g.learning.evolution, bothCfg = g.learning.both;
+    const playAsync = pool ? (spec) => pool.run({ type: 'play', seed: spec.seed, left: spec.left, right: spec.right, soldiers: spec.soldiers }) : playHeadless;
+    let cycleGames = 0, cycleSteps = 0;
+    const runEvolutionStep = async () => {
+      const e = t.steps;
+      const rival = pickRival(e);
+      const nG = Math.max(1, evoCfg.gamesPerCandidate || 1);
+      const base = cfg.seed + 100003 * (e + 1);
+      const sold = soldiersFor(e);
+      const out = await evolutionRound({ net, genome: g, rival: rival.spec, soldiers: sold, seeds: Array.from({ length: nG }, (_, j) => base + j), cfg: { ...evoCfg, frozen: g.frozen }, rng: makeRng(cfg.seed + 7 * (e + 1)), play: playAsync });
+      t.games += out.update.games; t.steps++; t.updates++;
+      // la red real contra el mismo rival: cuenta en la curva y se guarda (a x1/x10, en una sala viva)
+      const me = { type: 'net', genome: { ...g, weights: net.serialize() }, learn: true };
+      const spec = { seed: base + nG, left: e % 2 ? rival.spec : me, right: e % 2 ? me : rival.spec, soldiers: sold, rivalKind: rival.kind };
+      const res = cfg.speed !== 'turbo' ? await playLive(spec) : await playAsync(spec);
+      const game = record(t.games, { ...res, rivalKind: rival.kind }, { intoBatch: false, kind: 'showcase', sample: true, seed: spec.seed, soldiers: sold });
+      const x = prepareExperience({ genome: g, games: [game], optim, cfg: lc });
+      saveSample(game, x.emotions);
+      const refs = game.events && game.events[0] ? [{ game: game.events[0].game }] : [];
+      appendLog({ type: 'update', kind: 'evolution', netId: g.id, trainingId: t.id, step: e, games: out.update.games, meanFitness: out.update.meanFitness, bestFitness: out.update.bestFitness, top: out.update.top, refs });
+      if (out.lesson) appendLog({ type: 'lesson', netId: g.id, trainingId: t.id, blockId: out.lesson.blockId, name: out.lesson.name, relChange: out.lesson.relChange, bulb: out.lesson.bulb, refs });
+      t.lastLesson = out.lesson;
+      emit('sleep', { id: t.id, netId: g.id, games: out.update.games, update: { ...out.update, step: e } });
+      if (out.lesson) emit('lesson', { id: t.id, netId: g.id, lesson: out.lesson });
+      saveAll();
+      rivals.self = snapshotSelf();
+    };
+    const evolutionTurn = () => method === 'evolution' || (method === 'both' && cycleGames >= Math.max(0, bothCfg.gradientGamesPerCycle));
     let reason = null, k = 0;
     try {
       while (!reason) {
         while (t._paused && !t._stop) await new Promise((r) => setTimeout(r, 50));
         if (t._stop) { reason = 'stopped'; break; }
-        if (cfg.speed !== 'turbo') { const spec = playSpec(k); const res = await playLive(spec); record(k, { ...res, rivalKind: spec.rivalKind }); k++; }
-        else if (!pool) { await new Promise((r) => setImmediate(r)); const spec = playSpec(k); const res = playOne(spec); record(k, { ...res, rivalKind: spec.rivalKind }); k++; } // cede el bucle de eventos: el servidor sigue respondiendo
+        if (evolutionTurn()) {
+          if (batch.length) sleep(); // en 'ambos', el gradiente pendiente va antes que la evolución
+          await runEvolutionStep();
+          if (method === 'both' && ++cycleSteps >= Math.max(1, bothCfg.evolutionStepsPerCycle)) { cycleGames = 0; cycleSteps = 0; }
+          reason = doneBy();
+          if (!reason && t._stop) reason = 'stopped';
+          continue;
+        }
+        if (cfg.speed !== 'turbo') { const spec = playSpec(k); const res = await playLive(spec); record(k, { ...res, rivalKind: spec.rivalKind }); k++; cycleGames++; }
+        else if (!pool) { await new Promise((r) => setImmediate(r)); const spec = playSpec(k); const res = playOne(spec); record(k, { ...res, rivalKind: spec.rivalKind }); k++; cycleGames++; } // cede el bucle de eventos: el servidor sigue respondiendo
         else {
-          const n = Math.min(cfg.workers, batchSize - batch.length || batchSize);
+          const n = Math.min(cfg.workers, batchSize - batch.length || batchSize, method === 'both' ? Math.max(1, bothCfg.gradientGamesPerCycle - cycleGames) : Infinity);
           const specs = Array.from({ length: n }, (_, i) => playSpec(k + i));
           const results = await Promise.all(specs.map((spec) => pool.run({ type: 'play', seed: spec.seed, left: spec.left, right: spec.right, soldiers: spec.soldiers })));
           results.forEach((res, i) => { if (!reason && !t._stop) { record(k + i, { ...res, rivalKind: specs[i].rivalKind }); reason = doneBy(); } });
-          k += n;
+          k += n; cycleGames += n;
           if (batch.length >= batchSize) sleep();
           if (reason) break;
           continue;

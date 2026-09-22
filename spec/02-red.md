@@ -93,6 +93,11 @@ Columnas: tipo · parámetros (con rango y valor por defecto) · pesos (forma) �
 | `attention` | `heads` ∈ 1..8 (def 1) · `keyDim` ∈ 4..128 (def 16) | `Wq[Dctx·heads·keyDim]`, `Wk[Dcand·heads·keyDim]`, `Wv[Dcand·heads·keyDim]` | (`ctx` consulta, `cand`/`move` claves) → `ctx[heads·keyDim]` + pesos de atención visibles (`decision.attention`) |
 | `pool` (resumen) | `op` ∈ {mean, max} | — | `cand`/`move` → `ctx[D]` |
 
+Disposición de pesos (todas las matrices): `W[i·out + j]` = peso de la entrada `i` a la unidad `j`
+(`y_j = b_j + Σ_i x_i·W[i·out + j]`); en memoria las entradas van concatenadas `[x…, h…]`.
+Inicialización Xavier uniforme `U(−√(6/(in+out)), +√(6/(in+out)))` con el `rng` recibido; sesgos a 0
+(`bf` del LSTM a 1; `g` de `norm` a 1); `q0` de atención Xavier.
+
 Activaciones: `relu(x)=max(0,x)` · `leaky = x>0 ? x : 0.01x` · `gelu = 0.5x(1+tanh(√(2/π)(x+0.044715x³)))`
 · `sine = sin(x)` · `sigmoid = 1/(1+e^-x)`. Derivadas exactas de esas fórmulas (el test numérico manda).
 
@@ -123,24 +128,62 @@ como constante** (sin gradiente hacia los compañeros) 🧭: estable y suficient
 Sin `hand.choose` la red **no puede disparar**: `validate` lo marca como error si `learning`/uso lo
 exige (una red "solo pies" es válida como pieza para trasplantar, pero no puede jugar).
 
-## 5. `shared/nn.js` — API
+## 5. `shared/nn.js` y `shared/genome.js` — API exacta
 ```js
-compile(genome) → net           // valida (lanza GenomeError con {code, blockId?, message, example})
-net.forward(obs, state) → { outputs: {choose:{scores,probs}, adjust:{mu}, move:{scores,probs,mu}, value:V},
-                             activations: {blockId: Float64Array|Float64Array[]}, attention: {...}, state' }
-net.backward(tape, grads) → gradientes por bloque (mismas claves que weights); acumulables
-net.params() / net.setParams(flat) / net.paramCount()
-net.serialize() → weights (para el genoma); net.zeroState() → estado de memoria inicial
-initWeights(block, rng) · countParams(genome)
+// genome.js
+BLOCKS                                  // catálogo (§4) con name/icon/group/level/explain/example/params/streams
+LIMITS                                  // spec/00 §6 (también en constants.js)
+validate(genomeOrText) → {ok, errors:[{code, blockId?, wire?, message, example}], warnings:[...]}
+normalize(genome) → genome              // copia con las secciones opcionales rellenas con sus defaults
+repair(genome, rng) → {genome, fixes}   // rellena pesos que falten (Xavier con semilla), quita cables sueltos
+outDims(genome) → {blockId: {stream, dim}}   // dimensión de salida de cada bloque (exige grafo válido)
+countParams(genome) → n
+newGenome({id, name, blocks, wires, ...}, rng) → genome válido con pesos
+// nn.js
+compile(genome) → net                   // lanza GenomeError {code, blockId?, message, example} si no valida
+net.genome                              // el genoma normalizado
+net.zeroState() → state                 // {blockId: Float64Array (echo/gru/teamMemory: h) | {h, c} (lstm)}
+net.forward(obs, state) → out
+net.backward(tape, gradOut, stateGradNext) → {grads: {blockId: {W: Float64Array, ...}}, stateGrad}
+net.paramList() → [{blockId, key, array}] · net.getFlat() → Float64Array · net.setFlat(flat)
+net.flattenGrads(grads) → Float64Array   // mismo orden que getFlat (para optimizadores y tests)
+net.paramCount() · net.serialize() → weights (arrays JSON con precisión completa)
+initWeights(block, inDim, rng) → weights del bloque
 ```
+- **`obs`** = `{ctx: {blockId: Float64Array}, cand: {blockId: Float64Array[]}, move: {blockId:
+  Float64Array[]}, team: {blockId: Float64Array}}`: una entrada **por cada bloque ojo** del genoma,
+  indexada por su `id`, con la dimensión de `outDims` (las corrientes `cand`/`move` son arrays de
+  vectores, uno por candidato/destino). `team[blockId]` = lectura de la memoria de equipo (media de
+  los `h` de los compañeros vivos; si falta, se usa el `h` propio). Esto desacopla la red de
+  `percept.js`: un test puede alimentar cualquier vector.
+- **`out`** = `{outputs: {choose: {scores: Float64Array(N)} | null, adjust: {mu: Float64Array[N]
+  (params)} | null, move: {scores: Float64Array(9), mu: Float64Array[9](2) | null} | null,
+  value: number | null}, activations: {blockId: Float64Array | Float64Array[]}, attention:
+  {blockId: Float64Array[heads] (N)}, state, tape}`. Puntuaciones **crudas**: la temperatura, el
+  softmax y el muestreo son de `policy.js` (spec/03 §7).
+- **`gradOut`** = `{choose: Float64Array(N) | null, adjust: Float64Array[N] | null, move: {scores,
+  mu} | null, value: number | null}` = ∂L/∂salida. `stateGradNext` = `{blockId: ∂L/∂(estado de
+  salida)}` que llega del paso siguiente (BPTT hacia atrás en el tiempo); `backward` devuelve
+  `stateGrad` = ∂L/∂(estado de entrada) para encadenar con el paso anterior. Los gradientes de
+  pesos de varias llamadas se **suman** fuera (`grads` es nuevo en cada llamada).
 - `forward` es puro salvo por `state` (inmutable: devuelve uno nuevo). Coste objetivo < 5 ms para un
   genoma de 100 k parámetros con N = 24.
 - `tape`: lo que `forward` guarda para `backward` (entradas y pre-activaciones por bloque).
+- Regla de difusión (§3.2) en la práctica: un bloque cuyas entradas mezclan `ctx` y `cand`
+  concatena, para cada candidato `i`, `[ctx…, cand_i…]` en el orden de `wires`; el gradiente hacia
+  `ctx` es la suma sobre los candidatos.
+- `validate` con texto: si `text.length > LIMITS.genomeBytes` → `limit` **antes** de `JSON.parse`;
+  JSON inválido → `format`. Con objeto: campos → bloques → cables → dimensiones → pesos (se para en
+  la primera fase con errores). Secciones opcionales ausentes (`traits`, `imagination`, `reward`,
+  `learning`, `frozen`, `lineage`, `stats`, `emblem`) se aceptan (defaults); `weights` que falten
+  para un bloque con parámetros → `weights-shape` (usa `repair`).
 - Estabilidad: `softmax` con resta del máximo; `LayerNorm` con `eps`; ningún `NaN` sale de `forward`
   (si un peso es `NaN`, `validate` lo rechaza antes; si aparece en cálculo → `NetError`, y el agente
   cae al disparo de emergencia `0.1*x`, registrado como evento `error`).
 
-## 6. Validación (`validate(genome) → {ok, errors:[{code, blockId?, wireId?, message, example}], warnings}`)
+## 6. Validación (`validate(genome, {forPlay} = {}) → {ok, errors:[{code, blockId?, wire?, message, example}], warnings}`)
+`forPlay: true` exige `hand.choose` (`missing-choose`); sin él, una red "solo pies" o una pieza para
+trasplantar valida. Avisos (`warnings[].code`): `unconnected` (bloque sin camino ojo → mano/pie).
 Códigos (todos con mensaje en español y ejemplo de cómo arreglarlo):
 `format` · `id` · `name` · `unknown-field` · `block-type` · `block-param` (rango) · `wire-ref`
 (id inexistente) · `stream-mix` · `cycle` · `dim` · `missing-choose` · `duplicate-hand` ·
@@ -157,8 +200,10 @@ Códigos (todos con mensaje en español y ejemplo de cómo arreglarlo):
    norm, echo/gru/lstm con 3 pasos de BPTT, teamMemory) y para 20 grafos aleatorios válidos:
    error relativo < 1e-6 en doble precisión.
 2. **Propiedades**: `validate` acepta los 4 genomas de plantilla; rechaza cada código de error con un
-   caso mínimo; 2 000 genomas aleatorios generados por `mutate` (spec/05) siempre validan;
-   `serialize → compile → serialize` idéntico bit a bit; `forward` determinista.
+   caso mínimo; 20 grafos aleatorios válidos (generador propio del test) compilan y pasan el
+   gradiente numérico (los 2 000 genomas de `mutate` se prueban en F5, spec/05 §9);
+   `serialize → compile → serialize` idéntico bit a bit; `forward` determinista. Fórmulas exactas
+   contra referencias escritas en el test (densa, echo, GRU, LSTM, atención, norm, pool, add/mul).
 3. **Límites**: genoma con 65 bloques, 513 unidades, 2 000 001 parámetros, 49 MB de JSON → rechazo
    en < 50 ms cada uno (sin reservar memoria).
 4. Estado de memoria: dos soldados del mismo jugador comparten `teamMemory` (media); un soldado solo

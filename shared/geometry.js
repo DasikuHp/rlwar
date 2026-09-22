@@ -59,3 +59,15 @@ export function slideMove({ from, requested, soldiers = [], obstacles = [], self
   if (!best) return stay('blocked', true);
   return { to: best, slid: true, stayed: false, reason: 'slide' };
 }
+
+// Línea de tiro (spec/01 §5): segmento recto a→b sin cruzar ningún obstáculo (rect sin ampliar,
+// bordes incluidos; muestreo cada 0.25 u; un segmento más corto usa solo su extremo).
+export function los(a, b, obstacles) {
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  const n = Math.max(1, Math.ceil(len / 0.25));
+  for (let k = 1; k <= n; k++) {
+    const t = k / n, x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t;
+    for (const o of obstacles) if (x >= o.x && x <= o.x + o.w && y >= o.y && y <= o.y + o.h) return false;
+  }
+  return true;
+}

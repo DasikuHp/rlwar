@@ -107,10 +107,10 @@ await check('decideShot (Vidente): elección, margen, ajuste, valor, logp y dete
   assert.equal(r.choice.expr, adj.expr); assert.equal(r.choice.mode, adj.mode); assert.equal(r.choice.family, chosen.family); assert.deepEqual(r.choice.params, adj.params);
   assert.equal(r.choice.angle, adj.mode === 'ode2' ? adj.angle : null);
   assert.ok(near(d.value, out.outputs.value, 1e-9)); assert.equal(d.attention, null);
-  assert.ok(Array.isArray(d.attribution) && d.attribution.length === 3, 'un renglón por ojo (Rasgos, Candidatos, Simulador)');
+  assert.ok(Array.isArray(d.attribution) && d.attribution.length === 4, 'un renglón por ojo (Rasgos, Candidatos, Simulador, Destinos)');
   const shareSum = d.attribution.reduce((s, a) => s + a.share, 0);
   assert.ok(near(shareSum, 1, 1e-9) || d.attribution.every((a) => a.share === 0));
-  for (const a of d.attribution) assert.ok(['f', 'c', 's'].includes(a.blockId) && typeof a.name === 'string' && typeof a.drop === 'number');
+  for (const a of d.attribution) assert.ok(['f', 'c', 's', 'm'].includes(a.blockId) && typeof a.name === 'string' && typeof a.drop === 'number');
   assert.ok(r.memory && typeof r.memory === 'object');
   const r2 = pol.decideShot({ net, genome: g, state: st, soldierId: 'me', memory: net.zeroState(), team: null, rng: makeRng(7), attribution: true });
   const strip = (x) => { const y = clone(x); delete y.ms; return y; };
@@ -273,7 +273,10 @@ await check('agents/net.js: chooseShot y chooseMove con el contrato de agentes; 
   const broken = registry.createAgent('net', { genome: { format: 1, id: 'rota-1', name: 'Rota', blocks: [B('c', 'eye.candidates')], wires: [] } });
   const fb = broken.chooseShot({ soldiers: st.soldiers, obstacles: st.obstacles, soldier: me, history: [], rng: makeRng(1), moveOptions: [], state: st });
   assert.equal(fb.mode, 'function'); assert.equal(fb.expr, '0.1*x'); assert.ok(fb.decision && typeof fb.decision.error === 'string');
-  assert.equal(broken.chooseMove({ soldiers: st.soldiers, obstacles: st.obstacles, soldier: me, shot: null, moveOptions: [], history: [], rng: makeRng(1), state: st }), 'stay');
+  const bm = broken.chooseMove({ soldiers: st.soldiers, obstacles: st.obstacles, soldier: me, shot: null, moveOptions: [], history: [], rng: makeRng(1), state: st });
+  assert.ok(bm === 'stay' || bm.stay === true, 'sin Pies (o rota) se queda');
+  const really = registry.createAgent('net', { genome: { format: 1, id: 'rota-2', name: 'Rota', blocks: 'x', wires: [] } });
+  assert.equal(really.broken, true); assert.equal(really.chooseMove({ soldiers: st.soldiers, obstacles: st.obstacles, soldier: me, shot: null, moveOptions: [], history: [], rng: makeRng(1), state: st }), 'stay');
 });
 
 // ---------- sala ----------

@@ -11,3 +11,7 @@ $null
 agent/.agent-session.json
 # Experimentos desechables (su código se borra; solo sus números pasan a spec/)
 experimentos/
+# Datos del laboratorio (redes, partidas, registro): no son código
+evo/nets/
+evo/games/
+evo/log.jsonl

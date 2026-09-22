@@ -256,6 +256,7 @@ check('simulateCandidate/simulatorFeatures: igual que el solver en el mundo; kil
 // ---------- destinos ----------
 check('moveDestinations: 9 rasgos exactos en campo abierto, espejo para el derecho, y pegado a obstáculo', () => {
   const st = scene(); st.obstacles = []; const me = st.soldiers[0];
+  st.soldiers.find((s) => s.id === 'a1').x = -16; // que ningún aliado esté a menos de 1 u de un destino
   const dests = P.moveDestinations(st, me);
   assert.equal(dests.length, 9);
   const enemies = st.soldiers.filter((s) => s.alive && s.team === 'right'); const allies = st.soldiers.filter((s) => s.alive && s.team === 'left' && s.id !== 'me');
@@ -271,7 +272,7 @@ check('moveDestinations: 9 rasgos exactos en campo abierto, espejo para el derec
     vecNear(d.feat, [(d.to.x - me.x) / 2, (d.to.y - me.y) / 2, k === 0 ? 1 : 0, 0, withLos / 4, (dist(d.to, e1) - d0) / 2, Math.min(1, allyD / 10), 1, 0], 1e-9, `dest ${k}`);
     assert.equal(d.cover, withLos); assert.ok(near(d.distEnemy, dist(d.to, e1)));
   }
-  const right = scene({ team: 'right' }); right.obstacles = [];
+  const right = scene({ team: 'right' }); right.obstacles = []; right.soldiers.find((s) => s.id === 'a1').x = 16;
   const dr = P.moveDestinations(right, right.soldiers[0]);
   for (let k = 0; k < 9; k++) vecNear(dr[k].feat, dests[k].feat, 1e-9, `espejo ${k}`);
   assert.ok(near(dr[1].to.x, right.soldiers[0].x - 2), 'en el mundo, "adelante" para el derecho es −x');

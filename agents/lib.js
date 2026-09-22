@@ -4,7 +4,7 @@
 // Toda aleatoriedad recibe un `rng` (función () → [0,1)); por defecto Math.random (spec/01 §5).
 import { tryCompile } from '../shared/parser.js';
 import { simulateShot } from '../shared/solver.js';
-import { slideMove } from '../shared/geometry.js';
+import { slideMove, los } from '../shared/geometry.js';
 import { gaussFrom } from '../shared/rng.js';
 import { STEP, MAX_STEPS, MODES, TEAMS, MOVE_RADIUS, MOVE_DIRS } from '../shared/constants.js';
 
@@ -195,16 +195,8 @@ export function searchShot(state, soldierId, tries = 40, opts = {}) {
 
 // ---------- movimiento (spec/01 §3 y §5) ----------
 
-// Línea de tiro: segmento recto a→b sin cruzar ningún obstáculo (muestreo cada 0.25 u)
-export function los(a, b, obstacles) {
-  const len = Math.hypot(b.x - a.x, b.y - a.y);
-  const n = Math.max(1, Math.ceil(len / 0.25));
-  for (let k = 1; k <= n; k++) {
-    const t = k / n, x = a.x + (b.x - a.x) * t, y = a.y + (b.y - a.y) * t;
-    for (const o of obstacles) if (x >= o.x && x <= o.x + o.w && y >= o.y && y <= o.y + o.h) return false;
-  }
-  return true;
-}
+// Línea de tiro: vive en shared/geometry.js (la usan también la percepción y la sala)
+export { los };
 
 // Los 9 destinos (quedarse + 8 direcciones a MOVE_RADIUS), ya deslizados, con rasgos:
 // cover = enemigos vivos con línea de tiro al destino · distEnemy = distancia al enemigo vivo más

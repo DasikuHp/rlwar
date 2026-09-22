@@ -173,7 +173,8 @@ eyeLayout(block) → [{index, name}]                   // nombres en español de
 - Cupo de la Imaginación: `count_f = floor(n·w_f/Σw)` y los restos por mayor parte fraccionaria
   (empate → orden de `FAMILY_ORDER`). Rejilla por familia = producto cartesiano de sus listas
   (× objetivos en `line`, `parabola`, `sine`; `wild` × sus 7 plantillas). Se baraja con Fisher–Yates
-  (`j = floor(rng()·(i+1))`, de atrás adelante) y se toman los `count_f` primeros; si la rejilla es
+  (`j = floor(rng()·(i+1))`, de atrás adelante) y se toman los `count_f` primeros (en `line`, la recta
+  exacta al objetivo más cercano, jitter 0, va siempre la primera); si la rejilla es
   menor que el cupo, se repite desde el principio con `p1 += (rng()·2−1)·0.05`. Objetivos: enemigos
   vivos ordenados por distancia (`nearest`: solo el primero); si no hay enemigos vivos, objetivo
   virtual en `(sx'+20, sy)`.
@@ -213,6 +214,8 @@ attribute(net, obs, memory, chosen, phase) → [{blockId, name, drop, share}]
   `slideMove`; el registro guarda `moveAdjust` (spec/03 §7). Sin `foot.move`: `move = 'stay'`.
 - Sin `hand.value`: `value = null`. Atribución solo si `attribution:true`.
 - Orden de consumo del `rng` en `decideShot`: 1) `sampleIndex` 2) los `gauss` del ajuste.
+  La Imaginación usa su propio `rng` derivado del estado (`shots` y la posición del soldado en
+  `state.soldiers`), así dos salas con la misma semilla imaginan lo mismo aunque los ids difieran.
 
 ### 9.3 Ampliaciones de `server/rooms.js` (F3)
 - `room.shotLog` (máx. 40) y `snapshot().shotLog` (últimos 16; `points` solo en los últimos 4):
@@ -239,4 +242,4 @@ attribute(net, obs, memory, chosen, phase) → [{blockId, name, drop, share}]
   memoryFor(soldierId), trajectories}`; guarda `memory` por soldado y calcula `team` como media de
   los `h` de los otros soldados vivos del mismo jugador (última escritura). `chooseShot` devuelve
   `{mode, expr, angle, family, params, exprLocal, reason: '', decision}`; `chooseMove` devuelve
-  `{x, y, decision}` o `'stay'`. Ante cualquier excepción devuelve `0.1*x` y `decision.error`.
+  `{x, y, stay?, decision}` (`stay:true` = quedarse; la sala lo trata como `'stay'`). Ante cualquier excepción devuelve `0.1*x` y `decision.error`.

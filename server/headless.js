@@ -7,7 +7,7 @@ export function playGame({ seed, left, right, soldiers = 2, maxTurns = 400, hook
   const room = new Room('sin pantalla', { soldiersPerPlayer: soldiers, seed, headless: true });
   const seat = (spec, team) => {
     const s = typeof spec === 'string' ? { type: spec } : (spec || {});
-    const r = room.addAgent(s.type, { level: s.level ?? 3, temperature: s.temperature ?? 0, team, name: s.name ?? null, netId: s.netId ?? null });
+    const r = room.addAgent(s.type, { level: s.level ?? 3, temperature: s.temperature ?? 0, team, name: s.name ?? null, netId: s.netId ?? null, genome: s.genome ?? null, learn: !!s.learn });
     if (r.error) throw new Error(r.error);
   };
   seat(left, 'left');

@@ -73,6 +73,13 @@ bucle de 300 intentos de `nextTurn` (187); y comparaciones de borde equivalentes
 Vistos a mano los tres `*` de la línea 285: `G.g` y `m2` se cazan (error 0.48 y 0.72); solo el
 de `W.g` sobrevive por la inicialización a 1.
 
+**Segunda tirada** (tras el cambio autorizado de `red.spec`: pesos perturbados, muestreo completo,
+Atención con dos entradas; muestra de 200, semilla 23) — cazados **171/200**. Los 29 supervivientes son
+todos `<` → `<=` en bucles sobre typed arrays (equivalentes), `s = 0` → `1` en la atención
+(invariancia del softmax), `||`/`&&` en guardas de nulos que las entradas válidas nunca activan, y
+`1 → 2` en `subarray(1, 3)` de Moverse sin ajuste (rama no usada cuando `adjust:false`). Los cuatro
+gaps reales de la primera tirada (285, 304, 308, 386) ya se cazan.
+
 ### `shared/genome.js` contra `test/red.spec.mjs` (muestra de 150 de 925) — cazados 63/150
 - Líneas 25–58, 86–146: **defaults y catálogo** (recompensa, rasgos, aprendizaje, familias de la
   Imaginación, rangos de parámetros). Son decisiones del usuario → **`test/genoma.spec.mjs` los
@@ -83,7 +90,11 @@ de `W.g` sobrevive por la inicialización a 1.
   (no-objeto, familias/pesos de la Imaginación, `grazeRadius`, rangos de `learning` con genoma
   válido, exactamente 64 bloques / 256 cables, ids de bloque, parámetros `number`/`set`, avisos
   `unconnected` en ambos sentidos, `newGenome` sin nombre) → **cubiertas en `genoma.spec.mjs`**.
-Se vuelve a pasar la tirada con `red.spec + genoma.spec` al cerrar F2.
+**Segunda tirada** con `red.spec + genoma.spec` (muestra de 200, semilla 23) — cazados **167/200**.
+Supervivientes: mínimos/máximos de rangos del catálogo y de `LEARNING_RANGES` que `genoma.spec` no
+fija uno a uno (p. ej. `min: 1` → 2 de `units` en memorias, `[0.5, 10]` de `grazeRadius`), constantes
+del hash del emblema, y comparaciones equivalentes (`>` → `>=` en `n − used`). Ninguno cambia un
+contrato escrito.
 
 ### `shared/templates.js` contra `test/red.spec.mjs` (los 55) — cazados 28/55
 Los 27 supervivientes son las **constantes de las plantillas** (32 → 33 neuronas, semillas 101…104,

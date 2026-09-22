@@ -8,8 +8,21 @@ import * as C from '../shared/constants.js';
 import { genMap } from './mapgen.js';
 import { createAgent, agentMeta, DEFAULT_AGENT } from '../agents/registry.js';
 import { contextFor, moveOptions } from '../agents/lib.js';
+import { familyOf } from '../shared/percept.js';
+import { loadNet } from '../evo/store.js';
 
 const FAST = process.env.GW_FAST === '1';
+
+// polilínea gruesa de un disparo (cada 0.5 u, ≤ 100 puntos) para el registro y las estelas
+function coarsePoints(points) {
+  const out = [];
+  let last = null;
+  for (const p of points) { if (!last || Math.hypot(p[0] - last[0], p[1] - last[1]) >= 0.5) { out.push([p[0], p[1]]); last = p; } }
+  const end = points[points.length - 1];
+  if (end && (!out.length || out[out.length - 1][0] !== end[0] || out[out.length - 1][1] !== end[1])) out.push([end[0], end[1]]);
+  if (out.length > 100) { const k = []; for (let i = 0; i < 100; i++) k.push(out[Math.round(i * (out.length - 1) / 99)]); return k; }
+  return out;
+}
 
 let seq = 1;
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -47,6 +60,9 @@ export class Room {
     this.agents = {};       // agente en proceso por jugador (se crean al empezar; guardan estado)
     this.pending = {};      // por jugador: {agent, choice} del turno en curso (para chooseMove)
     this.animEnd = 0;       // cuándo termina la animación del último disparo (ms)
+    this.shotLog = [];      // F3: disparos con familia/params/minDist/stayed (máx. 40), spec/03 §9.3
+    this.decisions = [];    // F3: últimas 50 decisiones de las redes (sin pantalla)
+    this.lastDecision = null;
   }
 
   broadcast(ev, data) {
@@ -101,7 +117,7 @@ export class Room {
     return this.addAgent(type, { level });
   }
 
-  addAgent(type = DEFAULT_AGENT, { level = 2, team = 'auto', name = null, temperature = 0 } = {}) {
+  addAgent(type = DEFAULT_AGENT, { level = 2, team = 'auto', name = null, temperature = 0, ...rest } = {}) {
     if (this.phase !== 'lobby') return { error: 'La partida ya empezó' };
     if (this.players.length >= C.MAX_PLAYERS) return { error: 'Sala llena' };
     const counts = { [C.TEAMS.LEFT]: 0, [C.TEAMS.RIGHT]: 0 };
@@ -111,16 +127,24 @@ export class Room {
     }
     if (counts[team] >= Math.ceil(C.MAX_PLAYERS / 2)) return { error: 'Ese equipo está lleno' };
     const meta = agentMeta(type);
-    const sameType = this.players.filter((p) => p.agentType === meta.id).length;
+    let netId = null, genome = null;
+    if (meta.id === 'net') {
+      netId = String(type).startsWith('net:') ? String(type).slice(4) : (rest.netId || null);
+      genome = rest.genome || (netId ? loadNet(netId) : null);
+      if (!genome) return { error: `Red no encontrada: ${netId}` };
+      netId = genome.id;
+    }
+    const sameType = this.players.filter((p) => p.agentType === meta.id && (!netId || p.netId === netId)).length;
+    const baseName = name || (genome ? genome.name : `${meta.icon} ${meta.name}`);
     const player = {
-      id: 'p' + seq++, name: (name || `${meta.icon} ${meta.name}`).slice(0, 24) + (sameType ? ` ${sameType + 1}` : ''),
-      token: null, team, isBot: true, agentType: meta.id,
+      id: 'p' + seq++, name: baseName.slice(0, 24) + (sameType ? ` ${sameType + 1}` : ''),
+      token: null, team, isBot: true, agentType: meta.id, netId, genome, learn: !!rest.learn,
       level: Math.max(1, Math.min(3, level | 0)), soldiers: [],
       temperature: Math.max(0, Math.min(1, Number(temperature) || 0)),
     };
     this.players.push(player);
     this.broadcast('state', this.snapshot());
-    return { ok: true, player: { id: player.id, name: player.name, team: player.team, agentType: player.agentType } };
+    return { ok: true, player: { id: player.id, name: player.name, team: player.team, agentType: player.agentType, netId: player.netId } };
   }
 
   start(playerId) {
@@ -136,7 +160,7 @@ export class Room {
       const spots = map.placeSide(p.team, n);
       p.soldiers = [];
       for (const s of spots) {
-        const soldier = { id: 's' + seq++, ownerId: p.id, team: p.team, x: s.x, y: s.y, alive: true, lastExpr: '' };
+        const soldier = { id: 's' + seq++, ownerId: p.id, team: p.team, x: s.x, y: s.y, alive: true, lastExpr: '', turns: 0 };
         this.soldiers.push(soldier);
         p.soldiers.push(soldier);
       }
@@ -147,8 +171,11 @@ export class Room {
     this.lastMove = null;
     this.agents = {};
     this.pending = {};
+    this.shotLog = [];
+    this.decisions = [];
+    this.lastDecision = null;
     for (const p of this.players) {
-      if (p.isBot) this.agents[p.id] = createAgent(p.agentType, { level: p.level || 2, temperature: p.temperature || 0 });
+      if (p.isBot) this.agents[p.id] = this.makeAgent(p);
     }
     // orden de turnos intercalando equipos
     const L = this.players.filter((p) => p.team === C.TEAMS.LEFT);
@@ -177,6 +204,20 @@ export class Room {
     return { ok: true };
   }
 
+  makeAgent(p) {
+    return createAgent(p.agentType, { level: p.level || 2, temperature: p.temperature || 0, netId: p.netId, genome: p.genome, learn: p.learn, attribution: !this.headless });
+  }
+
+  // F3: registra una decisión de red (overlay/moviola) y la emite antes del disparo o del movimiento
+  pushDecision(decision) {
+    if (!decision) return;
+    const { activationsSummary, ...light } = decision;
+    this.lastDecision = light;
+    this.decisions.push(light);
+    if (this.decisions.length > 50) this.decisions.shift();
+    this.broadcast('decision', { decision });
+  }
+
   nextTurn() {
     clearTimeout(this.timer);
     if (this.phase !== 'playing') return;
@@ -191,6 +232,7 @@ export class Room {
       if (!soldiersAlive.length) continue;
       this.cursor[p.id] = (this.cursor[p.id] || 0) + 1;
       const soldier = soldiersAlive[(this.cursor[p.id] - 1) % soldiersAlive.length];
+      soldier.turns = (soldier.turns || 0) + 1;
       this.turn = { playerId: p.id, soldierId: soldier.id, stage: 'shoot', deadline: Date.now() + C.TURN_TIME };
       this.broadcast('state', this.snapshot());
       if (this.headless) return; // sin pantalla: step() ejecuta el turno cuando toque
@@ -230,7 +272,7 @@ export class Room {
     if (this.phase !== 'playing' || !this.turn || this.turn.playerId !== player.id || this.turn.stage !== 'shoot') return;
     const soldier = this.soldiers.find((s) => s.id === this.turn.soldierId);
     if (!soldier) return;
-    const agent = this.agents[player.id] || (this.agents[player.id] = createAgent(player.agentType, { level: player.level || 2, temperature: player.temperature || 0 }));
+    const agent = this.agents[player.id] || (this.agents[player.id] = this.makeAgent(player));
     let choice;
     try {
       choice = agent.chooseShot({
@@ -246,6 +288,7 @@ export class Room {
       this.log(`⚠️ ${player.name} falló al calcular (${e.message})`);
     }
     this.pending[player.id] = { agent, choice };
+    if (choice && choice.decision) this.pushDecision(choice.decision);
     if (choice && choice.reason) this.say(player, soldier, `💭 ${choice.reason}`, 'think');
     // habla primero y dispara después: da tiempo a leer el bocadillo
     const doFire = () => {
@@ -260,7 +303,7 @@ export class Room {
     } else doFire();
   }
 
-  fire(playerId, { mode = C.MODES.FUNCTION, expr = '', angle = 0, move = undefined } = {}) {
+  fire(playerId, { mode = C.MODES.FUNCTION, expr = '', angle = 0, move = undefined, family = null, params = null } = {}) {
     if (this.phase !== 'playing') return { error: 'La partida no está en curso' };
     if (!this.turn || this.turn.playerId !== playerId) return { error: 'No es tu turno' };
     if (this.turn.stage === 'move') return { error: 'Ya disparaste: elige destino o espera' };
@@ -280,6 +323,12 @@ export class Room {
       soldiers: this.soldiers, obstacles: this.obstacles, shooterId: soldier.id,
     });
 
+    let minDist = 30;
+    for (const e of this.soldiers) { if (!e.alive || e.team === soldier.team) continue; for (const [px, py] of shot.points) { const d = Math.hypot(e.x - px, e.y - py); if (d < minDist) minDist = d; } }
+    const fam = family && Array.isArray(params) ? { family, params: params.slice(0, 3) } : familyOf({ mode, expr, angle, team: soldier.team });
+    const logEntry = { turn: this.shots + 1, playerId, soldierId: soldier.id, team: soldier.team, mode, expr: String(expr).slice(0, 200), angle, family: fam.family, params: fam.params, result: { type: shot.result.type, soldierId: shot.result.soldierId ?? null }, minDist, stayed: null, points: coarsePoints(shot.points) };
+    this.shotLog.push(logEntry);
+    if (this.shotLog.length > 40) this.shotLog.shift();
     soldier.lastExpr = `${C.MODE_LABELS[mode]} ${String(expr).slice(0, 80)}`;
     let message;
     if (shot.result.type === 'kill') {
@@ -341,6 +390,8 @@ export class Room {
         this.log(`⚠️ ${shooter.name} falló al moverse (${e.message})`);
         requested = 'stay';
       }
+      if (requested && typeof requested === 'object' && requested.decision) this.pushDecision(requested.decision);
+      if (requested && typeof requested === 'object' && requested.stay === true) requested = 'stay';
       const m = this.move(playerId, requested == null ? 'stay' : requested);
       return { ok: true, result: shot.result, move: m.move };
     }
@@ -374,6 +425,8 @@ export class Room {
       playerId, soldierId: soldier.id, from, to: { x: r.to.x, y: r.to.y }, requested: asked,
       slid: r.slid, stayed: r.stayed, reason: timeout ? 'timeout' : r.reason, ts: Date.now(),
     };
+    const entry = this.shotLog[this.shotLog.length - 1];
+    if (entry && entry.soldierId === soldier.id) entry.stayed = r.stayed;
     if (r.stayed) this.log(`🦶 ${player.name} se queda quieto${timeout ? ' (se acabó el tiempo)' : ''}`);
     else this.log(`${r.slid ? '↪️' : '🦶'} ${player.name} se mueve a (${r.to.x.toFixed(1)}, ${r.to.y.toFixed(1)})${r.slid ? ' (deslizado)' : ''}`);
     this.finishTurn();
@@ -493,12 +546,15 @@ export class Room {
       turn: this.turn, lastShot: this.lastShot, lastMove: this.lastMove, result: this.result || null,
       players: this.players.map((p) => ({
         id: p.id, name: p.name, team: p.team, isBot: p.isBot,
-        agentType: p.agentType || null, level: p.level || null, temperature: p.temperature ?? null,
+        agentType: p.agentType || null, level: p.level || null, temperature: p.temperature ?? null, netId: p.netId || null, learn: p.isBot ? !!p.learn : undefined,
         kills: p.kills || 0, deaths: p.deaths || 0,
         alive: p.soldiers ? p.soldiers.filter((s) => s.alive).length : C.SOLDIERS_PER_PLAYER,
       })),
-      soldiers: this.soldiers.map((s) => ({ id: s.id, ownerId: s.ownerId, team: s.team, x: s.x, y: s.y, alive: s.alive, lastExpr: s.lastExpr })),
+      soldiers: this.soldiers.map((s) => ({ id: s.id, ownerId: s.ownerId, team: s.team, x: s.x, y: s.y, alive: s.alive, lastExpr: s.lastExpr, turns: s.turns || 0 })),
       obstacles: this.obstacles,
+      shotLog: this.shotLog.slice(-16).map((e, i, arr) => (i >= arr.length - 4 ? { ...e } : (({ points, ...rest }) => rest)(e))),
+      stats: { shots: this.shots, shotsNoKill: this.shotsNoKill, remaps: this.remaps },
+      lastDecision: this.lastDecision,
       chat: this.chat.slice(-40),
       history: this.history.slice(-12),
       config: {

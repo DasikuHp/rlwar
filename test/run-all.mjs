@@ -54,6 +54,10 @@ try {
   results.push(await run('motor (F1): movimiento, semilla, sin pantalla', [join(ROOT, 'test', 'motor.spec.mjs'), BASE]));
   results.push(await run('geometría (F1): propiedades del deslizamiento', [join(ROOT, 'test', 'geometry.spec.mjs')]));
   results.push(await run('rng (F1): secuencia fijada y distribución', [join(ROOT, 'test', 'rng.spec.mjs')]));
+  results.push(await run('movimiento de heurísticos (F1)', [join(ROOT, 'test', 'moves.spec.mjs')]));
+  results.push(await run('sala sin pantalla (F1)', [join(ROOT, 'test', 'rooms.spec.mjs')]));
+  results.push(await run('red (F2): genoma, validación, cálculo y BPTT', [join(ROOT, 'test', 'red.spec.mjs')]));
+  results.push(await run('genoma (F2): defaults fijados y validación', [join(ROOT, 'test', 'genoma.spec.mjs')]));
 } finally {
   server.kill();
 }

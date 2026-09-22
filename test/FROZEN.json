@@ -1,10 +1,14 @@
 {
   "test/agents.spec.mjs": "8267c5aa20b27284d371934f61895910a19d77e83fde99a061d9db9ac3447525",
   "test/client.spec.mjs": "65659173d8eca4e4291675bcadc8e9e64d1dbba5c77400c88be063e70119156a",
+  "test/genoma.spec.mjs": "147045817e4f51959ac6b181a114344f1e486ae6c522f8cb1eed5ca0ede6cb3c",
   "test/geometry.spec.mjs": "2c8b83388a6bb9b8159676f3d9dc62f512605cfc65280eb7e35413b768e0ca94",
   "test/motor.spec.mjs": "92901c90c30859c22f21f5aa49942f619b9eba81ab606b90473b88b9faee6996",
+  "test/moves.spec.mjs": "90b9bb5721deabe830d54fd4d32d15ddbbae602339fdd158b54954b2031394e0",
   "test/parser.spec.mjs": "780fdae97a48dc8b8281406105c95b4ac88a86cf28e48373d8b2a3f529bbcf0b",
+  "test/red.spec.mjs": "e6593fd870a73e64215f059cac8962c61752b34b2a742a7a24702e281e0570bf",
   "test/rng.spec.mjs": "4fc0264c161a540151bacbc2a4a11c8e5f6dafead07bae50eb6d6105fda0bc74",
+  "test/rooms.spec.mjs": "a45a56fe0074c3e4258972a27a213fdfdc96409776d7903997415d322bf9b5eb",
   "test/smoke.mjs": "708013b5e37bf82e4d13315978d0645238a15b3b229e2b9ab0335add182b6854",
   "test/tools.spec.mjs": "16ffcff2f467e99882d48a0969970bf3bca7faeaf95323cb7805a2bd52a53e68",
   "test/troops.spec.mjs": "f7f1f04c0b3a0d3d3743f687ce1619a22fa6646c248b7fb979490e2656526cc1"

@@ -2,6 +2,7 @@
 
 > `tools/mutants.mjs` mete un fallo por mutante y exige que algún test lo cace. Los supervivientes
 > se anotan aquí con su motivo. Un superviviente **sin** motivo escrito es un test que falta.
+> "Equivalente" = el programa mutado se comporta igual (no hay test posible que lo distinga).
 
 ## Herramientas (`tools/freeze.mjs` contra `test/tools.spec.mjs`, 2026-09-22) — cazados 41/54
 | línea | cambio | por qué sobrevive |
@@ -12,6 +13,71 @@
 | 72 | `process.exit(r.ok ? 0 : 1)` (código de salida de `--check`) | no estaba cubierto → **test añadido** (`freeze --check` sale 1/0). |
 | 76 | `process.exit(2)` (uso sin ficheros) | mensaje de uso; el código de salida no importa. |
 
-## F1 (`shared/geometry.js`, `shared/rng.js`, `agents/lib.js`, `server/rooms.js` contra
-`test/motor.spec.mjs`, muestra de 25 mutantes por fichero, semilla 7)
-(pendiente: se rellena al terminar la tirada)
+## F1
+
+### `shared/geometry.js` contra `test/geometry.spec.mjs` (los 123 mutantes) — cazados 109/123
+Antes, con solo `test/motor.spec.mjs` (muestra de 25): 11/25. La prueba mostró que el spec era
+corto → se escribió `geometry.spec.mjs` (150 escenas aleatorias contra fuerza bruta + bordes exactos).
+| línea | cambio | por qué sobrevive |
+|---|---|---|
+| 15 | `k <= 10` → `k < 10` (muestreo del segmento) | la muestra `t = 1.0` es el propio destino, que ya comprueba la regla 3: equivalente. |
+| 25, 42 | `>` → `>=` (radio exacto `R + 1e-9`) | igualdad en coma flotante prácticamente imposible: equivalente. |
+| 37 | `slid = false` por defecto → `true` en `stay('invalid'/'stay')` | lo cubre `motor.spec` (asserta `slid:false` para `stay`/`null`); en este spec no se asertaba. |
+| 38 | `\|\|` → `&&` en la comprobación `'stay' \|\| null \|\| undefined` | `null` y `undefined` los cubre `motor.spec`; aquí no se usan. |
+| 48 | `360 → 361` · `/` → `*` en `na = round(360/5)` | `round(361/5)` = 72 igual; `360·5` = 1 800 ángulos: rejilla más fina, mismo resultado (más lenta). Equivalentes. |
+| 49 | `i = 1` → `2`, `0`, `-1` (primer radio) | `2`: se pierde el radio 0.05 (dentro de la tolerancia 0.1 del test); `0`: añade el propio origen, que casi nunca es el más cercano a T; `-1`: radios negativos = ángulo + 180°, puntos ya cubiertos. Equivalentes a efectos del contrato. |
+| 51 | `k < na` → `<=` | añade el ángulo 360° = 0° repetido: equivalente. |
+| 56 | `<` → `<=` · `1e-12 → 0` (desempate) | empates exactos en coma flotante entre puntos distintos son rarísimos; el orden r↑ θ↑ ya lo garantiza el recorrido. |
+| 59 | `slid: true` → `false` en `blocked` | **test añadido** (`blocked` ⇒ `slid:true`) en `geometry.spec`; cazado desde entonces. |
+
+### `shared/rng.js` contra `test/rng.spec.mjs` (los 65) — cazados 59/65
+| línea | cambio | por qué sobrevive |
+|---|---|---|
+| 5 | `Math.random() * 2 ** 31` → `/`, `2 → 0`, `31 → 0/-31` (`randomSeed`) | la semilla sorteada sigue siendo un entero válido en [0, 2³¹); solo cambia su distribución. No afecta a nada reproducible (una vez sorteada, se expone y se reutiliza). |
+| 30 | `2 * Math.PI` → `3π`, `−2π` en Box-Muller | `cos(−2πv) = cos(2πv)`: equivalente; `cos(3πv)` da también media 0 y varianza 1 (el test estadístico no lo distingue y no hay contrato sobre la secuencia gaussiana exacta). |
+
+### `agents/lib.js` contra `test/moves.spec.mjs` (los 353) — (pendiente de la tirada)
+Con `motor.spec` (muestra de 25): 8/25; los 17 supervivientes eran **constantes de ajuste de los
+heurísticos de disparo** (puntuación 1000, radio 3 u, 6 disparos directos, 40 plantillas, pesos
+0.7/0.2/0.1, σ de pulso…): no son parte del contrato (los heurísticos son sparring, no lo crítico),
+así que no se fijan por test. Las funciones de movimiento (`los`, `moveOptions`, `coverMove`,
+`greedyMove`) sí son contrato y se cubren con `moves.spec.mjs` (120 escenas contra reglas
+reimplementadas). Resultado de la tirada completa: se rellena al terminar.
+
+### `server/rooms.js` contra `test/rooms.spec.mjs` (los 486) — (pendiente de la tirada)
+Con `motor.spec` (muestra de 25): 7/25. Los supervivientes eran lógica de sala sin test directo
+(equipos llenos, nombres repetidos, recortes de nivel/temperatura, desempates de `gameOver`,
+estancamiento, límites, `snapshot`) → se escribió `rooms.spec.mjs`. Resultado de la tirada completa:
+se rellena al terminar.
+
+## F2
+
+### `shared/nn.js` contra `test/red.spec.mjs` (muestra de 150 de 666, semilla 11) — cazados 139/150
+| línea | cambio | por qué sobrevive |
+|---|---|---|
+| 112, 128, 160, 303, 348 | `<` → `<=` en bucles sobre `Float64Array` | escribir/leer una posición más allá del final de un typed array no hace nada: equivalente. |
+| 298 | `let s = 0` → `1` en la derivada de la atención | sumar una constante a todas las `da[r]` no cambia `a·(da − Σ a·da)`: equivalente (invariancia del softmax). |
+| 285 | `dxh[j] = gy[j] * W.g[j]` → `/ W.g[j]` (norm) | **gap real**: `g` se inicializa a 1 y la comprobación del gradiente se hace con los pesos iniciales, donde `g = 1/g`. Se pide al usuario cambiar `red.spec` (pesos perturbados antes de comprobar). Comprobado a mano: con `g ≠ 1` el test lo caza. |
+| 304 | `j = 0 → 1` en el gradiente de `q0` | `q0` tiene 4 números; el muestreo de 80 índices puede no tocar `q0[0]`. Se pide al usuario ampliar el muestreo (todos los parámetros si son ≤ 600). |
+| 308 | `o += … → o -= …` (varias entradas de candidatos en Atención) | ningún test tiene Atención con **dos** cables de candidatos. Se pide añadir el caso a `red.spec`. |
+| 386 | `subarray(0, 1)` → `(1, 1)` (gradiente de Moverse) | muestreo (3 pesos entre 135). Misma petición de ampliar el muestreo. |
+Vistos a mano los tres `*` de la línea 285: `G.g` y `m2` se cazan (error 0.48 y 0.72); solo el
+de `W.g` sobrevive por la inicialización a 1.
+
+### `shared/genome.js` contra `test/red.spec.mjs` (muestra de 150 de 925) — cazados 63/150
+- Líneas 25–58, 86–146: **defaults y catálogo** (recompensa, rasgos, aprendizaje, familias de la
+  Imaginación, rangos de parámetros). Son decisiones del usuario → **`test/genoma.spec.mjs` los
+  fija** todos (añadido tras la tirada).
+- Líneas 162 (constantes del hash del emblema), 188 (`n` de `dims`, campo informativo), 335 (ídem):
+  equivalentes o sin contrato.
+- Líneas 358, 382, 390–391, 402, 414, 417, 427, 430, 460–461, 535: validaciones sin caso de test
+  (no-objeto, familias/pesos de la Imaginación, `grazeRadius`, rangos de `learning` con genoma
+  válido, exactamente 64 bloques / 256 cables, ids de bloque, parámetros `number`/`set`, avisos
+  `unconnected` en ambos sentidos, `newGenome` sin nombre) → **cubiertas en `genoma.spec.mjs`**.
+Se vuelve a pasar la tirada con `red.spec + genoma.spec` al cerrar F2.
+
+### `shared/templates.js` contra `test/red.spec.mjs` (los 55) — cazados 28/55
+Los 27 supervivientes son las **constantes de las plantillas** (32 → 33 neuronas, semillas 101…104,
+`survive` 0.3 → 1.3, `adjust` true/false): son elecciones de diseño de las plantillas, no contrato
+(la spec/08 §7 fija la forma, y el test comprueba bloques clave, `survive` 0.5 de la Tortuga y que
+validan y disparan). Se aceptan.

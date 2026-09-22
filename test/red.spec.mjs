@@ -281,9 +281,9 @@ await check('norm (LayerNorm), pool mean/max, attention (pesos softmax que suman
     for (let d = 0; d < 4; d++) { let s = 0; for (let i = 0; i < 5; i++) s += ex[i] / z * vv[i][h * 4 + d]; assert.ok(near(o.activations.at[h * 4 + d], s, 1e-12)); }
   }
   // sin consulta de contexto: q0 aprendido
-  const gb = build([B('c', 'eye.candidates'), B('at', 'attention', { heads: 1, keyDim: 3 }), B('v', 'hand.value')], [W('c', 'at'), W('at', 'v')]);
-  assert.equal(gb.weights.at.q0.length, 3); assert.equal(gb.weights.at.Wq, undefined);
-  assert.deepEqual(outDims(gb).at, { stream: 'ctx', dim: 3 });
+  const gb = build([B('c', 'eye.candidates'), B('at', 'attention', { heads: 1, keyDim: 4 }), B('v', 'hand.value')], [W('c', 'at'), W('at', 'v')]);
+  assert.equal(gb.weights.at.q0.length, 4); assert.equal(gb.weights.at.Wq, undefined);
+  assert.deepEqual(outDims(gb).at, { stream: 'ctx', dim: 4 });
 });
 
 await check('echo, gru, lstm, teamMemory: un paso exacto contra la referencia; estado inmutable', () => {
@@ -354,7 +354,7 @@ await check('gradiente: concat con difusión, add, mul, skip, norm, pool, atenci
   for (const op of ['mean', 'max']) gradCheck(build([B('c', 'eye.candidates'), B('d', 'dense', { units: 4, activation: 'tanh' }), B('p', 'pool', { op }), B('d2', 'dense', { units: 3, activation: 'gelu' }), B('v', 'hand.value')],
     [W('c', 'd'), W('d', 'p'), W('p', 'd2'), W('d2', 'v')], 15));
   gradCheck(build([B('f', 'eye.features'), B('q', 'dense', { units: 5, activation: 'tanh' }), B('c', 'eye.candidates'), B('cd', 'dense', { units: 6, activation: 'tanh' }),
-    B('at', 'attention', { heads: 2, keyDim: 3 }), B('cat', 'concat'), B('v', 'hand.value'), B('ch', 'hand.choose')],
+    B('at', 'attention', { heads: 2, keyDim: 4 }), B('cat', 'concat'), B('v', 'hand.value'), B('ch', 'hand.choose')],
   [W('f', 'q'), W('c', 'cd'), W('q', 'at'), W('cd', 'at'), W('q', 'cat'), W('at', 'cat'), W('cat', 'v'), W('cd', 'ch')], 16));
   gradCheck(build([B('m', 'eye.moves'), B('at', 'attention', { heads: 1, keyDim: 4 }), B('v', 'hand.value'), B('md', 'dense', { units: 3, activation: 'leaky' }), B('fm', 'foot.move', { adjust: true })],
     [W('m', 'at'), W('at', 'v'), W('m', 'md'), W('at', 'md'), W('md', 'fm')], 17));
@@ -388,7 +388,7 @@ function randomGraph(rng) {
     wires.push(W(last, id)); last = id;
   }
   const roll = rng();
-  if (roll < 0.4) { blocks.push(B('at', 'attention', { heads: 1 + rng.int(2), keyDim: 2 + rng.int(4) }), B('cat', 'concat')); wires.push(W(last, 'at'), W('c', 'at'), W(last, 'cat'), W('at', 'cat')); last = 'cat'; }
+  if (roll < 0.4) { blocks.push(B('at', 'attention', { heads: 1 + rng.int(2), keyDim: 4 + rng.int(4) }), B('cat', 'concat')); wires.push(W(last, 'at'), W('c', 'at'), W(last, 'cat'), W('at', 'cat')); last = 'cat'; }
   else if (roll < 0.7) { blocks.push(B('pl', 'pool', { op: rng.pick(['mean', 'max']) }), B('cat', 'concat')); wires.push(W('c', 'pl'), W(last, 'cat'), W('pl', 'cat')); last = 'cat'; }
   blocks.push(B('v', 'hand.value')); wires.push(W(last, 'v'));
   blocks.push(B('cd', 'dense', { units: 2 + rng.int(6), activation: rng.pick(ACTS) })); wires.push(W(last, 'cd'), W('c', 'cd'));

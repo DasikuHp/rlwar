@@ -236,14 +236,16 @@ red real en vivo; bofetada con efecto inmediato. Completan §1–§9 sin cambiar
 - `method: 'gradient'`: como hasta ahora.
 - `method: 'evolution'` en un entreno. Cada **paso de evolución** `e = 0, 1, …`:
   1. rival del paso = el sorteo de la mezcla de rivales (§6) con `makeRng(seed + 1000003·e)`; soldados =
-     `soldiersFor(e)`; la red juega a la izquierda en los pasos pares y a la derecha en los impares;
+     `soldiersFor(e)`;
   2. `population` copias antitéticas `θ ± σ·ε` (los bloques congelados no se perturban), y cada copia juega
      `gamesPerCandidate` partidas sin pantalla con **las mismas semillas para todas**: `seed + 100003·(e+1) + j`;
+     la partida `j` de cada copia se juega a la izquierda si `j` es par y a la derecha si es impar;
   3. fitness de una copia = media, sobre sus partidas, de la recompensa efectiva media por decisión (la misma
      magnitud que la curva). Las estadísticas de normalización se congelan durante el paso, así todas las copias
      se miden igual;
   4. `θ ← θ + lr/(population·σ)·Σ F·ε`, con ranking si `rankNormalize` (= `evolutionStep`, §4);
-  5. **una partida de la red real** contra el mismo rival (turbo: sin pantalla; x1/x10: sala viva espectable,
+  5. **una partida de la red real** contra el mismo rival, semilla `seed + 100003·(e+1) + gamesPerCandidate`, a la
+     izquierda en los pasos pares y a la derecha en los impares (turbo: sin pantalla; x1/x10: sala viva espectable,
      `rooms[]`). Cuenta en la curva (`point.kind = 'showcase'`), en `stats`, en la memoria, y se guarda como
      partida de muestra (con eventos `reward` y `emotion`).
   - `training.games` cuenta **todas** las partidas jugadas (copias + red real) y es lo que mide
@@ -253,13 +255,25 @@ red real en vivo; bofetada con efecto inmediato. Completan §1–§9 sin cambiar
     en el log con `kind: 'evolution'`.
   - Turbo con `workers ≥ 2`: las partidas de las copias se reparten entre hilos; el resultado es el mismo que con
     1 hilo.
+- Función: `evolutionRound({net, genome, rival, soldiers, seeds, cfg, rng, play}) → Promise<{update, lesson, fitness}>`:
+  `plan = planEvolution(net, cfg, rng)` (candidatos en orden `θ+ε₀, θ−ε₀, θ+ε₁, …`); para cada candidato, en ese orden,
+  las partidas `j = 0 … seeds.length−1` con `play({seed: seeds[j], left, right, soldiers})` (la copia lleva `learn: true`
+  y juega a la izquierda si `j` es par); `fitness[i]` = media sobre `j` de `Σ effective / nº de decisiones` de la copia
+  (con `assignRewards` y una copia congelada de `reward.stats` en cada partida; 0 si no decidió nada); después
+  `applyEvolution(net, plan, fitness, cfg)`. `soldiers` puede ser un número o una función `j → número`. `update` y
+  `lesson` como arriba. `play` es inyectable (tests); por defecto juega sin pantalla cediendo el bucle entre partidas.
+- Ruido de las copias: `rng = makeRng(seed + 7·(e+1))` en el paso `e` de un entreno, `makeRng(duelSeed + 7)` tras un
+  duelo y `makeRng(roomSeed + 7)` tras una exhibición. Cada paso fuera de un entreno deja una línea `update` en el log
+  con `kind: 'evolution'` y `duelId` o `roomCode`. Las actualizaciones por gradiente llevan `kind: 'gradient'`.
 - `method: 'both'`: un ciclo son `both.gradientGamesPerCycle` partidas con gradiente (con sus sueños por lote)
   seguidas de `both.evolutionStepsPerCycle` pasos de evolución. El ciclo se repite.
 - Duelos (spec/06 §6.2): una red `gradient` aprende como hasta ahora (frozen/hot/mix). Una red `evolution` no
   aprende partida a partida: **al acabar el duelo hace un paso de evolución contra la rival del duelo** (semillas
-  `duelSeed + 100003 + j`), sea cual sea el modo del duelo. Una red `both` aprende por gradiente según el modo y
+  `duelSeed + 100003 + j`; soldados: los del duelo si son fijos, y si son `'random'`, `1 + makeRng(duelSeed + 100003 + j).int(4)`),
+  sea cual sea el modo del duelo. La rival es su genoma al acabar el duelo. Las partidas del duelo sí entran en su memoria. Una red `both` aprende por gradiente según el modo y
   además hace ese paso al final.
-- Exhibiciones con `learn:true` (§10.3): la misma regla.
+- Exhibiciones con `learn:true` (§10.3): la misma regla, con la rival de la sala, sus soldados y las semillas
+  `roomSeed + 100003 + j`.
 
 ### 10.3 Exhibiciones (A2)
 - Salas creadas con `POST /api/rooms`: al terminar la partida, cada red sentada que no esté entrenando:

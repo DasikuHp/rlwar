@@ -164,13 +164,14 @@ export function evolutionStep(net, fitnessFn, cfg = {}, rng = Math.random) {
 }
 
 // ---------- aprender de partidas ----------
+// entries = [{game, entry}]: un episodio por (partida, soldado); dos partidas nunca se mezclan (spec/04 §10.1)
 function episodesFromRewards(entries) {
   const bySoldier = {};
-  for (const e of entries) (bySoldier[e.soldierId] ||= []).push(e);
+  for (const { game, entry } of entries) (bySoldier[`${game}|${entry.soldierId}`] ||= { game, soldierId: entry.soldierId, list: [] }).list.push(entry);
   const episodes = [], values = [];
-  for (const list of Object.values(bySoldier)) {
+  for (const { game, soldierId, list } of Object.values(bySoldier)) {
     list.sort((a, b) => a.decision.eventId - b.decision.eventId);
-    episodes.push({ steps: list.map((e) => ({ decisionEventId: e.decision.eventId, value: e.decision.value === null || e.decision.value === undefined ? null : e.decision.value, obs: e.obs, phase: e.phase, chosen: e.decision.chosen, chosenMove: e.decision.chosenMove, adjustSample: e.decision.adjust ? e.decision.adjust.sample : null, moveAdjustSample: e.decision.moveAdjust ? e.decision.moveAdjust.sample : null, reward: e.effective })) });
+    episodes.push({ game, soldierId, steps: list.map((e) => ({ decisionEventId: e.decision.eventId, value: e.decision.value === null || e.decision.value === undefined ? null : e.decision.value, obs: e.obs, phase: e.phase, chosen: e.decision.chosen, chosenMove: e.decision.chosenMove, adjustSample: e.decision.adjust ? e.decision.adjust.sample : null, moveAdjustSample: e.decision.moveAdjust ? e.decision.moveAdjust.sample : null, reward: e.effective })) });
     values.push(Float64Array.from(list, (e) => (e.decision.value === null || e.decision.value === undefined ? NaN : e.decision.value)));
   }
   return { episodes, values };
@@ -180,11 +181,11 @@ export function learnFromGames({ net, genome, games, optim, cfg = {} }) {
   const lc = { ...g.learning.gradient, ...cfg };
   const allEntries = [];
   let steps = 0, sumEff = 0;
-  for (const game of games) {
+  games.forEach((game, gi) => {
     const r = game.rewards || assignRewards({ reward: g.reward, teamSpirit: g.traits.teamSpirit, events: game.events, trajectory: game.trajectory, playerId: game.playerId, stats: g.reward.stats || (g.reward.stats = {}) });
     game.rewards = r;
-    for (const e of r.entries) { allEntries.push(e); steps++; sumEff += e.effective; }
-  }
+    for (const e of r.entries) { allEntries.push({ game: gi, entry: e }); steps++; sumEff += e.effective; }
+  });
   // 🎲 Imaginación por uso (spec/05 §10.6): familias elegidas en las últimas 200 decisiones de disparo del lote
   const decisions = [];
   for (const game of games) {
@@ -203,13 +204,13 @@ export function learnFromGames({ net, genome, games, optim, cfg = {} }) {
   for (const ep of episodes) for (const s of ep.steps) {
     if (!Number.isInteger(s.decisionEventId)) continue;
     const V = baseline === 'value' ? s.value : baseline === 'mean' ? meanV : null;
-    emotions.push({ decisionEventId: s.decisionEventId, ...emotionOf({ V, A: s.advantage ?? 0, valueSource: baseline === 'none' ? 'none' : baseline }) });
+    emotions.push({ game: ep.game, decisionEventId: s.decisionEventId, ...emotionOf({ V, A: s.advantage ?? 0, valueSource: baseline === 'none' ? 'none' : baseline }) });
   }
   const pg = policyGradient(net, g, episodes, { ...lc, baseline });
   const update = applyUpdate(net, pg.grads, optim, { lr: lc.lr, clipNorm: lc.clipNorm, optimizer: lc.optimizer, frozen: g.frozen });
   const threshold = g.learning.sleep.lessonThreshold;
   const lesson = update.top ? { blockId: update.top.blockId, name: update.top.name, relChange: update.top.relChange, bulb: update.top.relChange > threshold } : null;
-  return { imagination, emotions, update: { loss: pg.stats.loss, entropy: pg.stats.entropy, valueLoss: pg.stats.valueLoss, gradNorm: update.gradNorm, clipped: update.clipped, perBlock: update.perBlock, top: update.top, steps: pg.stats.steps }, lesson, rewards: { steps, meanEffective: steps ? sumEff / steps : 0 }, stats: pg.stats };
+  return { imagination, emotions, episodes: episodes.map((ep) => ({ game: ep.game, soldierId: ep.soldierId, steps: ep.steps.length })), update: { loss: pg.stats.loss, entropy: pg.stats.entropy, valueLoss: pg.stats.valueLoss, gradNorm: update.gradNorm, clipped: update.clipped, perBlock: update.perBlock, top: update.top, steps: pg.stats.steps }, lesson, rewards: { steps, meanEffective: steps ? sumEff / steps : 0 }, stats: pg.stats };
 }
 
 // ---------- estado de Adam en disco y aprendiz reutilizable (entrenador y duelos) ----------
@@ -388,9 +389,10 @@ export function createTrainer(opts = {}) {
       const byGame = new Map();
       for (const game of batch) if (game.sample) byGame.set(game, new Set(Object.values(game.trajectory && game.trajectory.soldiers ? game.trajectory.soldiers : {}).flat().map((s) => s.decision && s.decision.eventId)));
       for (const [game, ids] of byGame) {
+        const gi = batch.indexOf(game);
         const events = game.events.map((e) => ({ ...e }));
         rewardEvents(events, game.rewards, { playerId: game.playerId, netId: g.id, tau: g.traits.teamSpirit, normalized: !!g.reward.normalize });
-        emotionEvents(events, r.emotions.filter((em) => ids.has(em.decisionEventId)), { playerId: game.playerId, netId: g.id });
+        emotionEvents(events, r.emotions.filter((em) => em.game === gi && ids.has(em.decisionEventId)), { playerId: game.playerId, netId: g.id }); // solo las de esta partida (spec/04 §10.1)
         const gameId = events[0] ? events[0].game : `g-${game.seed}-t${t.id}`;
         const start = events.find((e) => e.type === 'game.start');
         const nets = start && start.data && Array.isArray(start.data.players) ? start.data.players.map((p) => p.netId).filter(Boolean) : [g.id];

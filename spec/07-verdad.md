@@ -230,3 +230,35 @@ trayectorias de las partidas guardadas de la red (más recientes primero).
   caricias aún no consumidas por un sueño). `GET /api/lab/nets/:id/neurons` → `{blocks: {blockId: [{index, name,
   corr, feature, m, custom}]}, m}`; `PUT …/neurons/:blockId/:index {name}` (400 vacío, 404 bloque/índice).
   `GET /api/lab/nets/:id/diary` → `{entries: [{kind, text, refs, t, netId}]}`; `GET /api/lab/chronicle` igual.
+
+## 13. Arreglos tras la revisión de Opus (2026-09-23, `spec/revision-opus.md` A3 y A4)
+Aprobados por el usuario ("arréglalo tú"; adaptación "equilibrar y penalizar perder"). Completan §1–§12.
+
+### 13.1 Boletín que mide lo que dice (A4)
+- **Blanco inofensivo**: en las escenas de puntería y cobertura el agente ficticio dispara una expresión que explota
+  en el primer punto (`sqrt(-1)`) y se queda quieto. Antes disparaba `y = 1000`, que en modo función es la
+  horizontal que pasa por él (la constante no cuenta) y mataba al examinado en 2 de 40 escenas de puntería.
+- **Adaptación equilibrada**: 16 partidas contra Greedy L3, 4 por tamaño (1, 2, 3 y 4 soldados), dos a la
+  izquierda y dos a la derecha. Partida `i = 0…15`: `soldados = 1 + ⌊i/4⌋`, izquierda si `i` es par, semilla
+  `9004 + i`. `details.adaptation = {1: tasa, 2: …, 3: …, 4: …}` y `details.adaptationGames = [{seed, soldiers, side,
+  win}]`.
+- **Puntuación**: `adaptación = tasa media × (1 − (máx − mín))` sobre las 4 tasas (`adaptationScore(rates)` en
+  `evo/exam.js`). Perder todo da 0; ganar lo mismo con 1, 2, 3 y 4 soldados da esa tasa. Progreso total del trabajo:
+  96 escenas (40 + 30 + 10 + 16).
+
+### 13.2 Voz verificada en la sala (A3)
+- Las redes hablan en las salas con pantalla (x1 y x10: exhibiciones, entrenos y duelos en vivo); sin pantalla no
+  hablan. Las frases fijas de relleno de las redes (`banter` de `agents/net.js`) desaparecen.
+- Cada frase la compone `evo/voice.js` con `compose` (cada hueco con `ref` a un evento de la partida, o del registro
+  o de una partida guardada si recuerda algo) y la sala la verifica con `checkPhrase` antes de decirla. Si no
+  verifica, no se dice: evento `error {message: 'frase no verificable', text, missing}`.
+- Momentos: al empezar (presentación: mapa y rival; si recuerda al rival, un recuerdo verificable), antes de
+  disparar (según su confianza: `novata` piensa en voz baja, `kind: 'think'`; `media` y `veterana` hablan,
+  `kind: 'say'`), al matar, al rozar, al morir, al matar a un aliado, y la réplica cuando el rival falla.
+- Probabilidad de hablar en cada momento = `sayProbability` de su confianza (§4); la presentación, siempre. El
+  sorteo usa un `rng` propio, `makeRng(hash32(seed, eventId))`, nunca el de la partida: **hablar no cambia la
+  partida**. Como mucho una frase por jugador y turno, además de la presentación y la réplica.
+- Chat: `{t, text, playerId, soldierId, kind: 'say'|'think', refs, confidence, level}`. Evento `say {text, kind, refs,
+  confidence: {certainty, experience, confidence, level}}`.
+- El carácter (`traits.character`: frío, chulo, dramático, desquiciado) elige el estilo; los números y los nombres
+  salen siempre de los eventos.

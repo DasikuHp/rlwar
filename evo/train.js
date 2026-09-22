@@ -136,21 +136,29 @@ export function applyUpdate(net, grads, optim, { lr = 0.003, clipNorm = 5, optim
 function frozenSetHas(frozenSet, list, i) { let off = 0; for (const p of list) { if (i < off + p.array.length) return frozenSet.has(p.blockId); off += p.array.length; } return false; }
 
 // ---------- evolución ----------
-export function evolutionStep(net, fitnessFn, cfg = {}, rng = Math.random) {
-  const pop = Math.max(2, cfg.population ?? 16), sigma = cfg.sigma ?? 0.02, lr = cfg.lr ?? 0.01;
+// en tres fases (sortear → evaluar → aplicar) para poder evaluar las copias fuera de línea (hilos, partidas)
+export function planEvolution(net, cfg = {}, rng = Math.random) {
+  const pop = Math.max(2, cfg.population ?? 16), sigma = cfg.sigma ?? 0.02;
   const frozenSet = new Set(cfg.frozen || []);
   const list = net.paramList();
   const mask = new Float64Array(net.paramCount()); let off = 0;
   for (const p of list) { if (!frozenSet.has(p.blockId)) mask.fill(1, off, off + p.array.length); off += p.array.length; }
   const theta = net.getFlat();
   const half = Math.ceil(pop / 2);
-  const epsList = [], fitness = [];
+  const epsList = [], candidates = [];
   for (let j = 0; j < half; j++) {
     const eps = Float64Array.from(mask, (m) => (m ? sigma * gaussFrom(rng) : 0));
     epsList.push(eps);
-    fitness.push(fitnessFn(Float64Array.from(theta, (v, i) => v + eps[i])));
-    fitness.push(fitnessFn(Float64Array.from(theta, (v, i) => v - eps[i])));
+    candidates.push(Float64Array.from(theta, (v, i) => v + eps[i]), Float64Array.from(theta, (v, i) => v - eps[i]));
   }
+  return { theta, epsList, candidates, sigma };
+}
+export function evolutionStep(net, fitnessFn, cfg = {}, rng = Math.random) {
+  const plan = planEvolution(net, cfg, rng);
+  return applyEvolution(net, plan, plan.candidates.map((c) => fitnessFn(c)), cfg);
+}
+export function applyEvolution(net, { theta, epsList, sigma }, fitness, cfg = {}) {
+  const lr = cfg.lr ?? 0.01, half = epsList.length;
   let F = fitness.slice();
   if (cfg.rankNormalize !== false) {
     const order = fitness.map((f, i) => [f, i]).sort((a, b) => a[0] - b[0]);
@@ -176,7 +184,8 @@ function episodesFromRewards(entries) {
   }
   return { episodes, values };
 }
-export function learnFromGames({ net, genome, games, optim, cfg = {} }) {
+// fase 1: recompensas, episodios, ventajas y emociones (sin tocar pesos); fase 2: el paso de gradiente
+export function prepareExperience({ genome, games, optim, cfg = {} }) {
   const g = normalize(genome);
   const lc = { ...g.learning.gradient, ...cfg };
   const allEntries = [];
@@ -206,6 +215,10 @@ export function learnFromGames({ net, genome, games, optim, cfg = {} }) {
     const V = baseline === 'value' ? s.value : baseline === 'mean' ? meanV : null;
     emotions.push({ game: ep.game, decisionEventId: s.decisionEventId, ...emotionOf({ V, A: s.advantage ?? 0, valueSource: baseline === 'none' ? 'none' : baseline }) });
   }
+  return { g, lc, baseline, imagination, episodes, emotions, steps, sumEff };
+}
+export function learnFromGames({ net, genome, games, optim, cfg = {} }) {
+  const { g, lc, baseline, imagination, episodes, emotions, steps, sumEff } = prepareExperience({ genome, games, optim, cfg });
   const pg = policyGradient(net, g, episodes, { ...lc, baseline });
   const update = applyUpdate(net, pg.grads, optim, { lr: lc.lr, clipNorm: lc.clipNorm, optimizer: lc.optimizer, frozen: g.frozen });
   const threshold = g.learning.sleep.lessonThreshold;

@@ -139,7 +139,10 @@ servidor) · regresión (la suite actual).
   hijos con pre-torneo y ranking, vista de diferencias con mapa de calor, cirugía (spec/08 §4).
 - **F6 trono** hecho (duelos turbo/x1/x10, reto al trono, sala de la fama, liga, genealogía, dinastías,
   explotadora; spec/06 §6). Desbloqueado para Opus: trono y duelos (spec/08 §5), sala de la fama, árbol genealógico.
-- Siguiente: F7 verdad.
+- **F7 verdad** hecho (evo/truth.js, evo/exam.js; registro completo, moviola con cerebro, boletín, diario,
+  cronista, neuronas con nombre, bofetada/caricia; spec/07 §12). Desbloqueado para Opus: voz con compose/checkPhrase,
+  diario y cronista, radar del boletín, moviola, neuronas, emociones (spec/08 §4, §6).
+- Las 7 fases están hechas. Siguiente: segunda ronda de mutantes de F5/F6/F7 con specs extra (spec/mutantes.md).
 
 ## 7. Cierre de cada sesión
 1. Actualiza `plan2.md` (estado de la fase) y `plan.md` §4 si cambia el stack.

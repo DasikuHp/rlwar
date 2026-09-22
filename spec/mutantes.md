@@ -176,3 +176,43 @@ spec completo, ~1 min). Supervivientes vistos hasta ahora y su lectura:
 - 287 (rama `number` de `eyeParams`): ningún ojo tiene parámetros `number` → inalcanzable.
 - 296 (`imagination.n ± rng.int(0..4)`): el test acota |Δn| ≤ 4 pero no exige que suba y baje →
   pendiente extra (en 60 semillas aparecen subidas, bajadas y |Δn| = 4).
+
+Resultado final de la primera tirada de F5 (`scratchpad/mutants-f5.log`, semilla 41, ~1 min por mutante):
+- `evo/mutate.js` (40 de 616): **28/40**. Los huecos reales (202/203 `removeWire`, 279 `eyeParams` entero, 296 `Δn`)
+  ya están cubiertos en **`test/evolucion-extra.spec.mjs`** (congelado); 57 (≥ 26 hermanos), 287 (rama `number`
+  inalcanzable), 329 (`σ` de `weights`: el test acota el ruido pero no su signo) y 350 (`emblem`: `rng.int(2^31)`
+  con `2 → 0` da siempre 0: el test exige distintos en 30/40 → equivalente en la muestra) quedan justificados.
+- `evo/labels.js` (los 20 de 59): **15/20**. Supervivientes 22/23 (guardas `||`/`!==` en `outLabels` de bloques de
+  paso sin entradas), 40/41 (`add`/`mul` sin entradas), 47 (`pool` con una sola entrada): ramas que los genomas
+  válidos del test no alcanzan.
+- `evo/diff.js` (20 de 131): **7/20**. Supervivientes en `bucket` (11, 15, 16: solo se ejecuta con > 64 unidades y el
+  test comprueba la longitud, no los valores promediados), `blockDelta` (34/35/46: la suma de cuadrados de las
+  posiciones que faltan; el test mira `relChange` de un solo bloque con formas iguales) y `status`/`relChange` de
+  bloques añadidos/quitados (68/70: fijos a 1). **Pendiente**: `evolucion-extra` con valores exactos del `heat`
+  promediado y de `relChange` con una fila quitada.
+- `evo/children.js` (20 de 98): en curso al cerrar.
+
+## F6
+
+### `evo/duel.js` (30 de 160), `evo/league.js` (30 de 145), `evo/throne.js` (30 de 180) contra `test/trono.spec.mjs`
+Cazados **14/30**, **13/30** y **8/30**. Lectura de los supervivientes (fuente en `scratchpad/mutants-f6.log`):
+- Equivalentes o inalcanzables: `duel.js` 16 (`% 4` con `−4`: mismo resto en JS para valores positivos), 31
+  (`>` → `>=` con victorias distintas), 38/44/53/62–67 (nombres de sala, `learn: false`, salas vivas x1/x10 que el
+  test unitario no abre), 90/92/114 (declaraciones); `league.js` 23 (`return base` en un `catch` que no salta), 35/49
+  (orden del par: simétrico en el test), 47 (`0.5` sin datos, comprobado solo para pares ausentes), 61 (defaults
+  de la mezcla: los tests pasan mezclas completas), 67/72/86/87 (bucle del sorteo: el test tolera ± 2 %), 82/83
+  (`hard` por defecto y `1e-9`), 110 (`exists`); `throne.js` 27 (tablas en la liga: el test no las incluye), 34
+  (numeración `hof-n`), 98/102 (mensajes de 400), 117/128/129/145/152/159/161/170 (parámetros de la generación:
+  el test solo exige que termine y actualice `history`).
+- **Huecos reales pendientes** (segunda ronda con `trono-extra.spec`): liga con partidas en tablas; `hof-2` al
+  perder dos veces; una generación donde el hijo promocione (semilla que lo fuerce) y donde el entreno cruzado use
+  de verdad a la campeona rival (`antagonistId` observable en `config`); `duelScore` con más victorias pero
+  `killDiff` negativo (ya cubierto por la tabla 1: revisar por qué 31 sobrevive); salas vivas x1/x10 del duelo
+  (solo cubiertas por `api-trono`, que el probador de mutantes no ejecuta).
+
+## F7
+
+### `evo/truth.js` (40) y `evo/exam.js` (20) contra `test/verdad.spec.mjs`
+En curso al cerrar la sesión (`scratchpad/mutants-f7.log`). Se documenta en la siguiente sesión junto con la
+segunda ronda de F5/F6.
+

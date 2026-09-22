@@ -54,7 +54,11 @@ el único punto de validación de disparos.
   genealogía), duel.js (3×2 con hash32, frozen/hot/mix, moviola), throne.js (reto, sala de la fama, dinastías,
   generación); makeLearner en train.js; rutas duels/throne/hall-of-fame/genealogy/dynasties/games; explotadora;
   spec/06 §6. trono.spec corregido con OK del usuario en 5 aserciones defectuosas del test (motivo en su cabecera).
-  Batería 29 specs (27 congelados). Siguiente: F7 verdad (spec/07).**
+  Batería 29 specs (27 congelados). **F7 verdad** hecho (commit 29fb873): evo/truth.js (checkPhrase/compose,
+  confianza, emoción, memoria episódica, neuronas con nombre, diario verificable), evo/exam.js (boletín
+  determinista), registro completo en la sala con tope y graze, partidas de muestra con reward/emotion y
+  trayectorias, moviola con cerebro, bofetada/caricia, log con id y rotación; spec/07 §12. Batería 31 specs
+  (29 congelados). Las 7 fases están hechas. Siguiente: segunda ronda de mutantes de F5/F6/F7 (extras).**
 - F0 **a medias**: `plan.md` escrito; **falta** el selector de tropas en la UI. *(superado: ver
   arriba)*
 - F1–F5 sin empezar: no hay `move` en `rooms.js`, no existe `evo/`.

@@ -120,13 +120,15 @@ E:\grafwar
 │   ├── children.js  F5: pre-torneo justo (mismas semillas/soldados, lados alternos) y ranking
 │   ├── league.js    F6: throne.json, liga (pares, winrate), pickOpponent (AlphaStar, f_hard, fantasma), genealogía
 │   ├── duel.js      F6: 3 mapas × 2 lados con hash32, ranking, modos frozen/hot/mix, partidas guardadas
-│   └── throne.js    F6: reto al trono, sala de la fama (copia congelada), dinastías y generaciones
+│   ├── throne.js    F6: reto al trono, sala de la fama (copia congelada), dinastías y generaciones
+│   ├── truth.js     F7: checkPhrase/compose (nada inventado), confianza, emoción, memoria, neuronas con nombre, diario
+│   └── exam.js      F7: boletín de habilidades determinista (puntería, cobertura, supervivencia, adaptación)
 ├── agents/net.js    F3: agente-red (net:<id>), memoria por soldado, trayectorias para aprender
 ├── test/            run-all.mjs (comprueba FROZEN.json y levanta servidor 8791 → TODO OK ✔)
 │                    parser.spec / smoke / agents.spec / client.spec / troops.spec (F0) /
 │                    tools.spec (freeze+mutants) / motor.spec, geometry, rng, moves, rooms (F1) /
 │                    red, genoma, api-lab (F2) / percepcion(+extra), politica (F3) / aprendizaje(+extra),
-│                    entrenador-extra(-b), api-trainings (F4) / evolucion, api-evolucion (F5) / trono, api-trono (F6).
+│                    entrenador-extra(-b), api-trainings (F4) / evolucion, api-evolucion (F5) / trono, api-trono (F6) / verdad, api-verdad (F7).
 │                    FROZEN.json = huellas SHA-256
 ├── tools/           freeze.mjs (congela tests) · mutants.mjs (prueba de mutantes) ·
 │                    launch-selfplay.mjs · room-debug.mjs

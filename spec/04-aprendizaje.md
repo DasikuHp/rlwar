@@ -131,3 +131,87 @@ Nunca entra en `stats.wins/kills` del trono; sí en `stats.games`.
 7. Curva de aprendizaje real corta: red plantilla "Vidente" (spec/08 §7) contra copia congelada,
    40 partidas sin pantalla → la tasa de kill por disparo sube (media de 3 semillas, sin puerta de
    aprendizaje ✅: el test solo exige que el mecanismo funcione, no un nivel).
+
+## 9. API exacta (fijado antes de los tests de F4)
+
+### 9.1 Eventos de la sala (subconjunto de spec/07 §1; `room.events`, `playGame().events`)
+`{id, t, game, turn, type, actor:{playerId, soldierId, netId}, data}`; `id` correlativo desde 1;
+`game` = `room.gameId` = `"g-<seed>-<code>"`. Tipos y `data` en F4:
+`game.start` `{seed, map, soldiers, players:[{playerId, name, netId, agentType, team}]}` ·
+`decision` `{phase, chosen, chosenMove}` (la decisión completa vive en `room.decisions`; el evento
+recibe el mismo `id`, que se escribe en `decision.eventId`) · `shot` `{mode, expr, family, params,
+angle, result:{type, soldierId}, minDist, minAllyDist, decisionEventId}` · `move` `{from, to,
+requested, slid, stayed, coverBefore, coverAfter, decisionEventId}` · `kill` / `friendlyFire`
+`{victimSoldierId, victimPlayerId, victimName, shotEventId}` (actor = tirador) · `death`
+`{killerSoldierId, killerPlayerId, killerName, shotEventId}` (actor = víctima) · `map.renew`
+`{remaps}` · `win` / `lose` / `draw` `{winner, killsLeft, killsRight, shots, byLimit}` (uno por
+jugador, actor = ese jugador). `minAllyDist` = distancia mínima de los puntos del tiro a un aliado
+vivo (30 si no hay). `coverBefore/After` = enemigos vivos con línea de tiro al soldado antes y después.
+
+### 9.2 Trayectorias (`agents/net.js`, `playGame().trajectories`)
+`trajectories = {playerId: {netId, soldiers: {soldierId: [{turn, phase, obs, decision}]}}}` para
+cada jugador `net`; `decision` es el registro de spec/03 §7 (con `eventId` puesto por la sala) y `obs`
+la observación exacta con la que decidió (Float64Array, transferible a un hilo). Se registran también
+las decisiones de fallback (`decision.error`) — se ignoran al aprender.
+
+### 9.3 `shared/reward.js`
+```js
+assignRewards({ reward, teamSpirit, events, trajectory, playerId }) →
+  { entries: [{ soldierId, turn, phase, decision, obs, terms, own, team, effective }], stats }
+returns(values, gamma) → Float64Array          // G_t = Σ γ^(k−t) r_k
+normalizeStats(stats, term, value) → valor/σ   // σ = max(0.1, sqrt(var EMA, α = 1/500)); actualiza stats
+```
+Reglas (§2): `kill/friendlyFire/graze/repeatExpr/nearFriendly` → la decisión `shoot` cuyo `shot` lleva
+su `decisionEventId`; `graze` si el resultado no es kill/suicide y `minDist ≤ grazeRadius`;
+`repeatExpr` si `expr` coincide con alguno de los 10 tiros anteriores del jugador; `nearFriendly` si
+no es suicide y `minAllyDist ≤ 1.5`; `cover` → la decisión `move` × `max(0, coverBefore − coverAfter)`;
+`die` → la última decisión (de cualquier fase) de la víctima anterior al `death`; `win/lose` → la
+última decisión de **cada** soldado del jugador; `survive` → la última decisión de cada soldado vivo
+al final. `own` = Σ términos (normalizados si `reward.normalize`); `team` = media de `own` de todas
+las decisiones del jugador en la partida; `effective = (1−τ)·own + τ·team`.
+
+### 9.4 `evo/train.js`
+```js
+policyGradient(net, genome, episodes, cfg) → { grads: Float64Array, stats: {loss, entropy, valueLoss, steps} }
+  // episodes = [{ steps: [{ obs, phase, chosen, chosenMove, adjustSample, moveAdjustSample, advantage, ret }] }]
+  // L = −Σ logp·A − β·H + ½·Σ (V − G)² ; memoria replicada desde cero; BPTT truncado cada cfg.bpttSteps pasos
+  // (el gradiente que llega del futuro se descarta en las fronteras). adjustLearn:false ⇒ sin término de ajuste.
+computeAdvantages(episodes, values, cfg) → episodes   // ret = returns(r, γ); A = ret − baseline (value | mean EMA 0.05 | 0)
+adamInit(net) → optim ; applyUpdate(net, grads, optim, { lr, clipNorm, optimizer, frozen }) →
+  { gradNorm, clipped, perBlock: {blockId: {name, relChange}}, top: {blockId, relChange} }
+evolutionStep(net, fitnessFn, cfg, rng) → { fitness: number[], mean, best }   // ES antitética, rank-normalizada
+learnFromGames({ net, genome, games: [{events, trajectory, playerId}], optim, cfg }) → { update, lesson, rewards }
+  // asigna recompensas, retornos y ventajas; un paso de gradiente; lesson = {blockId, name, relChange, bulb}
+createTrainer({ netId, genome?, opponents, speed, workers, duration, soldiers, seed, learnCfg? }) → trainer
+  trainer: { id, status, games, updates, curve, start(), pause(), resume(), stop(), on(ev, fn) }
+  // eventos: 'training' {status, games, updates} · 'curve' {game, reward, win, kills, deaths, loss?, entropy?}
+  //          'sleep' {games, update} · 'lesson' {lesson} · 'done' {reason} · 'error' {message}
+```
+- Duración: `{games}` · `{minutes}` · `{plateau:{window, minGain}}` (media móvil de `reward` por partida).
+- `speed:'turbo'` con `workers ≥ 1`: `workers = 1` juega en el hilo principal (síncrono, determinista);
+  `workers ≥ 2` reparte partidas a `evo/worker.js` (cada hilo recibe los genomas y la semilla de la
+  partida y devuelve `{result, events, trajectories}`); las actualizaciones se aplican en orden de
+  semilla, así el resultado no depende del número de hilos.
+- Semillas de partida: `seed + k` para la partida `k` (0, 1, 2…). Rival de cada partida: sorteo con
+  `makeRng(seed + 1000003·k)`: `antagonist` (`antagonistId` o, si falta, copia congelada de la propia
+  red) · `hallOfFame` (hitos guardados en `evo/nets/<id>/milestones/`; si no hay, cae a `self`) · `self`
+  (copia congelada al inicio de cada lote). Lados: la red entrena en el lado `k % 2 ? 'right' : 'left'`.
+- Guardado: tras cada lote, `saveNet` (atómico) y `evo/nets/<id>/optim.json`; `reward.stats` y
+  `stats.games/wins/kills/deaths` se actualizan en el genoma.
+- Hitos: `evo/nets/<id>/milestones/<n>.json` cuando la tasa de victoria móvil (últimas 20 partidas,
+  mínimo 20) supera la mejor anterior; evento `milestone`.
+
+### 9.5 Sala a velocidad x10 (`server/rooms.js`)
+`new Room(name, {speed: 1 | 10})`: divide por `speed` `NEXT_TURN_DELAY`, la espera de habla y el
+retardo de los bots, y multiplica `SHOT_SPEED`; `TURN_TIME` no cambia. `snapshot().config.speed`.
+`POST /api/rooms {speed}` (solo agentes; si hay humanos, 400).
+
+### 9.6 API (`/api/lab/trainings`, SSE `/api/lab/events`)
+| método | ruta | cuerpo → respuesta |
+|---|---|---|
+| POST | `/api/lab/trainings` | `{netId, opponents?, speed?, workers?, duration?, soldiers?, seed?}` → `202 {id, status}`; 404 si la red no existe; 409 si ya entrena |
+| GET | `/api/lab/trainings` | `{trainings:[{id, netId, status, games, updates, startedAt}]}` |
+| GET | `/api/lab/trainings/:id` | `{id, netId, status, games, updates, elapsedMs, curve (últimos 500), sampleGames, lastLesson, config}` |
+| POST | `/api/lab/trainings/:id/stop` · `/pause` · `/resume` | `{ok, status}` |
+SSE global: `hello {trainings}` · `training` · `curve` · `sleep` · `lesson` · `milestone` · `error`.
+`GET /api/lab/nets` marca `training:true` en la red que entrena; `PUT`/`DELETE` sobre ella → 409.

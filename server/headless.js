@@ -19,8 +19,7 @@ export function playGame({ seed, left, right, soldiers = 2, maxTurns = 400, hook
     if (hooks.onTurn) hooks.onTurn(room);
   }
   if (room.phase === 'playing') room.gameOver(true);
-  return {
-    seed: room.seed, result: room.result, events: room.events || [], trajectories: room.trajectories || {},
-    chat: room.chat.slice(), room,
-  };
+  const trajectories = {};
+  for (const p of room.players) if (p.agentType === 'net' && room.agents[p.id]) trajectories[p.id] = { netId: p.netId, soldiers: room.agents[p.id].trajectories };
+  return { seed: room.seed, result: room.result, events: room.events, trajectories, chat: room.chat.slice(), room };
 }

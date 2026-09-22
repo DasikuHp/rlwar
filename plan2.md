@@ -41,8 +41,12 @@ el único punto de validación de disparos.
   `test/FROZEN.json`); F1 motor (movimiento, semilla, sin pantalla, ángulo y'') con `test/motor.spec.mjs`
   congelado antes del código. **F2 red** (genome.js, nn.js, templates.js) y **F3 percepción**
   (percept.js, policy.js, evo/store.js, agents/net.js, sala con shotLog/decision) hechos, más la API
-  del laboratorio para redes/catálogo (evo/api.js). Batería 18 specs (17 congelados). Siguiente: F4
-  aprendizaje (reward.js, train.js, worker.js, entrenos por API).**
+  del laboratorio para redes/catálogo (evo/api.js). **F4 aprendizaje** hecho: reward.js (términos a la
+  decisión exacta, normalización NERO, retornos), evo/train.js (REINFORCE+baseline+BPTT verificado
+  contra derivada numérica, Adam/SGD, evolución antitética, learnFromGames, entrenador turbo con hilos
+  y x1/x10 en salas vivas, hitos, meseta), evo/worker.js, eventos de sala, /api/lab/trainings + SSE.
+  Tareas de resultado conocido en verde (tragaperras, recordar un bit, evolución, Corazonada).
+  Batería 20 specs (19 congelados). Siguiente: F5 evolución (mutate.js).**
 - F0 **a medias**: `plan.md` escrito; **falta** el selector de tropas en la UI. *(superado: ver
   arriba)*
 - F1–F5 sin empezar: no hay `move` en `rooms.js`, no existe `evo/`.

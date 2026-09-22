@@ -4,6 +4,30 @@ import { BLOCKS, LIMITS, validate, normalize, countParams, DEFAULT_TRAITS, TRAIT
 import { eyeLayout } from '../shared/percept.js';
 import { TEMPLATES } from '../shared/templates.js';
 import { listNets, loadNet, saveNet, deleteNet, entryOf } from './store.js';
+import { createTrainer } from './train.js';
+
+// ---------- entrenos y SSE global (spec/04 §9.6) ----------
+const trainings = new Map();
+const sseClients = new Set();
+function pushEvent(ev, data) { for (const res of sseClients) { try { res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* ignorar */ } } }
+const activeTraining = (netId) => [...trainings.values()].find((t) => t.netId === netId && ['queued', 'running', 'paused'].includes(t.status)) || null;
+function trainingView(t, full = false) {
+  const v = { id: t.id, netId: t.netId, status: t.status, games: t.games, updates: t.updates, startedAt: t.startedAt, error: t.error };
+  if (full) Object.assign(v, { elapsedMs: t.startedAt ? Date.now() - t.startedAt : 0, curve: t.curve.slice(-500), sampleGames: [], rooms: t.rooms, lastLesson: t.lastLesson, config: { ...t.config, genome: undefined } });
+  return v;
+}
+function startTraining(body) {
+  const t = createTrainer(body);
+  t.on('training', () => pushEvent('training', trainingView(t)));
+  t.on('curve', (d) => pushEvent('curve', { trainingId: t.id, netId: t.netId, point: d.point }));
+  t.on('sleep', (d) => pushEvent('sleep', { trainingId: t.id, netId: t.netId, games: d.games, update: d.update }));
+  t.on('lesson', (d) => pushEvent('lesson', { trainingId: t.id, netId: t.netId, lesson: d.lesson }));
+  t.on('milestone', (d) => pushEvent('milestone', { trainingId: t.id, ...d }));
+  t.on('error', (d) => pushEvent('error', { trainingId: t.id, message: d.message }));
+  trainings.set(t.id, t);
+  t.start();
+  return t;
+}
 
 const json = (res, code, obj, headers = {}) => {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*', ...headers });
@@ -131,10 +155,40 @@ export async function labApi(req, res, parts, url) {
   };
 
   if (seg[0] === 'catalog' && method === 'GET') return json(res, 200, catalog());
+  if (seg[0] === 'events' && method === 'GET') {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'Access-Control-Allow-Origin': '*' });
+    res.write('retry: 2000\n\n');
+    res.write(`event: hello\ndata: ${JSON.stringify({ trainings: [...trainings.values()].map((t) => trainingView(t)) })}\n\n`);
+    sseClients.add(res);
+    const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { clearInterval(ping); } }, 20000);
+    req.on('close', () => { sseClients.delete(res); clearInterval(ping); });
+    return;
+  }
+  if (seg[0] === 'trainings') {
+    if (seg.length === 1 && method === 'GET') return json(res, 200, { trainings: [...trainings.values()].map((t) => trainingView(t)) });
+    if (seg.length === 1 && method === 'POST') {
+      const b = await body();
+      if (!b.ok) return bad(b.status, b.error);
+      const v = b.value || {};
+      if (!loadNet(v.netId)) return bad(404, `Red no encontrada: ${v.netId}`);
+      if (v.speed !== undefined && !['turbo', 'x1', 'x10'].includes(v.speed)) return bad(400, 'speed tiene que ser turbo, x1 o x10');
+      const d = v.duration || { games: 100 };
+      if ((d.games !== undefined && !(Number.isInteger(d.games) && d.games >= 1)) || (d.minutes !== undefined && !(d.minutes > 0)) || (d.plateau !== undefined && !(d.plateau && Number.isInteger(d.plateau.window) && d.plateau.window >= 1))) return bad(400, 'duración inválida: {games ≥ 1} | {minutes > 0} | {plateau:{window ≥ 1, minGain}}');
+      if (v.workers !== undefined && !(Number.isInteger(v.workers) && v.workers >= 1 && v.workers <= 32)) return bad(400, 'workers entre 1 y 32');
+      if (activeTraining(v.netId)) return bad(409, `La red ${v.netId} ya está entrenando`);
+      const t = startTraining({ ...v, duration: d });
+      return json(res, 202, { id: t.id, status: t.status });
+    }
+    const t = trainings.get(seg[1]);
+    if (!t) return bad(404, 'Entreno no encontrado');
+    if (seg.length === 2 && method === 'GET') return json(res, 200, trainingView(t, true));
+    if (seg.length === 3 && method === 'POST' && ['stop', 'pause', 'resume'].includes(seg[2])) { t[seg[2]](); return json(res, 200, { ok: true, status: t.status }); }
+    return bad(404, 'Ruta desconocida');
+  }
   if (seg[0] === 'templates' && method === 'GET') return json(res, 200, Object.entries(TEMPLATES).map(([key, t]) => ({ key, name: t.name, why: t.why, genome: t.genome, paramCount: countParams(t.genome) })));
 
   if (seg[0] === 'nets') {
-    if (seg.length === 1 && method === 'GET') return json(res, 200, { nets: listNets().map((n) => ({ ...n, isQueen: false, house: null, training: false })) });
+    if (seg.length === 1 && method === 'GET') return json(res, 200, { nets: listNets().map((n) => ({ ...n, isQueen: false, house: null, training: !!activeTraining(n.id) })) });
     if (seg.length === 1 && method === 'POST') {
       const b = await body();
       if (!b.ok) return bad(b.status, b.error);
@@ -175,6 +229,7 @@ export async function labApi(req, res, parts, url) {
     if (!genome) return bad(404, `Red no encontrada: ${id}`);
     if (seg.length === 2) {
       if (method === 'GET') return json(res, 200, { genome, paramCount: countParams(genome), warnings: validate(genome).warnings });
+      if ((method === 'DELETE' || method === 'PUT') && activeTraining(id)) return bad(409, `La red ${id} está entrenando: para el entreno antes de editarla o borrarla.`);
       if (method === 'DELETE') return json(res, 200, { ok: deleteNet(id) });
       if (method === 'PUT') {
         const b = await body();

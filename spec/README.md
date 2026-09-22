@@ -132,7 +132,9 @@ servidor) · regresión (la suite actual).
 - Desbloqueado para Opus: clic tras disparar y destino (F1), editor de cables sobre el catálogo
   (`GET /api/lab/catalog`, `validate`, CRUD de redes, plantillas), overlay de candidatos y cerebro en
   vivo (evento SSE `decision`, `state.lastDecision`), selector de tropas con redes (`net:<id>`).
-- Siguiente: F4 aprendizaje.
+- **F4 aprendizaje** hecho (reward.js, evo/train.js, evo/worker.js, eventos de sala, /api/lab/trainings, SSE
+  /api/lab/events, sala x10). Desbloqueado para Opus: curvas y panel de entreno (spec/04 §9.6).
+- Siguiente: F5 evolución.
 
 ## 7. Cierre de cada sesión
 1. Actualiza `plan2.md` (estado de la fase) y `plan.md` §4 si cambia el stack.

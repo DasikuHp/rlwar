@@ -192,6 +192,9 @@ createTrainer({ netId, genome?, opponents, speed, workers, duration, soldiers, s
   `workers ≥ 2` reparte partidas a `evo/worker.js` (cada hilo recibe los genomas y la semilla de la
   partida y devuelve `{result, events, trajectories}`); las actualizaciones se aplican en orden de
   semilla, así el resultado no depende del número de hilos.
+- Con `workers = 1` el entrenador cede el bucle de eventos entre partidas (`setImmediate`): el servidor
+  sigue respondiendo. `stop()` pone `status = 'stopped'` en el acto; la partida en curso termina, se
+  hace el sueño con lo que haya en el lote y se guarda; después llega el evento `done {reason:'stopped'}`.
 - Semillas de partida: `seed + k` para la partida `k` (0, 1, 2…). Rival de cada partida: sorteo con
   `makeRng(seed + 1000003·k)`: `antagonist` (`antagonistId` o, si falta, copia congelada de la propia
   red) · `hallOfFame` (hitos guardados en `evo/nets/<id>/milestones/`; si no hay, cae a `self`) · `self`

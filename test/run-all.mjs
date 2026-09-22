@@ -64,6 +64,8 @@ try {
   results.push(await run('percepción (F3): casos extra', [join(ROOT, 'test', 'percepcion-extra.spec.mjs')]));
   results.push(await run('política (F3): decisión, agente-red, almacén, sala', [join(ROOT, 'test', 'politica.spec.mjs')]));
   results.push(await run('API del laboratorio: catálogo, plantillas, redes', [join(ROOT, 'test', 'api-lab.spec.mjs'), BASE]));
+  results.push(await run('aprendizaje (F4): recompensa, gradiente, tareas, entrenador', [join(ROOT, 'test', 'aprendizaje.spec.mjs')]));
+  results.push(await run('API de entrenos (F4)', [join(ROOT, 'test', 'api-trainings.spec.mjs'), BASE]));
 } finally {
   server.kill();
 }

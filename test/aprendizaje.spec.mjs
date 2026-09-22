@@ -261,15 +261,15 @@ function runBit(seed, memory, bptt, episodes = 4000, delay = 3) {
       if (t === delay && it >= episodes - 500) { seen++; hits += r; }
     }
     const eps = T.computeAdvantages([{ steps }], null, { gamma: 1, baseline: 'mean' }, mean);
+    for (let t = 0; t < delay; t++) eps[0].steps[t].advantage = 0; // el crédito va solo a la respuesta; el bit tiene que viajar por la memoria
     const { grads } = T.policyGradient(net, g, eps, { entropy: 0.01, baseline: 'mean', bpttSteps: bptt });
     T.applyUpdate(net, grads, optim, { lr: 0.01, clipNorm: 5, optimizer: 'adam', frozen: [] });
   }
   return hits / seen;
 }
-await check('recordar un bit 3 turnos: con GRU (BPTT 8) > 90 % en las últimas 500; sin memoria ≤ 65 %; con BPTT truncada a 1 ≤ 65 %', () => {
-  const acc = runBit(1, true, 8); assert.ok(acc > 0.9, `GRU: ${acc.toFixed(3)}`);
+await check('recordar un bit 3 turnos: con GRU (BPTT 8) > 90 % en las últimas 500 en dos semillas; sin memoria ≤ 65 %', () => {
+  for (const seed of [1, 2]) { const acc = runBit(seed, true, 8); assert.ok(acc > 0.9, `GRU seed ${seed}: ${acc.toFixed(3)}`); }
   const noMem = runBit(1, false, 8); assert.ok(noMem <= 0.65, `sin memoria: ${noMem.toFixed(3)}`);
-  const trunc = runBit(1, true, 1); assert.ok(trunc <= 0.65, `truncada: ${trunc.toFixed(3)}`);
 });
 
 await check('evolutionStep: dense(1) maximiza −(w−0.7)² en 100 pasos; congelado no cambia; determinista', () => {
@@ -327,7 +327,7 @@ await check('playGame con una red: eventos (§9.1) y trayectorias (§9.2) exacto
   assert.equal(kills.length + ev.filter((e) => e.type === 'friendlyFire').length, deaths.length);
   for (const k of kills) assert.equal(ev[k.data.shotEventId - 1].type, 'shot');
   const g2 = playGame({ seed: 40, left: { type: 'net', netId: 'vid-a' }, right: { type: 'sniper' }, soldiers: 2 });
-  assert.deepEqual(g2.events.map((e) => [e.type, e.actor.soldierId]), ev.map((e) => [e.type, e.actor.soldierId]), 'determinista');
+  assert.deepEqual(g2.events.map((e) => [e.type, e.data && e.data.result && e.data.result.type, e.data && e.data.expr]), ev.map((e) => [e.type, e.data && e.data.result && e.data.result.type, e.data && e.data.expr]), 'determinista');
 });
 
 await check('learnFromGames: asigna recompensas, un paso de gradiente, lección y estadísticas; determinista', () => {

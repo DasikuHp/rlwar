@@ -12,7 +12,7 @@ import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 
 const DEFAULT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const SKIP_DIRS = new Set(['.git', 'node_modules', '.mutants', 'referencia', 'experimentos', 'evo']);
+const SKIP_DIRS = new Set(['.git', 'node_modules', '.mutants', 'referencia', 'experimentos', 'nets', 'games']); // evo/nets y evo/games son datos, no código
 
 // ---------- escáner mínimo de JS: separa comentarios, cadenas, plantillas, regex, números, ids, signos ----------
 const PUNCTS = ['>>>=', '===', '!==', '**=', '<<=', '>>=', '>>>', '&&=', '||=', '??=', '...', '=>', '==', '!=', '<=', '>=', '&&', '||', '??', '++', '--', '+=', '-=', '*=', '/=', '%=', '**', '<<', '>>', '?.'];

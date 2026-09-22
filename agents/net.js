@@ -29,7 +29,7 @@ export function create({ netId = null, genome = null, learn = false, attribution
   const agent = {
     meta: { ...meta, netId: (g && g.id) || netId, name: (g && g.name) || String(netId), emblem: (g && g.emblem) || null,
       description: !broken ? `Red neuronal "${g.name}": ${g.blocks.length} bloques, generación ${g.lineage.generation}.` : `Red rota: ${error}` },
-    learn: !!learn, broken, error, genome: g, net, trajectories: [],
+    learn: !!learn, broken, error, genome: g, net, trajectories: {},
     memoryFor(soldierId) { return memories[soldierId] || (memories[soldierId] = net ? net.zeroState() : {}); },
     // media de las memorias de los otros soldados vivos del mismo jugador (última escritura)
     teamFor(soldier, soldiers) {
@@ -49,6 +49,7 @@ export function create({ netId = null, genome = null, learn = false, attribution
       try {
         const r = decideShot({ net, genome: g, state, soldierId: soldier.id, memory: this.memoryFor(soldier.id), team: this.teamFor(soldier, soldiers), rng, attribution });
         memories[soldier.id] = r.memory;
+        (this.trajectories[soldier.id] ||= []).push({ turn: (state && state.stats && state.stats.shots) || 0, phase: 'shoot', obs: r.obs, decision: r.decision });
         return { ...r.choice, reason: '', decision: r.decision };
       } catch (e) { return fallback('shoot', soldier.id, e.message); }
     },
@@ -57,6 +58,7 @@ export function create({ netId = null, genome = null, learn = false, attribution
       try {
         const r = decideMove({ net, genome: g, state, soldierId: soldier.id, memory: this.memoryFor(soldier.id), team: this.teamFor(soldier, soldiers), rng, shot });
         memories[soldier.id] = r.memory;
+        (this.trajectories[soldier.id] ||= []).push({ turn: (state && state.stats && state.stats.shots) || 0, phase: 'move', obs: r.obs, decision: r.decision });
         return r.move === 'stay' ? { x: soldier.x, y: soldier.y, stay: true, decision: r.decision } : { x: r.move.x, y: r.move.y, decision: r.decision };
       } catch { return 'stay'; }
     },

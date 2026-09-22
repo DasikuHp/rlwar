@@ -172,8 +172,9 @@ await check('runMutants: un test que revienta por tiempo cuenta como cazado', as
   const r = await runMutants({ root, file: 'lib/loop.js', tests: ['test/loop.spec.mjs'], timeoutMs: 3000, quiet: true });
   const m = r.results.find((x) => x.from === '<' && x.to === '<=');
   assert.ok(m, 'existe el mutante < → <=');
-  // con <=, n(3) devuelve 3 igualmente: sobrevive; con "3 → 4" el bucle no termina → tiempo → cazado
-  const t = r.results.find((x) => x.from === '3' && x.to === '4' && x.line === 1);
+  // con <=, n(3) devuelve 3 igualmente: sobrevive; el último "3" de la línea (`: 3`) → 4 hace que
+  // n() nunca devuelva 3 → el bucle no termina → tiempo → cazado
+  const t = r.results.filter((x) => x.from === '3' && x.to === '4' && x.line === 1).sort((p, q) => q.col - p.col)[0];
   assert.ok(t && t.killed === true && t.timeout === true, '3 → 4 cazado por tiempo');
 });
 

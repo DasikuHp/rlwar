@@ -84,9 +84,9 @@ Regla de dependencia: `shared/*` no importa nada de `server/`, `evo/` ni `agents
 - `node tools/mutants.mjs <fichero.js> --tests test/a.spec.mjs[,test/b.spec.mjs] [--max N] [--seed S]`
 - Genera mutantes cambiando **un** operador o constante por mutante (`+`↔`-`, `*`↔`/`, `<`↔`<=`,
   `>`↔`>=`, `===`↔`!==`, `&&`↔`||`, `true`↔`false`, número `k` → `k+1`, `0`, `-k`, `return x` →
-  `return null`), escribe el fichero mutado en una copia temporal del módulo (nunca toca el original:
-  copia a `.mutants/<n>/` con el resto del repo enlazado por ruta), corre los tests indicados con
-  tiempo máximo y cuenta **cazado** (algún test falla o revienta por tiempo) o **superviviente**.
+  `return null`), escribe el fichero mutado en una copia temporal del repo (nunca toca el original: copia en el
+  directorio temporal del sistema, `gw-mutants-<pid>`, sin `.git`, `node_modules`, `referencia`,
+  `evo`), corre los tests indicados con tiempo máximo y cuenta **cazado** (algún test falla o revienta por tiempo) o **superviviente**.
 - Salida: tabla `mutante · línea · cambio · cazado/superviviente` + resumen `cazados X/Y`. Los
   supervivientes se copian a `spec/mutantes.md` con justificación escrita.
 - Tests propios: `test/tools.spec.mjs` (freeze detecta un byte cambiado; mutants caza un `+`→`-` en un

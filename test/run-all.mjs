@@ -3,6 +3,7 @@
 import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { checkFrozen, describeCheck } from '../tools/freeze.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.TEST_PORT || 8791);
@@ -28,6 +29,14 @@ async function waitHealth(ms = 20000) {
   return false;
 }
 
+// Tests congelados (spec/00 §4): si alguna huella no coincide, no se corre nada.
+const args = process.argv.slice(2);
+const rootArg = args.indexOf('--root');
+const fz = checkFrozen(rootArg >= 0 ? args[rootArg + 1] : ROOT);
+console.log(describeCheck(fz));
+if (!fz.ok) { console.log('\nFAIL ✘ (tests congelados modificados: OK del usuario + motivo escrito + tools/freeze.mjs)'); process.exit(1); }
+if (args.includes('--check-only')) process.exit(0);
+
 const server = spawn(process.execPath, [join(ROOT, 'server', 'server.js')], {
   env: { ...process.env, GW_FAST: '1', PORT: String(PORT) }, stdio: 'ignore',
 });
@@ -41,6 +50,7 @@ try {
   results.push(await run('self-play de agentes', [join(ROOT, 'test', 'agents.spec.mjs'), BASE]));
   results.push(await run('cliente (DOM simulado)', [join(ROOT, 'test', 'client.spec.mjs')]));
   results.push(await run('selector de tropas (F0)', [join(ROOT, 'test', 'troops.spec.mjs')]));
+  results.push(await run('herramientas: congelado y mutantes', [join(ROOT, 'test', 'tools.spec.mjs')]));
 } finally {
   server.kill();
 }

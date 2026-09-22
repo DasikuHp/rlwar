@@ -90,7 +90,7 @@
 ## 6. Precisiones de F6 (fijadas al escribir los tests; completan §1–§5 sin cambiarlos)
 
 ### 6.1 Semillas y plan del duelo (`evo/duel.js`)
-- `hash32(seed, k)` (en `shared/rng.js`) = primer valor de `makeRng((seed ^ Math.imul(k + 1, 0x9E3779B1)) >>> 0)`
+- `hash32(seed, k)` (en `shared/rng.js`) = primer valor de `makeRng((seed ^ Math.imul(k + 1, 0x9E3779B1)) & 0x7fffffff)` (quitar el bit alto deja la semilla en `[0, 2³¹)`, el rango que acepta `makeRng`, sin perder los bits bajos)
   convertido a entero: `Math.floor(r · 2³¹)`. Determinista, en `[0, 2³¹)`.
 - `duelPlan({a, b, seed, soldiers}) → games[6]`: para `k = 0..5`, mapa `m = ⌊k/2⌋`, `seed = hash32(seed, m)`,
   `left = k par ? a : b`, `right` el otro, `soldiers = 'random' ? 1 + hash32(seed, 100 + m) mod 4 : soldiers`.

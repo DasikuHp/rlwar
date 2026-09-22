@@ -1,6 +1,9 @@
 // F6 — Trono, duelos, liga, genealogía, dinastías (spec/06 §1–§6): plan del duelo y semillas, ranking, modos de
 // aprendizaje, reto al trono (sentar, ganar, perder, empate, auto-reto), liga (pickOpponent, f_hard, fantasma),
 // genealogía (sha, edited, orphan) y una generación de dinastías sin pantalla. Escrito ANTES del código y congelado.
+// Corregido con OK del usuario (2026-09-23) en 5 aserciones defectuosas del propio test: referencia de hash32 fuera del
+// rango de makeRng, un killDiff mal sumado (−2, no −1), una edición de estructura inválida (units sin pesos), un montaje
+// de liga con derrotas dentro de la ventana y una comprobación de huérfanos que incluía la huérfana del test anterior.
 process.env.GW_FAST = '1';
 import { strict as assert } from 'node:assert';
 import { mkdtempSync, existsSync, readFileSync } from 'node:fs';
@@ -30,7 +33,7 @@ const flatOf = (id) => Array.from(compile(store.loadNet(id)).getFlat());
 
 await check('hash32: fórmula exacta (mulberry32 de seed ^ imul(k+1, 0x9E3779B1)), entero en [0, 2³¹), determinista', () => {
   for (const [seed, k] of [[0, 0], [4242, 0], [4242, 1], [4242, 100], [7, 3]]) {
-    const ref = Math.floor(makeRng((seed ^ Math.imul(k + 1, 0x9E3779B1)) >>> 0)() * 2 ** 31);
+    const ref = Math.floor(makeRng((seed ^ Math.imul(k + 1, 0x9E3779B1)) & 0x7fffffff)() * 2 ** 31);
     assert.equal(hash32(seed, k), ref, `seed ${seed} k ${k}`);
     assert.ok(Number.isInteger(ref) && ref >= 0 && ref < 2 ** 31);
   }
@@ -55,7 +58,7 @@ await check('duelPlan: 6 partidas = 3 mapas × 2 lados; misma semilla y soldados
 await check('duelScore: más victorias; empate → diferencia de kills; empate total → tie y winner null; con throne gana la reina', () => {
   const g = (winner, ka, kb) => ({ winner, kills: { a: ka, b: kb } });
   assert.deepEqual(D.duelScore([g('a', 2, 0), g('a', 1, 1), g('b', 0, 2), g('a', 2, 1), g(null, 1, 1), g('b', 0, 1)], 'a', 'b'), { wins: { a: 3, b: 2 }, killDiff: 0, winner: 'a', tie: false });
-  assert.deepEqual(D.duelScore([g('a', 2, 0), g('b', 0, 2), g('a', 1, 0), g('b', 0, 3), g(null, 0, 0), g(null, 1, 1)], 'a', 'b'), { wins: { a: 2, b: 2 }, killDiff: -1, winner: 'b', tie: false });
+  assert.deepEqual(D.duelScore([g('a', 2, 0), g('b', 0, 2), g('a', 1, 0), g('b', 0, 3), g(null, 0, 0), g(null, 1, 1)], 'a', 'b'), { wins: { a: 2, b: 2 }, killDiff: -2, winner: 'b', tie: false });
   assert.deepEqual(D.duelScore([g('a', 2, 0), g('b', 0, 2), g(null, 1, 1), g(null, 1, 1), g(null, 0, 0), g(null, 0, 0)], 'a', 'b'), { wins: { a: 1, b: 1 }, killDiff: 0, winner: null, tie: true });
   assert.deepEqual(D.duelScore([g('a', 2, 0), g('b', 0, 2)], 'a', 'b', { throne: true, queen: 'b' }), { wins: { a: 1, b: 1 }, killDiff: 0, winner: 'b', tie: true });
   assert.deepEqual(D.duelScore([], 'a', 'b'), { wins: { a: 0, b: 0 }, killDiff: 0, winner: null, tie: true });
@@ -173,7 +176,7 @@ await check('trono: sin reina sienta a la retadora; reto ganado → reign.end/st
 
 await check('liga: pares ordenados, last ≤ 20, winrate 0.5 sin datos; pickOpponent respeta los pesos (10 000 sorteos ± 2 %), f_hard, fantasma solo con derrota reciente', () => {
   const t = TH.emptyThrone();
-  for (let i = 0; i < 25; i++) TH.updateLeague(t, 'zeta', 'alfa', i % 5 !== 0); // zeta gana 20 de 25
+  for (let i = 0; i < 25; i++) TH.updateLeague(t, 'zeta', 'alfa', i >= 5); // zeta pierde las 5 primeras y gana las 20 últimas
   const pair = t.league.pairs['alfa|zeta'];
   assert.ok(pair && pair.wins === 5 && pair.losses === 20 && pair.last.length === 20, JSON.stringify(pair));
   assert.ok(near(TH.winrate(t, 'zeta', 'alfa'), 0.8) && near(TH.winrate(t, 'alfa', 'zeta'), 0.2) && TH.winrate(t, 'alfa', 'nadie') === 0.5);
@@ -208,7 +211,7 @@ await check('genealogía: registerBirth guarda sha de la estructura; aprender no
   assert.equal(v.nets['gen-hija'].sha, TH.structureSha(store.loadNet('gen-hija'))); assert.equal(v.nets['gen-hija'].sha.length, 64);
   const g = store.loadNet('gen-hija'); g.weights.d.W = g.weights.d.W.map((x) => x + 0.01); store.saveNet(g);
   assert.equal(TH.genealogyView().nets['gen-hija'].edited, false, 'cambiar pesos (aprender) no es editar');
-  g.blocks.find((b) => b.id === 'd').params.units = 33; store.saveNet(g);
+  g.blocks.find((b) => b.id === 'd').params.activation = 'relu'; assert.ok(store.saveNet(g).ok);
   assert.equal(TH.genealogyView().nets['gen-hija'].edited, true, 'cambiar la estructura sí');
   const orphan = { ...clone(TEMPLATES.empty.genome), id: 'gen-huerfana', name: 'h', lineage: { generation: 1, parents: ['nadie-1'], born: null, mutations: [] } };
   store.saveNet(orphan); TH.registerBirth(store.loadNet('gen-huerfana'));
@@ -237,7 +240,7 @@ await check('dinastías: fundar (400 misma red, 404 inexistente) y una generaci�
   const kinds = new Set(events.filter((e) => e.type === 'dynasty').map((e) => e.event));
   for (const k of ['train', 'children', 'duel', 'generation']) assert.ok(kinds.has(k), `evento dynasty ${k}`);
   const v = TH.genealogyView();
-  assert.ok(Object.values(v.nets).every((n) => !n.orphan), 'sin huérfanos');
+  assert.ok(Object.entries(v.nets).filter(([id]) => id.startsWith('casa-')).every(([, n]) => !n.orphan), 'sin huérfanos entre las casas y sus hijos');
   assert.ok(Object.keys(v.nets).some((id) => id.startsWith('casa-a-1') || id.startsWith('casa-b-1')), 'los hijos están en la genealogía');
 });
 

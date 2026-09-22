@@ -77,3 +77,30 @@ export function readThrone() {
   const file = join(evoDir(), 'throne.json');
   try { return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null; } catch { return null; }
 }
+
+
+// Partidas guardadas (moviola, spec/07 §1): evo/games/<gameId>.json = {meta, events}; registro evo/log.jsonl
+export function gamesDir() {
+  const base = join(evoDir(), 'games');
+  if (!existsSync(base)) mkdirSync(base, { recursive: true });
+  return base;
+}
+const GAME_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+export function saveGame(meta, events) {
+  if (!meta || !GAME_ID_RE.test(String(meta.gameId))) return { ok: false, error: 'gameId inválido' };
+  const file = join(gamesDir(), `${meta.gameId}.json`);
+  const tmp = file + '.tmp';
+  writeFileSync(tmp, JSON.stringify({ meta, events }));
+  renameSync(tmp, file);
+  return { ok: true, id: meta.gameId, file };
+}
+export function loadGame(id) {
+  if (!GAME_ID_RE.test(String(id))) return null;
+  const file = join(gamesDir(), `${id}.json`);
+  if (!existsSync(file)) return null;
+  try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; }
+}
+export function appendLog(entry) {
+  if (!existsSync(evoDir())) mkdirSync(evoDir(), { recursive: true });
+  writeFileSync(join(evoDir(), 'log.jsonl'), JSON.stringify({ ts: Date.now(), ...entry }) + '\n', { flag: 'a' });
+}

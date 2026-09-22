@@ -29,3 +29,9 @@ export function gaussFrom(rng = Math.random) {
   while (!v) v = rng();
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
+
+// Entero determinista en [0, 2^31) a partir de (seed, k): primer valor de mulberry32 con semilla mezclada (spec/06 §6.1)
+export function hash32(seed, k) {
+  const s = (Number(seed) ^ Math.imul((Number(k) | 0) + 1, 0x9E3779B1)) & 0x7fffffff; // quita el bit alto: semilla válida para makeRng ([0, 2^31)) sin perder los bits bajos
+  return Math.floor(makeRng(s)() * 2 ** 31);
+}

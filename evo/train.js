@@ -10,6 +10,7 @@ import { normalize, validate, BLOCKS } from '../shared/genome.js';
 import { softmaxT } from '../shared/policy.js';
 import { assignRewards, returns } from '../shared/reward.js';
 import { loadNet, saveNet, netsDir } from './store.js';
+import { readThroneFull, pickOpponent } from './league.js';
 import { adaptImagination } from './mutate.js';
 import { playGame } from '../server/headless.js';
 import { createRoom } from '../server/rooms.js';
@@ -202,6 +203,51 @@ export function learnFromGames({ net, genome, games, optim, cfg = {} }) {
   return { imagination, update: { loss: pg.stats.loss, entropy: pg.stats.entropy, valueLoss: pg.stats.valueLoss, gradNorm: update.gradNorm, clipped: update.clipped, perBlock: update.perBlock, top: update.top, steps: pg.stats.steps }, lesson, rewards: { steps, meanEffective: steps ? sumEff / steps : 0 }, stats: pg.stats };
 }
 
+// ---------- estado de Adam en disco y aprendiz reutilizable (entrenador y duelos) ----------
+export function loadOptim(net, dir) {
+  let optim = adamInit(net);
+  const file = join(dir, 'optim.json');
+  try {
+    if (existsSync(file)) {
+      const o = JSON.parse(readFileSync(file, 'utf8'));
+      if (o.m && o.m.length === optim.m.length) optim = { m: Float64Array.from(o.m), v: Float64Array.from(o.v), t: o.t || 0, mean: o.mean || { mean: 0, n: 0 } };
+    }
+  } catch { /* fichero roto: se empieza de cero */ }
+  return optim;
+}
+export function saveOptim(optim, dir) {
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'optim.json'), tmp = file + '.tmp';
+  writeFileSync(tmp, JSON.stringify({ m: Array.from(optim.m), v: Array.from(optim.v), t: optim.t, mean: optim.mean }));
+  renameSync(tmp, file);
+}
+// aplica a la red lo que learnFromGames decidió sobre la Imaginación por uso
+export function applyImagination(g, im) {
+  if (!im) return;
+  g.imagination.usage = { ...im.usage };
+  if (im.changed) for (const f of Object.keys(im.weights)) g.imagination.families[f].weight = im.weights[f];
+}
+// makeLearner(genome) → {net, genome, optim, learn(games, {lrScale}), review(games), addStats(s), save()} (spec/06 §6.2)
+export function makeLearner(genome) {
+  const g = normalize(genome);
+  const net = compile(g);
+  const dir = join(netsDir(), g.id);
+  const optim = loadOptim(net, dir);
+  const learn = (games, { lrScale = 1 } = {}) => {
+    const lc = { ...g.learning.gradient, lr: g.learning.gradient.lr * lrScale };
+    const r = learnFromGames({ net, genome: g, games, optim, cfg: lc });
+    applyImagination(g, r.imagination);
+    g.weights = net.serialize();
+    return r;
+  };
+  return {
+    net, genome: g, optim, learn,
+    review: (games) => learn(games, { lrScale: 1 }),
+    addStats: (s) => { g.stats.games += s.games || 0; g.stats.wins += s.wins || 0; g.stats.kills += s.kills || 0; g.stats.deaths += s.deaths || 0; },
+    save: () => { g.weights = net.serialize(); saveNet(g); saveOptim(optim, dir); },
+  };
+}
+
 // ---------- partidas (en proceso o en hilo) ----------
 export function gameSummary(res, playerId) {
   const ev = res.events;
@@ -242,7 +288,10 @@ export function createTrainer(opts = {}) {
   const emit = (ev, data) => { for (const fn of listeners[ev] || []) { try { fn(data); } catch { /* ignorar */ } } };
   const cfg = {
     netId: opts.netId, genome: opts.genome || null,
-    opponents: { antagonist: 0.6, hallOfFame: 0.25, self: 0.15, antagonistId: null, ...(opts.opponents || {}) },
+    opponents: opts.exploiter
+      ? { antagonist: 1, hallOfFame: 0, self: 0, ghost: 0, hard: 2, ...(opts.opponents || {}), antagonist: 1, hallOfFame: 0, self: 0, antagonistId: (opts.opponents && opts.opponents.antagonistId) || readThroneFull().queen || null }
+      : { antagonist: 0.6, hallOfFame: 0.25, self: 0.15, ghost: 0, hard: 2, antagonistId: null, ...(opts.opponents || {}) },
+    exploiter: !!opts.exploiter,
     speed: opts.speed || 'turbo', workers: Math.max(1, Math.min(32, opts.workers || 1)),
     duration: opts.duration || { games: 100 }, soldiers: opts.soldiers ?? 'random', seed: Number.isInteger(opts.seed) ? opts.seed : Math.floor(Math.random() * 2 ** 30),
     learn: opts.learn || {},
@@ -265,27 +314,29 @@ export function createTrainer(opts = {}) {
     const net = compile(g);
     const dir = join(netsDir(), g.id);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    const optimFile = join(dir, 'optim.json');
-    let optim = adamInit(net);
-    try { if (existsSync(optimFile)) { const o = JSON.parse(readFileSync(optimFile, 'utf8')); if (o.m && o.m.length === optim.m.length) optim = { m: Float64Array.from(o.m), v: Float64Array.from(o.v), t: o.t, mean: o.mean || { mean: 0, n: 0 } }; } } catch { /* estado nuevo */ }
+    let optim = loadOptim(net, dir);
     const lc = { ...g.learning.gradient, ...cfg.learn };
     const batchSize = Math.max(1, lc.batchGames);
     const pool = cfg.speed === 'turbo' && cfg.workers > 1 ? new Pool(cfg.workers) : null;
     t.status = 'running'; emit('training', t.info());
     await new Promise((r) => setImmediate(r));
     const rivals = { antagonist: null, self: null, hall: [] };
-    if (cfg.opponents.antagonistId) { const a = loadNet(cfg.opponents.antagonistId); if (a) rivals.antagonist = { type: 'net', genome: a }; else if (AGENTS[cfg.opponents.antagonistId]) rivals.antagonist = { type: cfg.opponents.antagonistId, level: 3 }; }
+    const throne = readThroneFull();
+    const antagonistId = cfg.opponents.antagonistId || (throne.queen && throne.queen !== g.id ? throne.queen : null);
+    if (antagonistId) { const a = loadNet(antagonistId); if (a) rivals.antagonist = { type: 'net', genome: a }; else if (AGENTS[antagonistId]) rivals.antagonist = { type: antagonistId, level: 3 }; }
     const mDir = join(dir, 'milestones');
     if (existsSync(mDir)) for (const f of readdirSync(mDir).filter((x) => x.endsWith('.json')).sort()) { try { rivals.hall.push({ type: 'net', genome: normalize(JSON.parse(readFileSync(join(mDir, f), 'utf8'))) }); } catch { /* ignorar */ } }
     const snapshotSelf = () => ({ type: 'net', genome: { ...g, weights: net.serialize() } });
     rivals.self = snapshotSelf();
+    // sala de la fama = hitos propios + ex-reinas del trono (copias congeladas)
+    for (const h of throne.hallOfFame) { try { const snap = normalize(JSON.parse(readFileSync(h.snapshot, 'utf8'))); if (snap.id !== g.id) rivals.hall.push({ type: 'net', genome: snap, kind: 'hallOfFame' }); } catch { /* copia ilegible */ } }
+    const hallEntries = rivals.hall.map((spec) => ({ netId: spec.genome.id, kind: spec.kind || 'milestone', spec }));
     const pickRival = (k) => {
-      const r = makeRng(cfg.seed + 1000003 * k)();
-      const o = cfg.opponents; const total = (o.antagonist || 0) + (o.hallOfFame || 0) + (o.self || 0) || 1;
-      let kind = r < (o.antagonist || 0) / total ? 'antagonist' : r < ((o.antagonist || 0) + (o.hallOfFame || 0)) / total ? 'hallOfFame' : 'self';
-      if (kind === 'antagonist' && !rivals.antagonist) kind = 'self';
-      if (kind === 'hallOfFame') { if (!rivals.hall.length) kind = 'self'; else return { kind, spec: rivals.hall[makeRng(cfg.seed + 7 * k).int(rivals.hall.length)] }; }
-      return { kind, spec: kind === 'antagonist' ? rivals.antagonist : rivals.self };
+      const mix = { ...cfg.opponents, antagonistId: rivals.antagonist ? (antagonistId || 'antagonist') : null };
+      const pick = pickOpponent(g.id, mix, makeRng(cfg.seed + 1000003 * k), { throne, hall: hallEntries });
+      if (pick.kind === 'antagonist') return rivals.antagonist ? { kind: 'antagonist', spec: rivals.antagonist } : { kind: 'self', spec: rivals.self };
+      if (pick.kind === 'hallOfFame' || pick.kind === 'ghost') return { kind: pick.kind, spec: pick.spec };
+      return { kind: 'self', spec: rivals.self };
     };
     const soldiersFor = (k) => (cfg.soldiers === 'random' ? 1 + makeRng(cfg.seed + 31 * k + 1).int(4) : cfg.soldiers);
     const wins = [];
@@ -293,18 +344,13 @@ export function createTrainer(opts = {}) {
     const saveAll = () => {
       g.weights = net.serialize();
       saveNet(g);
-      const tmp = optimFile + '.tmp';
-      writeFileSync(tmp, JSON.stringify({ m: Array.from(optim.m), v: Array.from(optim.v), t: optim.t, mean: optim.mean }));
-      renameSync(tmp, optimFile);
+      saveOptim(optim, dir);
     };
     const sleep = () => {
       if (!batch.length) return;
       const r = learnFromGames({ net, genome: g, games: batch, optim, cfg: lc });
       t.updates++;
-      if (r.imagination) {
-        g.imagination.usage = { ...r.imagination.usage };
-        if (r.imagination.changed) for (const f of Object.keys(r.imagination.weights)) g.imagination.families[f].weight = r.imagination.weights[f];
-      }
+      applyImagination(g, r.imagination);
       const last = t.curve[t.curve.length - 1];
       if (last) { last.loss = r.update.loss; last.entropy = r.update.entropy; }
       t.lastLesson = r.lesson;

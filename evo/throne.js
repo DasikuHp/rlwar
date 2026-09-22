@@ -1,0 +1,185 @@
+// Trono y dinastías (spec/06 §2, §3, §6.3–§6.4): retar, sentar, sala de la fama con copia congelada,
+// fundar casas y correr una generación (entreno cruzado → cría → promoción → duelo entre casas).
+import { existsSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
+import { join } from 'node:path';
+import { validate } from '../shared/genome.js';
+import { makeRng, randomSeed } from '../shared/rng.js';
+import { loadNet, saveNet, netsDir, listNets, appendLog } from './store.js';
+import { readThroneFull, writeThrone, updateLeague, registerBirth, structureSha } from './league.js';
+import { runDuel as runDuelDefault } from './duel.js';
+import { mutate, mutationConfig } from './mutate.js';
+import { runPretournamentAsync } from './children.js';
+import { createTrainer } from './train.js';
+
+export { emptyThrone, readThroneFull, writeThrone, updateLeague, winrate, recentLoss, pickOpponent, structureSha, registerBirth, genealogyView } from './league.js';
+
+const httpError = (status, message) => Object.assign(new Error(message), { status });
+const clone = (v) => JSON.parse(JSON.stringify(v));
+
+export function throneView() {
+  const t = readThroneFull();
+  const q = t.queen ? loadNet(t.queen) : null;
+  return { ...t, queenName: q ? q.name : null };
+}
+
+// registra en la liga las partidas de un duelo (tablas no cuentan)
+export function recordDuelInLeague(t, rec) {
+  for (const g of rec.games) if (g.winner === rec.a || g.winner === rec.b) updateLeague(t, rec.a, rec.b, g.winner === rec.a);
+}
+
+function snapshotQueen(t, queenId, now) {
+  const g = loadNet(queenId);
+  const dir = join(netsDir(), queenId);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const n = t.hallOfFame.filter((h) => h.netId === queenId).length + 1;
+  const file = join(dir, `hof-${n}.json`);
+  const snap = { ...clone(g), frozen: g.blocks.map((b) => b.id) };
+  const tmp = file + '.tmp';
+  writeFileSync(tmp, JSON.stringify(snap)); renameSync(tmp, file);
+  const reignIdx = t.reigns.length - 1;
+  return { netId: queenId, snapshot: file, reignIdx, reignGames: t.reigns[reignIdx] ? t.reigns[reignIdx].defenses + t.reigns[reignIdx].lost : 0, sha: structureSha(g), ts: now };
+}
+
+// challenge(opts, hooks) → {result: seated|queen|challenger|tie, queen, duelId?}
+export async function challenge({ challenger, learning = 'mix', speed = 'turbo', seed } = {}, hooks = {}) {
+  const now = hooks.now || Date.now;
+  const emit = (ev) => { if (hooks.onEvent) hooks.onEvent(ev); appendLog(ev); };
+  const g = loadNet(challenger);
+  if (!g) throw httpError(404, `Red no encontrada: ${challenger}`);
+  if (!validate(g, { forPlay: true }).ok) throw httpError(400, `La red ${challenger} no puede jugar (falta Elegir)`);
+  let t = readThroneFull();
+  if (t.queen === challenger) throw httpError(400, 'Una red no puede retarse a sí misma');
+  if (!t.queen) {
+    const ts = now();
+    t.queen = challenger; t.since = ts;
+    t.reigns.push({ netId: challenger, from: ts, to: null, defenses: 0, won: 0, lost: 0 });
+    writeThrone(t);
+    emit({ type: 'reign.start', netId: challenger, queen: challenger, ts });
+    return { result: 'seated', queen: challenger };
+  }
+  const queen = t.queen;
+  const duelOpts = { a: challenger, b: queen, learning, speed, seed: Number.isInteger(seed) ? seed : randomSeed(), throne: true, queen };
+  const started = hooks.startDuel ? hooks.startDuel(duelOpts) : null;
+  const duelId = started ? started.id : null;
+  if (hooks.onDuelStart) hooks.onDuelStart({ duelId, queen, challenger });
+  const rec = started ? await started.promise : await (hooks.runDuel || runDuelDefault)(duelOpts);
+  t = readThroneFull();
+  recordDuelInLeague(t, rec);
+  const ts = now();
+  const result = rec.tie ? 'tie' : rec.winner === challenger ? 'challenger' : 'queen';
+  const cid = `c${t.challenges.length + 1}`;
+  t.challenges.push({ id: cid, challenger, queen, duelId: rec.id, result, ts });
+  const reign = t.reigns[t.reigns.length - 1];
+  if (result === 'challenger') {
+    if (reign) { reign.to = ts; reign.lost++; }
+    t.hallOfFame.push(snapshotQueen(t, queen, ts));
+    t.queen = challenger; t.since = ts;
+    t.reigns.push({ netId: challenger, from: ts, to: null, defenses: 0, won: 0, lost: 0 });
+    writeThrone(t);
+    emit({ type: 'challenge', id: cid, challenger, queen, duelId: rec.id, result, ts });
+    emit({ type: 'reign.end', netId: queen, queen: challenger, duelId: rec.id, ts });
+    emit({ type: 'reign.start', netId: challenger, queen: challenger, duelId: rec.id, ts });
+  } else {
+    if (reign) { reign.defenses++; reign.won++; }
+    writeThrone(t);
+    emit({ type: 'challenge', id: cid, challenger, queen, duelId: rec.id, result, ts });
+  }
+  return { result, queen: t.queen, duelId: rec.id };
+}
+
+// ---------- dinastías ----------
+const houseOf = (h) => (h === 'A' || h === 'B' ? h : null);
+export function foundDynasties(body = {}, house = null) {
+  const t = readThroneFull();
+  const houses = house ? [house] : ['A', 'B'];
+  for (const h of houses) {
+    if (!houseOf(h)) throw httpError(404, `Casa desconocida: ${h}`);
+    const spec = body[h];
+    if (!spec || typeof spec.netId !== 'string') throw httpError(400, `Falta la casa ${h}: {name, netId}`);
+    if (!loadNet(spec.netId)) throw httpError(404, `Red no encontrada: ${spec.netId}`);
+  }
+  const ids = houses.map((h) => body[h].netId);
+  const otherId = house ? (t.dynasties[house === 'A' ? 'B' : 'A'] || {}).champion : null;
+  if (new Set([...ids, ...(otherId ? [otherId] : [])]).size < ids.length + (otherId ? 1 : 0)) throw httpError(400, 'Las dos casas no pueden usar la misma red');
+  for (const h of houses) t.dynasties[h] = { name: String(body[h].name || `Casa ${h}`).slice(0, 32), champion: body[h].netId, generation: 0, founder: body[h].netId, history: [] };
+  writeThrone(t);
+  return { A: t.dynasties.A, B: t.dynasties.B };
+}
+
+function nextJobId() { return `cj${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`; }
+
+// una generación completa (spec/06 §3, §6.4). hooks: onEvent, registerJob, startDuel, onProgress
+export async function runGeneration(body = {}, hooks = {}) {
+  const emit = (house, event, extra = {}) => { const ev = { type: 'dynasty', house, event, ...extra }; if (hooks.onEvent) hooks.onEvent(ev); appendLog(ev); };
+  let t = readThroneFull();
+  if (!t.dynasties.A || !t.dynasties.B) throw httpError(400, 'Primero funda las dos casas (POST /api/lab/dynasties)');
+  const seed = Number.isInteger(body.seed) ? body.seed : randomSeed();
+  const training = { speed: 'turbo', duration: { games: 20 }, soldiers: 'random', workers: 1, ...(body.training || {}) };
+  delete training.netId; delete training.antagonistId;
+  const childrenCfg = { n: 4, mutation: null, pretournament: { games: 4, soldiers: 'random' }, ...(body.children || {}) };
+  const duelCfg = { learning: 'frozen', speed: 'turbo', soldiers: 'random', ...(body.duel || {}) };
+  const runDuel = hooks.runDuel || runDuelDefault;
+  let done = 0; const total = 6;
+  const progress = () => { done++; if (hooks.onProgress) hooks.onProgress(done, total); };
+  const result = { trainings: {}, children: {}, promoted: {}, duelId: null, winner: null, tie: false, A: null, B: null };
+  const champ = (h) => readThroneFull().dynasties[h].champion;
+  // 1. entreno cruzado
+  for (const h of ['A', 'B']) {
+    const other = h === 'A' ? 'B' : 'A';
+    const tr = createTrainer({ ...training, netId: champ(h), opponents: { antagonist: 1, hallOfFame: 0, self: 0, ...(training.opponents || {}), antagonistId: champ(other) }, seed: seed + (h === 'A' ? 1 : 2) });
+    if (hooks.registerTraining) hooks.registerTraining(tr);
+    emit(h, 'train', { trainingId: tr.id, netId: champ(h), against: champ(other) });
+    await tr.start();
+    if (tr.status === 'error') throw new Error(`entreno de la casa ${h}: ${tr.error}`);
+    result.trainings[h] = tr.id;
+    progress();
+  }
+  // 2. cría y promoción
+  for (const h of ['A', 'B']) {
+    const other = h === 'A' ? 'B' : 'A';
+    const mother = loadNet(champ(h)), rival = loadNet(champ(other));
+    const jobId = hooks.registerJob ? hooks.registerJob('children', mother.id) : nextJobId();
+    const existing = new Set(listNets().map((x) => x.id));
+    const kids = [];
+    for (let k = 0; k < childrenCfg.n; k++) {
+      const { child } = mutate(mother, mutationConfig(childrenCfg.mutation), makeRng(seed + 100 * (h === 'A' ? 1 : 2) + k), { sibling: k, existingIds: existing });
+      existing.add(child.id);
+      const r = saveNet(child);
+      if (!r.ok) throw new Error(`hijo ${child.id} inválido`);
+      registerBirth(loadNet(child.id));
+      kids.push(loadNet(child.id));
+    }
+    const pre = await runPretournamentAsync({ children: kids, opponent: rival, games: childrenCfg.pretournament.games ?? 4, seed: seed + 1000 * (h === 'A' ? 1 : 2), soldiers: childrenCfg.pretournament.soldiers ?? 'random' });
+    if (hooks.finishJob) hooks.finishJob(jobId, { parentId: mother.id, ranking: pre.ranking });
+    emit(h, 'children', { jobId, parentId: mother.id, ranking: pre.ranking });
+    result.children[h] = jobId;
+    const best = pre.ranking[0];
+    let promoted = false;
+    if (best) {
+      const duel = await runDuel({ a: best.id, b: mother.id, learning: duelCfg.learning, speed: duelCfg.speed, soldiers: duelCfg.soldiers, seed: seed + 2000 * (h === 'A' ? 1 : 2), throne: false });
+      t = readThroneFull(); recordDuelInLeague(t, duel);
+      if (duel.winner === best.id && !duel.tie) { t.dynasties[h].champion = best.id; promoted = true; }
+      writeThrone(t);
+      emit(h, 'promote', { duelId: duel.id, child: best.id, mother: mother.id, promoted });
+    }
+    result.promoted[h] = promoted;
+    progress();
+  }
+  // 3. duelo entre casas
+  const a = champ('A'), b = champ('B');
+  const duel = await runDuel({ a, b, learning: duelCfg.learning, speed: duelCfg.speed, soldiers: duelCfg.soldiers, seed: seed + 3000, throne: false });
+  t = readThroneFull(); recordDuelInLeague(t, duel);
+  result.duelId = duel.id; result.winner = duel.winner; result.tie = duel.tie;
+  for (const h of ['A', 'B']) {
+    const d = t.dynasties[h];
+    const won = duel.winner === d.champion && !duel.tie;
+    if (won) d.generation++;
+    d.history.push({ generation: d.generation, champion: d.champion, trainingId: result.trainings[h], childrenJobId: result.children[h], duelId: duel.id, won });
+    result[h] = { champion: d.champion, generation: d.generation, promoted: result.promoted[h] };
+  }
+  writeThrone(t);
+  emit('A', 'duel', { duelId: duel.id, a, b, winner: duel.winner, tie: duel.tie });
+  progress(); progress();
+  emit(duel.winner === t.dynasties.A.champion ? 'A' : duel.winner === t.dynasties.B.champion ? 'B' : 'A', 'generation', { A: result.A, B: result.B, duelId: duel.id, tie: duel.tie });
+  return result;
+}

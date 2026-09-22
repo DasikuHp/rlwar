@@ -5,6 +5,9 @@ import { eyeLayout } from '../shared/percept.js';
 import { TEMPLATES } from '../shared/templates.js';
 import { listNets, loadNet, saveNet, deleteNet, entryOf } from './store.js';
 import { createTrainer } from './train.js';
+import { runDuel, LEARNING_MODES, SPEEDS } from './duel.js';
+import { challenge, throneView, foundDynasties, runGeneration, readThroneFull, genealogyView, registerBirth } from './throne.js';
+import { loadGame, appendLog } from './store.js';
 import { mutate, mutationConfig, slugify } from './mutate.js';
 import { diffGenomes } from './diff.js';
 import { runPretournamentAsync } from './children.js';
@@ -31,6 +34,7 @@ function startChildrenJob({ genome, n, mutation, games, opponent, soldiers, seed
         existing.add(child.id);
         const r = saveNet(child);
         if (!r.ok) throw new Error(`el hijo ${child.id} no se pudo guardar: ${JSON.stringify(r.errors && r.errors[0])}`);
+        registerBirth(loadNet(child.id));
         children.push(loadNet(child.id));
       }
       const res = await runPretournamentAsync({ children, opponent, games, seed, soldiers, onGame: (done, total) => { job.progress = { done, total }; pushEvent('job', jobView(job)); } });
@@ -54,6 +58,46 @@ function trainingView(t, full = false) {
   if (full) Object.assign(v, { elapsedMs: t.startedAt ? Date.now() - t.startedAt : 0, curve: t.curve.slice(-500), sampleGames: [], rooms: t.rooms, lastLesson: t.lastLesson, config: { ...t.config, genome: undefined } });
   return v;
 }
+// ---------- duelos (spec/06 §1, §6.5) ----------
+const duels = new Map();
+let duelSeq = 1;
+const duelView = (d) => ({ id: d.id, a: d.a, b: d.b, status: d.status, learning: d.learning, speed: d.speed, throne: d.throne, soldiers: d.soldiers, seed: d.seed, games: d.games, wins: d.wins, killDiff: d.killDiff, winner: d.winner, tie: d.tie, ms: d.ms, roomCodes: d.roomCodes, startedAt: d.startedAt });
+function startDuel(opts) {
+  const id = `d${duelSeq++}`;
+  const holder = { id, rec: { id, a: opts.a, b: opts.b, status: 'running', learning: opts.learning, speed: opts.speed, throne: !!opts.throne, soldiers: opts.soldiers, seed: opts.seed, games: [], wins: {}, killDiff: 0, winner: null, tie: false, ms: 0, roomCodes: [], startedAt: Date.now() }, stop: false };
+  duels.set(id, holder);
+  holder.promise = runDuel({ ...opts, id, onStart: (rec) => { holder.rec = rec; }, shouldStop: () => holder.stop, onGame: (k, game, rec) => { holder.rec = rec; pushEvent('duel', { id, game, wins: rec.wins }); } })
+    .then((rec) => { holder.rec = rec; pushEvent('duel', { id, result: duelView(rec) }); appendLog({ type: 'duel', ...duelView(rec), games: undefined }); return rec; })
+    .catch((e) => { holder.rec.status = 'error'; holder.rec.error = e.message; pushEvent('error', { message: `duelo ${id}: ${e.message}` }); return holder.rec; });
+  return { id, promise: holder.promise, holder };
+}
+function startGenerationJob(body) {
+  const job = { id: `j${jobSeq++}`, kind: 'generation', status: 'running', progress: { done: 0, total: 6 }, result: null, error: null, netId: null, createdAt: Date.now() };
+  jobs.set(job.id, job);
+  (async () => {
+    try {
+      await new Promise((r) => setImmediate(r));
+      const res = await runGeneration(body, {
+        onEvent: (ev) => { if (ev.type === 'dynasty') pushEvent('dynasty', { house: ev.house, event: ev.event, ...ev }); },
+        onProgress: (done, total) => { job.progress = { done, total }; pushEvent('job', jobView(job)); },
+        registerJob: (kind, netId) => { const j = { id: `j${jobSeq++}`, kind, status: 'running', progress: { done: 0, total: 0 }, result: null, error: null, netId, createdAt: Date.now() }; jobs.set(j.id, j); return j.id; },
+        finishJob: (id, result) => { const j = jobs.get(id); if (j) { j.status = 'done'; j.result = result; pushEvent('job', jobView(j)); pushEvent('children', { jobId: id, parentId: result.parentId, ranking: result.ranking }); } },
+        registerTraining: (tr) => { trainings.set(tr.id, tr); tr.on('training', () => pushEvent('training', trainingView(tr))); },
+        startDuel: (opts) => startDuel(opts),
+      });
+      job.status = 'done'; job.result = res;
+      pushEvent('job', jobView(job));
+    } catch (e) { job.status = 'error'; job.error = e.message; pushEvent('job', jobView(job)); pushEvent('error', { message: `generación: ${e.message}` }); }
+  })();
+  return job;
+}
+function throneHooks() {
+  return {
+    onEvent: (ev) => { pushEvent('throne', { queen: readThroneFull().queen, event: ev.type, ...ev }); },
+    startDuel: (opts) => startDuel(opts),
+  };
+}
+
 function startTraining(body) {
   const t = createTrainer(body);
   t.on('training', () => pushEvent('training', trainingView(t)));
@@ -191,11 +235,103 @@ export async function labApi(req, res, parts, url) {
   if (seg[0] === 'events' && method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'Access-Control-Allow-Origin': '*' });
     res.write('retry: 2000\n\n');
-    res.write(`event: hello\ndata: ${JSON.stringify({ trainings: [...trainings.values()].map((t) => trainingView(t)), jobs: [...jobs.values()].map(jobView) })}\n\n`);
+    const th = readThroneFull(); res.write(`event: hello\ndata: ${JSON.stringify({ throne: { queen: th.queen, since: th.since }, trainings: [...trainings.values()].map((t) => trainingView(t)), jobs: [...jobs.values()].map(jobView), duels: [...duels.values()].map((d) => duelView(d.rec)) })}\n\n`);
     sseClients.add(res);
     const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { clearInterval(ping); } }, 20000);
     req.on('close', () => { sseClients.delete(res); clearInterval(ping); });
     return;
+  }
+  if (seg[0] === 'games' && seg.length === 2 && method === 'GET') {
+    const g = loadGame(seg[1]);
+    return g ? json(res, 200, g) : bad(404, 'Partida no encontrada');
+  }
+  if (seg[0] === 'duels') {
+    if (seg.length === 1 && method === 'GET') return json(res, 200, { duels: [...duels.values()].map((d) => duelView(d.rec)) });
+    if (seg.length === 1 && method === 'POST') {
+      const b = await body();
+      if (!b.ok) return bad(b.status, b.error);
+      const v = b.value || {};
+      for (const k of ['a', 'b']) if (typeof v[k] !== 'string' || !ID_RE.test(v[k]) || !loadNet(v[k])) return bad(404, `Red no encontrada: ${v[k]}`);
+      if (v.a === v.b) return bad(400, 'Una red no puede batirse contra sí misma');
+      const learning = v.learning ?? 'mix', speed = v.speed ?? 'turbo', soldiers = v.soldiers ?? 'random';
+      if (!LEARNING_MODES.includes(learning)) return bad(400, `learning tiene que ser ${LEARNING_MODES.join(', ')}`);
+      if (!SPEEDS.includes(speed)) return bad(400, `speed tiene que ser ${SPEEDS.join(', ')}`);
+      if (!(soldiers === 'random' || (Number.isInteger(soldiers) && soldiers >= 1 && soldiers <= 4))) return bad(400, 'soldiers tiene que ser "random" o un entero entre 1 y 4');
+      if (v.seed !== undefined && !(Number.isInteger(v.seed) && v.seed >= 0)) return bad(400, 'seed tiene que ser un entero ≥ 0');
+      if (activeTraining(v.a) || activeTraining(v.b)) return bad(409, 'Una de las redes está entrenando: para el entreno antes del duelo');
+      const d = startDuel({ a: v.a, b: v.b, learning, speed, soldiers, seed: v.seed === undefined ? randomSeed() : v.seed, throne: false });
+      return json(res, 202, { id: d.id, status: 'running', roomCodes: d.holder.rec.roomCodes });
+    }
+    const h = duels.get(seg[1]);
+    if (!h) return bad(404, 'Duelo no encontrado');
+    if (seg.length === 2 && method === 'GET') return json(res, 200, duelView(h.rec));
+    if (seg.length === 3 && seg[2] === 'stop' && method === 'POST') { h.stop = true; return json(res, 200, { ok: true, status: h.rec.status }); }
+    return bad(404, 'Ruta desconocida');
+  }
+  if (seg[0] === 'throne') {
+    if (seg.length === 1 && method === 'GET') return json(res, 200, throneView());
+    if (seg.length === 2 && seg[1] === 'challenge' && method === 'POST') {
+      const b = await body();
+      if (!b.ok) return bad(b.status, b.error);
+      const v = b.value || {};
+      if (typeof v.challenger !== 'string' || !ID_RE.test(v.challenger)) return bad(404, `Red no encontrada: ${v.challenger}`);
+      if (v.learning !== undefined && !LEARNING_MODES.includes(v.learning)) return bad(400, `learning tiene que ser ${LEARNING_MODES.join(', ')}`);
+      if (v.speed !== undefined && !SPEEDS.includes(v.speed)) return bad(400, `speed tiene que ser ${SPEEDS.join(', ')}`);
+      if (activeTraining(v.challenger)) return bad(409, 'La retadora está entrenando: para el entreno antes del reto');
+      let responded = false;
+      const hooks = { ...throneHooks(), onDuelStart: ({ duelId, queen }) => { responded = true; json(res, 202, { duelId, queen, status: 'running' }); } };
+      try {
+        const r = await (async () => {
+          const p = challenge({ challenger: v.challenger, learning: v.learning, speed: v.speed, seed: v.seed }, hooks);
+          p.catch(() => {});
+          return responded ? null : await p;
+        })();
+        if (responded) return;
+        if (r) return json(res, 200, r);
+        return;
+      } catch (e) {
+        if (responded) return;
+        return bad(e.status || 500, e.message);
+      }
+    }
+    return bad(404, 'Ruta desconocida');
+  }
+  if (seg[0] === 'hall-of-fame' && method === 'GET') return json(res, 200, { hallOfFame: readThroneFull().hallOfFame });
+  if (seg[0] === 'genealogy' && method === 'GET') return json(res, 200, genealogyView());
+  if (seg[0] === 'dynasties') {
+    if (seg.length === 1 && method === 'GET') { const t = readThroneFull(); return json(res, 200, { A: t.dynasties.A, B: t.dynasties.B }); }
+    if (seg.length === 1 && method === 'POST') {
+      const b = await body();
+      if (!b.ok) return bad(b.status, b.error);
+      try { return json(res, 200, foundDynasties(b.value || {}, url.searchParams.get('house'))); } catch (e) { return bad(e.status || 500, e.message); }
+    }
+    if (seg.length === 2 && seg[1] === 'generation' && method === 'POST') {
+      const b = await body();
+      if (!b.ok) return bad(b.status, b.error);
+      const t = readThroneFull();
+      if (!t.dynasties.A || !t.dynasties.B) return bad(400, 'Primero funda las dos casas (POST /api/lab/dynasties)');
+      if (activeTraining(t.dynasties.A.champion) || activeTraining(t.dynasties.B.champion)) return bad(409, 'Una campeona está entrenando');
+      const job = startGenerationJob(b.value || {});
+      return json(res, 202, { jobId: job.id, status: job.status });
+    }
+    if (seg.length === 3 && seg[2] === 'challenge-throne' && method === 'POST') {
+      const t = readThroneFull();
+      const house = t.dynasties[seg[1]];
+      if (!house) return bad(404, `Casa no encontrada: ${seg[1]}`);
+      const b = await body();
+      if (!b.ok) return bad(b.status, b.error);
+      const v = b.value || {};
+      let responded = false;
+      const hooks = { ...throneHooks(), onDuelStart: ({ duelId, queen }) => { responded = true; json(res, 202, { duelId, queen, status: 'running' }); } };
+      try {
+        const p = challenge({ challenger: house.champion, learning: v.learning, speed: v.speed, seed: v.seed }, hooks);
+        p.catch(() => {});
+        const r = responded ? null : await p;
+        if (responded) return;
+        return json(res, 200, r);
+      } catch (e) { if (responded) return; return bad(e.status || 500, e.message); }
+    }
+    return bad(404, 'Ruta desconocida');
   }
   if (seg[0] === 'jobs' && method === 'GET') {
     if (seg.length === 1) return json(res, 200, { jobs: [...jobs.values()].map(jobView) });
@@ -214,6 +350,7 @@ export async function labApi(req, res, parts, url) {
       if ((d.games !== undefined && !(Number.isInteger(d.games) && d.games >= 1)) || (d.minutes !== undefined && !(d.minutes > 0)) || (d.plateau !== undefined && !(d.plateau && Number.isInteger(d.plateau.window) && d.plateau.window >= 1))) return bad(400, 'duración inválida: {games ≥ 1} | {minutes > 0} | {plateau:{window ≥ 1, minGain}}');
       if (v.workers !== undefined && !(Number.isInteger(v.workers) && v.workers >= 1 && v.workers <= 32)) return bad(400, 'workers entre 1 y 32');
       if (activeTraining(v.netId)) return bad(409, `La red ${v.netId} ya está entrenando`);
+      if (v.exploiter) { const th = readThroneFull(); if (!th.queen) return bad(400, 'No hay reina: la retadora explotadora necesita una reina a la que explotar'); if (th.queen === v.netId) return bad(400, 'La reina no puede explotarse a sí misma'); }
       const t = startTraining({ ...v, duration: d });
       return json(res, 202, { id: t.id, status: t.status });
     }
@@ -226,7 +363,8 @@ export async function labApi(req, res, parts, url) {
   if (seg[0] === 'templates' && method === 'GET') return json(res, 200, Object.entries(TEMPLATES).map(([key, t]) => ({ key, name: t.name, why: t.why, genome: t.genome, paramCount: countParams(t.genome) })));
 
   if (seg[0] === 'nets') {
-    if (seg.length === 1 && method === 'GET') return json(res, 200, { nets: listNets().map((n) => ({ ...n, isQueen: false, house: null, training: !!activeTraining(n.id) })) });
+    const th = readThroneFull();
+    if (seg.length === 1 && method === 'GET') return json(res, 200, { nets: listNets().map((n) => ({ ...n, isQueen: th.queen === n.id, house: th.dynasties.A && th.dynasties.A.champion === n.id ? 'A' : th.dynasties.B && th.dynasties.B.champion === n.id ? 'B' : null, training: !!activeTraining(n.id) })) });
     if (seg.length === 1 && method === 'POST') {
       const b = await body();
       if (!b.ok) return bad(b.status, b.error);
@@ -236,6 +374,7 @@ export async function labApi(req, res, parts, url) {
         if (!val.ok) return json(res, 400, { error: 'Genoma inválido', errors: val.errors, warnings: val.warnings });
         if (loadNet(v.genome.id)) return bad(409, `Ya existe una red con id "${v.genome.id}".`);
         const r = saveNet(v.genome);
+        registerBirth(loadNet(r.id));
         return json(res, 201, { id: r.id, genome: loadNet(r.id) });
       }
       const t = TEMPLATES[v.template];
@@ -245,6 +384,7 @@ export async function labApi(req, res, parts, url) {
       const genome = { ...JSON.parse(JSON.stringify(t.genome)), id, name };
       const r = saveNet(genome);
       if (!r.ok) return json(res, 400, { error: 'Genoma inválido', errors: r.errors });
+      registerBirth(loadNet(id));
       return json(res, 201, { id, genome: loadNet(id) });
     }
     if (seg.length === 2 && seg[1] === 'import' && method === 'POST') {
@@ -259,6 +399,7 @@ export async function labApi(req, res, parts, url) {
         id = uniqueId(id);
       }
       const r = saveNet({ ...g, id });
+      registerBirth(loadNet(r.id));
       return json(res, 201, { id: r.id, warnings: val.warnings });
     }
     const id = seg[1];

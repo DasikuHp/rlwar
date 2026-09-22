@@ -133,7 +133,7 @@ await check('neuronas: GET calcula nombres desde las partidas guardadas; PUT ren
   assert.equal((await api(`/api/lab/nets/${netId}/neurons/cd/3`, 'PUT', { name: '' })).status, 400);
 });
 
-await check('bofetada y caricia: evento en la partida y en el registro, recompensa devuelta con signo, feedback pendiente; 404 partida/decisión', async () => {
+await check('bofetada y caricia: evento en la partida y en el registro, recompensa devuelta con signo, feedback aplicado al momento; 404 partida/decisión', async () => {
   const slap = await api(`/api/lab/nets/${netId}/slap`, 'POST', { game: sampleGame, decisionEventId: decisionEv.id, amount: 1 });
   assert.equal(slap.status, 200, slap.text); assert.equal(slap.body.ok, true); assert.ok(slap.body.reward < 0);
   const caress = await api(`/api/lab/nets/${netId}/caress`, 'POST', { game: sampleGame, decisionEventId: decisionEv.id });
@@ -143,7 +143,7 @@ await check('bofetada y caricia: evento en la partida y en el registro, recompen
   assert.equal(evs.length, 2);
   assert.deepEqual(evs.map((e) => e.data.term), ['slapCaress', 'slapCaress']); assert.ok(evs.every((e) => e.data.decisionEventId === decisionEv.id && e.data.amount === 1 && e.actor.playerId === 'usuario'));
   const fb = (await api(`/api/lab/nets/${netId}/feedback`)).body;
-  assert.ok(fb.pending.length === 2 && fb.pending.every((f) => f.game === sampleGame));
+  assert.ok(fb.pending.length === 0 && fb.applied.length === 2 && fb.applied.every((f) => f.game === sampleGame)); // efecto inmediato (spec/04 §10.4)
   assert.equal((await api(`/api/lab/nets/${netId}/slap`, 'POST', { game: 'no-existe', decisionEventId: 1 })).status, 404);
   assert.equal((await api(`/api/lab/nets/${netId}/slap`, 'POST', { game: sampleGame, decisionEventId: 999999 })).status, 404);
   const log = (await api('/api/lab/log?limit=20')).body;

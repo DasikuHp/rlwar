@@ -4,7 +4,7 @@
   "test/api-lab.spec.mjs": "e9a5c4eee703e51223ec6c27eed73bda97060aab038933d3067243c82679cdef",
   "test/api-trainings.spec.mjs": "b9803e2fbb235407cbcc192bf428ea18c4a316144de13846350a50c2fc29a17a",
   "test/api-trono.spec.mjs": "534f9b7e82f1e4c3f6906d9013315cef75216cc1e8144889e51897fbd8d29f9f",
-  "test/api-verdad.spec.mjs": "68eedebb8a0fba8847c3809a5619ae366acc805e6db56fc94493b14b05ffd130",
+  "test/api-verdad.spec.mjs": "ca1d8a176513740d87b7044f274d378726607f8beeb3cc874a61d7be94c10c60",
   "test/aprendizaje-extra.spec.mjs": "2a48c48c1d52088e53e56fa754b4a419ed655f25da2bb343ccc1a2cdb49a2da8",
   "test/aprendizaje.spec.mjs": "25c7544b912e59aa3b067246cdebae1856db2855372627934364035e35c185ea",
   "test/arreglos-bofetada.spec.mjs": "60ef1cb5db4507f80256aaf6e8909e6c49601b0c4f51335a6ca37b55bf6ea3a3",

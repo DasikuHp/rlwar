@@ -24,7 +24,7 @@ await check('GET /api/lab/catalog: bloques, ojos con layout, familias, rasgos, r
   const r = await api('/api/lab/catalog');
   assert.equal(r.status, 200);
   const c = r.body;
-  assert.equal(c.blocks.length, 24);
+  assert.equal(c.blocks.length, 26);
   for (const b of c.blocks) assert.ok(b.type && b.name && b.icon && b.group && b.level && b.explain && b.example && Array.isArray(b.params) && b.streams, b.type);
   const dense = c.blocks.find((b) => b.type === 'dense');
   assert.deepEqual(dense.params.map((p) => p.key), ['units', 'activation']);

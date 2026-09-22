@@ -1,5 +1,6 @@
 {
   "test/agents.spec.mjs": "8267c5aa20b27284d371934f61895910a19d77e83fde99a061d9db9ac3447525",
+  "test/api-lab.spec.mjs": "e9a5c4eee703e51223ec6c27eed73bda97060aab038933d3067243c82679cdef",
   "test/client.spec.mjs": "65659173d8eca4e4291675bcadc8e9e64d1dbba5c77400c88be063e70119156a",
   "test/genoma.spec.mjs": "147045817e4f51959ac6b181a114344f1e486ae6c522f8cb1eed5ca0ede6cb3c",
   "test/geometry.spec.mjs": "2c8b83388a6bb9b8159676f3d9dc62f512605cfc65280eb7e35413b768e0ca94",

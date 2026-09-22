@@ -6,6 +6,7 @@ import { extname, join, normalize, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { rooms, getRoom, createRoom } from './rooms.js';
 import { listAgents } from '../agents/registry.js';
+import { labApi } from '../evo/api.js';
 import * as C from '../shared/constants.js';
 
 const PORT = Number(process.env.PORT) || 8787;
@@ -41,6 +42,7 @@ async function api(req, res, parts, url) {
   // /api/health
   if (parts[1] === 'health') return json(res, 200, { ok: true, rooms: rooms.size });
   if (parts[1] === 'agents') return json(res, 200, { agents: listAgents() });
+  if (parts[1] === 'lab') return labApi(req, res, parts, url); // laboratorio (spec/08), cuerpos hasta 48 MB
 
   if (parts[1] !== 'rooms') return json(res, 404, { error: 'Ruta desconocida' });
 

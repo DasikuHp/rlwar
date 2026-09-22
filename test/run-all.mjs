@@ -4,6 +4,8 @@ import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkFrozen, describeCheck } from '../tools/freeze.mjs';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const PORT = Number(process.env.TEST_PORT || 8791);
@@ -38,7 +40,7 @@ if (!fz.ok) { console.log('\nFAIL ✘ (tests congelados modificados: OK del usua
 if (args.includes('--check-only')) process.exit(0);
 
 const server = spawn(process.execPath, [join(ROOT, 'server', 'server.js')], {
-  env: { ...process.env, GW_FAST: '1', PORT: String(PORT) }, stdio: 'ignore',
+  env: { ...process.env, GW_FAST: '1', PORT: String(PORT), GW_EVO_DIR: mkdtempSync(join(tmpdir(), 'gw-evo-test-')) }, stdio: 'ignore',
 });
 
 const results = [];
@@ -60,6 +62,7 @@ try {
   results.push(await run('genoma (F2): defaults fijados y validación', [join(ROOT, 'test', 'genoma.spec.mjs')]));
   results.push(await run('percepción (F3): ojos, Imaginación, ajuste, destinos', [join(ROOT, 'test', 'percepcion.spec.mjs')]));
   results.push(await run('política (F3): decisión, agente-red, almacén, sala', [join(ROOT, 'test', 'politica.spec.mjs')]));
+  results.push(await run('API del laboratorio: catálogo, plantillas, redes', [join(ROOT, 'test', 'api-lab.spec.mjs'), BASE]));
 } finally {
   server.kill();
 }

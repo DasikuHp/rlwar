@@ -47,6 +47,7 @@ Nada se bloquea por nivel ✅: la interfaz filtra por `level`; el servidor acept
 |---|---|---|
 | GET | `/api/lab/nets` | `{nets:[{id, name, emblem, traits, stats, generation, paramCount, blocks, updatedAt, isQueen, house, training}]}` |
 | POST | `/api/lab/nets` | `{template:"sniper"|"turtle"|"seer"|"empty", name}` o `{genome}` → `201 {id, genome}` |
+| | | `id` = nombre en minúsculas sin acentos ni símbolos (`[a-z0-9-]`, 3–32); si ya existe, sufijo `-2`, `-3`…; sin nombre, el de la plantilla. Con `{genome}` manda el `id` del genoma (409 si existe). |
 | GET | `/api/lab/nets/:id` | `{genome, paramCount, warnings}` |
 | PUT | `/api/lab/nets/:id` | genoma completo → `{ok, warnings}` / `400 {errors}` / `409` si entrena |
 | DELETE | `/api/lab/nets/:id` | `{ok}` (409 si es reina o campeona de casa, salvo `?force=1`) |

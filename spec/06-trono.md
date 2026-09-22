@@ -172,3 +172,27 @@
 - SSE: `duel {id, game?, result?}` por partida y al final; `throne {queen, event: reign.start|reign.end|
   challenge}`; `dynasty {house, event, …}`. `hello` lleva `throne: {queen, since}`.
 - Todo evento de trono/dinastía/entreno se añade también a `evo/log.jsonl` (`{ts, type, ...}`), que F7 lee.
+
+## 7. Arreglos tras la revisión de Opus (2026-09-23, `spec/revision-opus.md` C5 y C6)
+Aprobados por el usuario ("arréglalo tú"). Completan §1–§6 sin cambiar lo que ya decían.
+
+### 7.1 La reina y las campeonas no se borran por accidente (C5)
+- `DELETE /api/lab/nets/:id` responde **409** si la red es la reina o la campeona de una casa (spec/08 §4), con el
+  motivo en español. Con `?force=1` se borra y:
+  - si era la reina: su reinado se cierra (`to = ahora`, `ended: 'deleted'`), `queen = null`, `since = null`, y se
+    emite `throne {event: 'reign.end', reason: 'deleted'}` (y la línea en el log). La siguiente retadora se sienta
+    directamente;
+  - si era campeona de una casa: la casa queda **sin campeona** (`champion: null`). Una generación o un reto de esa
+    casa responde 400 ("la casa no tiene campeona: vuelve a fundarla con `?house=`").
+- Si la reina ya no existe (su fichero desapareció por otra vía), `challenge()` cierra su reinado con
+  `ended: 'missing'` y sienta a la retadora (`result: 'seated'`).
+- Un duelo de reto que termina en error o sin ninguna partida jugada **anula** el reto: se registra en
+  `challenges` con `result: 'void'` (y `error`), nadie gana ni defiende (los reinados no cambian) y el evento
+  `challenge` lleva `result: 'void'`.
+
+### 7.2 Un id por duelo, también entre dinastías y reinicios (C6)
+- Los ids de duelo son únicos entre procesos: `d<ms en base 36>-<n>` (`newDuelId()` en `evo/duel.js`). Los usan el
+  API, el trono y las dinastías.
+- Los duelos de una generación (madre contra hija en cada casa y duelo entre casas) pasan por el mismo registro que
+  `POST /api/lab/duels`: aparecen en `GET /api/lab/duels`, emiten SSE `duel` y sus ids son los de `history` y de
+  los eventos `dynasty`.

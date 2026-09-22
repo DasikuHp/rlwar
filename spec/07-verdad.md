@@ -203,8 +203,8 @@ API: `POST /api/lab/nets/:id/bulletin` → `202 {jobId}` (`kind: 'exam'`), event
 en `evo/nets/<id>/bulletin.json`; `GET /api/lab/nets/:id/bulletin` → el último o `404`.
 
 ### 12.7 Neuronas con nombre (§9)
-`nameNeurons(genome, samples, {m = 500, min = 50, threshold = 0.3})`, `samples = [{obs, decision?}]` (las
-más recientes primero; se usan como mucho `m`): para cada `dense`/memoria y cada unidad, correlación de
+`nameNeurons(genome, samples, {min = 50, threshold = 0.3})`, `samples = [{obs, decision?}]` (las
+más recientes primero; usa todas las que recibe y devuelve en `m` cuántas usó; la **API** recoge como mucho las 500 decisiones más recientes): para cada `dense`/memoria y cada unidad, correlación de
 Pearson de su activación (recalculada con `net.forward`) con cada entrada nombrada por `eyeLayout`: para
 bloques `ctx`, las entradas de contexto; para bloques `cand`/`move`, además las entradas por fila
 (`candidates`/`moves`) y las columnas `kill` / `suicide` (`decision.candidates[i].sim.type`). Con menos de

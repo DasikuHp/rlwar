@@ -3,7 +3,7 @@
 import { hash32 } from '../shared/rng.js';
 import { playGame } from '../server/headless.js';
 import { createRoom } from '../server/rooms.js';
-import { loadNet, saveGame } from './store.js';
+import { loadNet, saveGame, saveGameNets } from './store.js';
 import { makeLearner } from './train.js';
 
 export const LEARNING_MODES = ['frozen', 'hot', 'mix'];
@@ -50,7 +50,7 @@ function summarize(room, row) {
   return { winner, kills, events: room.events, trajectories, playerIds, gameId: room.gameId, result: room.result };
 }
 
-export function makePlay({ speed = 'turbo', duelId = null, saveGames = true, genomes = {}, shouldStop = null } = {}) {
+export function makePlay({ speed = 'turbo', duelId = null, saveGames = true, genomes = {}, shouldStop = null, throne = false } = {}) {
   const genomeOf = (id) => genomes[id] || loadNet(id);
   return async (row) => {
     const left = netSpec(genomeOf(row.left)), right = netSpec(genomeOf(row.right));
@@ -68,7 +68,10 @@ export function makePlay({ speed = 'turbo', duelId = null, saveGames = true, gen
       if (room.phase === 'playing') room.gameOver(true);
       out = { ...summarize(room, row), roomCode: room.code };
     }
-    if (saveGames) saveGame({ gameId: out.gameId, kind: 'duel', duelId, seed: row.seed, soldiers: row.soldiers, left: row.left, right: row.right, winner: out.winner, kills: out.kills, ts: Date.now() }, out.events);
+    if (saveGames) {
+      saveGame({ gameId: out.gameId, kind: 'duel', duelId, throne: !!throne, seed: row.seed, soldiers: row.soldiers, left: row.left, right: row.right, nets: [row.left, row.right], winner: out.winner, kills: out.kills, ts: Date.now() }, out.events, out.trajectories);
+      if (throne) saveGameNets(out.gameId, { [row.left]: left.genome, [row.right]: right.genome });
+    }
     return out;
   };
 }
@@ -95,7 +98,7 @@ export async function runDuel(opts = {}) {
   const learners = {};
   const learnEnabled = a !== b;
   const learnerOf = (netId) => learners[netId] || (learners[netId] = (opts.learner || defaultLearner)(netId));
-  const play = opts.play || makePlay({ speed, duelId: id, saveGames, genomes: {}, shouldStop });
+  const play = opts.play || makePlay({ speed, duelId: id, saveGames, genomes: {}, shouldStop, throne });
   const plan = duelPlan({ a, b, seed, soldiers });
   const played = [];
   const t0 = Date.now();

@@ -7,7 +7,12 @@ import { listNets, loadNet, saveNet, deleteNet, entryOf } from './store.js';
 import { createTrainer } from './train.js';
 import { runDuel, LEARNING_MODES, SPEEDS } from './duel.js';
 import { challenge, throneView, foundDynasties, runGeneration, readThroneFull, genealogyView, registerBirth } from './throne.js';
-import { loadGame, appendLog } from './store.js';
+import { loadGame, appendLog, readLog, loadLogEntry, listGames, saveGame, loadGameNets, readFeedback, writeFeedback, netsDir } from './store.js';
+import { nameNeurons, diaryPhrase, memoryOf } from './truth.js';
+import { runBulletin } from './exam.js';
+import { compile } from '../shared/nn.js';
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { mutate, mutationConfig, slugify } from './mutate.js';
 import { diffGenomes } from './diff.js';
 import { runPretournamentAsync } from './children.js';
@@ -55,7 +60,7 @@ function pushEvent(ev, data) { for (const res of sseClients) { try { res.write(`
 const activeTraining = (netId) => [...trainings.values()].find((t) => t.netId === netId && ['queued', 'running', 'paused'].includes(t.status)) || null;
 function trainingView(t, full = false) {
   const v = { id: t.id, netId: t.netId, status: t.status, games: t.games, updates: t.updates, startedAt: t.startedAt, error: t.error };
-  if (full) Object.assign(v, { elapsedMs: t.startedAt ? Date.now() - t.startedAt : 0, curve: t.curve.slice(-500), sampleGames: [], rooms: t.rooms, lastLesson: t.lastLesson, config: { ...t.config, genome: undefined } });
+  if (full) Object.assign(v, { elapsedMs: t.startedAt ? Date.now() - t.startedAt : 0, curve: t.curve.slice(-500), sampleGames: t.sampleGames || [], rooms: t.rooms, lastLesson: t.lastLesson, config: { ...t.config, genome: undefined } });
   return v;
 }
 // ---------- duelos (spec/06 §1, §6.5) ----------
@@ -91,6 +96,77 @@ function startGenerationJob(body) {
   })();
   return job;
 }
+function startExamJob(genome) {
+  const job = { id: `j${jobSeq++}`, kind: 'exam', status: 'running', progress: { done: 0, total: 92 }, result: null, error: null, netId: genome.id, createdAt: Date.now() };
+  jobs.set(job.id, job);
+  (async () => {
+    try {
+      let done = 0;
+      const res = await runBulletin(genome, { onScene: () => { done++; if (done % 10 === 0) { job.progress = { done, total: 92 }; pushEvent('job', jobView(job)); } } });
+      const out = { netId: genome.id, ts: Date.now(), aim: res.aim, cover: res.cover, survival: res.survival, adaptation: res.adaptation, details: res.details, seeds: res.seeds };
+      const dir = join(netsDir(), genome.id);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      const file = join(dir, 'bulletin.json'), tmp = file + '.tmp';
+      writeFileSync(tmp, JSON.stringify(out)); renameSync(tmp, file);
+      const logId = appendLog({ type: 'exam', netId: genome.id, aim: res.aim, cover: res.cover, survival: res.survival, adaptation: res.adaptation, seeds: res.seeds });
+      job.status = 'done'; job.progress = { done: 92, total: 92 }; job.result = { ...out, logId };
+      pushEvent('job', jobView(job));
+      pushEvent('exam', { netId: genome.id, aim: res.aim, cover: res.cover, survival: res.survival, adaptation: res.adaptation, logId });
+    } catch (e) { job.status = 'error'; job.error = e.message; pushEvent('job', jobView(job)); pushEvent('error', { message: `examen de ${genome.id}: ${e.message}` }); }
+  })();
+  return job;
+}
+function loadBulletin(netId) {
+  const file = join(netsDir(), netId, 'bulletin.json');
+  try { return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null; } catch { return null; }
+}
+// muestras para las neuronas: trayectorias de las partidas guardadas de la red (más recientes primero, ≤ 500)
+function neuronSamples(netId, limit = 500) {
+  const out = [];
+  const games = listGames({ netId }).reverse();
+  for (const meta of games) {
+    const g = loadGame(meta.gameId);
+    if (!g || !g.trajectories) continue;
+    const steps = Object.values(g.trajectories).filter((tr) => tr && tr.netId === netId).flatMap((tr) => Object.values(tr.soldiers || {}).flat());
+    steps.sort((a, b) => ((b.decision && b.decision.eventId) || 0) - ((a.decision && a.decision.eventId) || 0));
+    for (const st of steps) { if (st && st.obs && st.phase === 'shoot') out.push({ obs: st.obs, decision: st.decision }); if (out.length >= limit) return out; }
+  }
+  return out;
+}
+const DIARY_KINDS = new Set(['lesson', 'milestone', 'reign.start', 'reign.end', 'challenge', 'exam']);
+const CHRONICLE_KINDS = new Set(['reign.start', 'reign.end', 'challenge', 'dynasty']);
+function diaryEntries(filter) {
+  const out = [];
+  for (const e of readLog()) {
+    if (!filter(e)) continue;
+    const ph = diaryPhrase(e);
+    if (ph) out.push({ ...ph, id: e.id });
+  }
+  return out.reverse();
+}
+// moviola: activaciones de la decisión del turno n reproduciendo la trayectoria del soldado (spec/07 §12.8)
+function brainOf(gameId, turn, playerId) {
+  const g = loadGame(gameId);
+  if (!g) return { status: 404, error: 'Partida no encontrada' };
+  const decisions = g.events.filter((e) => e.type === 'decision' && e.turn === turn && (!playerId || e.actor.playerId === playerId) && !e.data.truncated);
+  const dec = decisions[0];
+  if (!dec) return { status: 404, error: `No hay decisión registrada en el turno ${turn}` };
+  const tr = g.trajectories && g.trajectories[dec.actor.playerId];
+  if (!tr) return { status: 404, error: 'La partida no guarda la trayectoria de ese jugador' };
+  const steps = (tr.soldiers && tr.soldiers[dec.actor.soldierId]) || [];
+  const idx = steps.findIndex((s) => s.decision && s.decision.eventId === dec.id);
+  if (idx < 0) return { status: 404, error: 'La decisión no está en la trayectoria' };
+  const nets = loadGameNets(gameId);
+  const genome = (nets && nets[tr.netId]) || loadNet(tr.netId);
+  if (!genome) return { status: 404, error: `Red no encontrada: ${tr.netId}` };
+  const net = compile(genome);
+  let st = net.zeroState(), out = null;
+  for (let i = 0; i <= idx; i++) { out = net.forward(steps[i].obs, st); st = out.state; }
+  const activations = {}; for (const [id, a] of Object.entries(out.activations)) activations[id] = Array.isArray(a) && a[0] && a[0].length !== undefined ? a.map((row) => Array.from(row)) : Array.from(a);
+  const attention = {}; for (const [k, v] of Object.entries(out.attention || {})) attention[k] = v.map((h) => Array.from(h));
+  return { status: 200, body: { decision: { ...dec.data, eventId: dec.id, id: dec.id, turn: dec.turn, actor: dec.actor }, activations, attention, outputs: { choose: out.outputs.choose ? Array.from(out.outputs.choose.scores) : null, value: out.outputs.value ?? null }, approx: !(nets && nets[tr.netId]), netId: tr.netId } };
+}
+
 function throneHooks() {
   return {
     onEvent: (ev) => { pushEvent('throne', { queen: readThroneFull().queen, event: ev.type, ...ev }); },
@@ -240,6 +316,18 @@ export async function labApi(req, res, parts, url) {
     const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { clearInterval(ping); } }, 20000);
     req.on('close', () => { sseClients.delete(res); clearInterval(ping); });
     return;
+  }
+  if (seg[0] === 'log' && method === 'GET') {
+    if (seg.length === 1) { const limit = Math.max(1, Math.min(1000, Number(url.searchParams.get('limit')) || 100)); return json(res, 200, { entries: readLog({ limit }) }); }
+    const e = loadLogEntry(seg[1]);
+    return e ? json(res, 200, e) : bad(404, 'Entrada no encontrada');
+  }
+  if (seg[0] === 'chronicle' && method === 'GET') return json(res, 200, { entries: diaryEntries((e) => CHRONICLE_KINDS.has(e.type)) });
+  if (seg[0] === 'games' && seg.length === 5 && seg[2] === 'turns' && seg[4] === 'brain' && method === 'GET') {
+    const turn = Number(seg[3]);
+    if (!Number.isInteger(turn)) return bad(400, 'turno inválido');
+    const r = brainOf(seg[1], turn, url.searchParams.get('player'));
+    return r.status === 200 ? json(res, 200, r.body) : bad(r.status, r.error);
   }
   if (seg[0] === 'games' && seg.length === 2 && method === 'GET') {
     const g = loadGame(seg[1]);
@@ -524,6 +612,63 @@ export async function labApi(req, res, parts, url) {
       rep.genome.lineage.mutations.push({ op: 'transplant', from: donor.id, blockId: targetId, sourceBlockId: dblock.id, text });
       saveNet(rep.genome);
       return json(res, 200, { ok: true, blockId: targetId, warnings });
+    }
+    // ----- F7: boletín, diario, neuronas, bofetada/caricia, feedback (spec/07 §7, §9, §10, §12) -----
+    if (seg.length === 3 && seg[2] === 'bulletin') {
+      if (method === 'GET') { const b = loadBulletin(id); return b ? json(res, 200, b) : bad(404, 'Todavía no hay boletín: pide un examen con POST'); }
+      if (method === 'POST') {
+        if (activeTraining(id)) return bad(409, `La red ${id} está entrenando: para el entreno antes del examen.`);
+        if (!validate(genome, { forPlay: true }).ok) return bad(400, 'La red no puede jugar (falta Elegir)');
+        if ([...jobs.values()].some((j) => j.kind === 'exam' && j.netId === id && j.status === 'running')) return bad(409, 'Ya hay un examen en marcha para esta red');
+        const job = startExamJob(genome);
+        return json(res, 202, { jobId: job.id, status: job.status });
+      }
+    }
+    if (seg.length === 3 && seg[2] === 'diary' && method === 'GET') return json(res, 200, { entries: diaryEntries((e) => e.netId === id && DIARY_KINDS.has(e.type)) });
+    if (seg.length === 3 && seg[2] === 'feedback' && method === 'GET') return json(res, 200, { pending: readFeedback(id) });
+    if (seg.length === 3 && seg[2] === 'memory' && method === 'GET') return json(res, 200, memoryOf(genome));
+    if (seg.length === 3 && seg[2] === 'neurons' && method === 'GET') {
+      const samples = neuronSamples(id, 500);
+      const named = nameNeurons(genome, samples);
+      const m = samples.length;
+      return json(res, 200, { blocks: named, m });
+    }
+    if (seg.length === 5 && seg[2] === 'neurons' && method === 'PUT') {
+      const block = genome.blocks.find((x) => x.id === seg[3]);
+      if (!block || !(block.type === 'dense' || ['echo', 'gru', 'lstm', 'teamMemory'].includes(block.type))) return bad(404, `El bloque "${seg[3]}" no existe o no tiene neuronas`);
+      const index = Number(seg[4]);
+      if (!Number.isInteger(index) || index < 0 || index >= block.params.units) return bad(404, `La neurona ${seg[4]} no existe en ${block.id} (tiene ${block.params.units})`);
+      const b = await body();
+      if (!b.ok) return bad(b.status, b.error);
+      const name = b.value && typeof b.value.name === 'string' ? b.value.name.trim().slice(0, 40) : '';
+      if (!name) return bad(400, 'name tiene que ser un texto no vacío');
+      const g2 = { ...genome, names: { ...(genome.names || {}), neurons: { ...((genome.names || {}).neurons || {}) } } };
+      g2.names.neurons[block.id] = { ...(g2.names.neurons[block.id] || {}), [index]: name };
+      saveNet(g2);
+      appendLog({ type: 'neuron.name', netId: id, blockId: block.id, index, name, custom: true });
+      return json(res, 200, { ok: true, blockId: block.id, index, name });
+    }
+    if (seg.length === 3 && (seg[2] === 'slap' || seg[2] === 'caress') && method === 'POST') {
+      const b = await body();
+      if (!b.ok) return bad(b.status, b.error);
+      const v = b.value || {};
+      const game = loadGame(String(v.game || ''));
+      if (!game) return bad(404, `Partida no encontrada: ${v.game}`);
+      const dec = game.events.find((e) => e.type === 'decision' && e.id === Number(v.decisionEventId));
+      if (!dec) return bad(404, `La partida no tiene la decisión ${v.decisionEventId}`);
+      const amount = v.amount === undefined ? 1 : Number(v.amount);
+      if (!(amount > 0 && amount <= 10)) return bad(400, 'amount tiene que estar entre 0 y 10');
+      const kind = seg[2];
+      const term = 'slapCaress';
+      const reward = (kind === 'slap' ? -1 : 1) * amount * (genome.reward.slapCaress ?? 1);
+      const eid = game.events.reduce((m, e) => Math.max(m, e.id || 0), 0) + 1;
+      game.events.push({ id: eid, t: Date.now(), game: game.meta.gameId, turn: dec.turn, type: kind, actor: { playerId: 'usuario', soldierId: null, netId: id }, data: { decisionEventId: dec.id, amount, term } });
+      saveGame(game.meta, game.events, game.trajectories || null);
+      const pending = readFeedback(id);
+      pending.push({ kind, game: game.meta.gameId, decisionEventId: dec.id, amount, ts: Date.now() });
+      writeFeedback(id, pending);
+      appendLog({ type: kind, netId: id, game: game.meta.gameId, decisionEventId: dec.id, amount, term });
+      return json(res, 200, { ok: true, reward, kind });
     }
     if (seg.length === 3 && seg[2] === 'export' && method === 'GET') {
       return json(res, 200, normalize(genome), { 'Content-Disposition': `attachment; filename="${id}.json"` });

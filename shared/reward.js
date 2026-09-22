@@ -19,7 +19,7 @@ export function returns(values, gamma) {
   return out;
 }
 
-export function assignRewards({ reward, teamSpirit = 0.5, events, trajectory, playerId, stats = null }) {
+export function assignRewards({ reward, teamSpirit = 0.5, events, trajectory, playerId, stats = null, extraTerms = null }) {
   const st = stats || reward.stats || {};
   const soldiers = trajectory && trajectory.soldiers ? trajectory.soldiers : {};
   const entries = [];
@@ -52,6 +52,7 @@ export function assignRewards({ reward, teamSpirit = 0.5, events, trajectory, pl
       if (mine.length) add(mine[mine.length - 1], 'die', reward.die);
     }
   }
+  if (extraTerms) for (const [id, terms] of Object.entries(extraTerms)) { const e = byDecision.get(Number(id)); if (e) for (const [term, value] of Object.entries(terms)) add(e, term, value); }
   const end = events.filter((ev) => (ev.type === 'win' || ev.type === 'lose') && ev.actor.playerId === playerId).pop();
   const dead = new Set(events.filter((ev) => ev.type === 'death' && ev.actor.playerId === playerId).map((ev) => ev.actor.soldierId));
   for (const soldierId of Object.keys(soldiers)) {

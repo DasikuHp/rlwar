@@ -98,9 +98,14 @@ export class Room {
 
   // F4: evento del registro; devuelve su id
   emit(type, actor, data = {}) {
+    // tope duro (spec/07 §1, §12.1): al superarlo, un único `error` y las decisiones dejan de ir completas
+    if (this.events.length >= C.LIMITS.eventsPerGame && !this.eventsCapped) {
+      this.eventsCapped = true;
+      const eid = this.events.length + 1;
+      this.events.push({ id: eid, t: Date.now(), game: this.gameId, turn: this.shots, type: 'error', actor: { playerId: null, soldierId: null, netId: null }, data: { message: `tope de eventos (${C.LIMITS.eventsPerGame})`, fallback: 'decisiones sin registro completo' } });
+    }
     const id = this.events.length + 1;
     this.events.push({ id, t: Date.now(), game: this.gameId, turn: this.shots, type, actor, data });
-    if (this.events.length > C.LIMITS.eventsPerGame) this.events.shift();
     return id;
   }
   actorOf(soldier) {
@@ -230,11 +235,18 @@ export class Room {
     return createAgent(p.agentType, { level: p.level || 2, temperature: p.temperature || 0, netId: p.netId, genome: p.genome, learn: p.learn, attribution: !this.headless });
   }
 
+  // registro completo de la decisión (spec/07 §12.1): sin activationsSummary; sin puntos si la sala es sin pantalla
+  decisionData(decision) {
+    const { activationsSummary, eventId, ...rest } = decision;
+    const data = { ...rest, chosen: decision.chosen ?? null, chosenMove: decision.chosenMove ?? null };
+    if (this.headless && Array.isArray(data.candidates)) data.candidates = data.candidates.map((c) => { const { points, ...cc } = c; return cc; });
+    return data;
+  }
   // F3: registra una decisión de red (overlay/moviola) y la emite antes del disparo o del movimiento
   pushDecision(decision) {
     if (!decision) return;
     const soldier = this.soldiers.find((s) => s.id === decision.soldierId);
-    decision.eventId = this.emit('decision', this.actorOf(soldier), { phase: decision.phase, chosen: decision.chosen ?? null, chosenMove: decision.chosenMove ?? null });
+    decision.eventId = this.emit('decision', this.actorOf(soldier), this.eventsCapped ? { phase: decision.phase, chosen: decision.chosen ?? null, chosenMove: decision.chosenMove ?? null, truncated: true } : this.decisionData(decision));
     const { activationsSummary, ...light } = decision;
     this.lastDecision = light;
     this.decisions.push(light);
@@ -358,6 +370,12 @@ export class Room {
     this.shotLog.push(logEntry);
     if (this.shotLog.length > 40) this.shotLog.shift();
     const shotEventId = this.emit('shot', this.actorOf(soldier), { mode, expr: logEntry.expr, family: fam.family, params: fam.params, angle, result: logEntry.result, minDist, minAllyDist, decisionEventId });
+    // roces (spec/07 §12.1): enemigos vivos no alcanzados a ≤ 1 u de la trayectoria
+    for (const e of this.soldiers) {
+      if (!e.alive || e.team === soldier.team || (shot.result.type === 'kill' && shot.result.soldierId === e.id)) continue;
+      let d = Infinity; for (const [px, py] of shot.points) { const dd = Math.hypot(e.x - px, e.y - py); if (dd < d) d = dd; }
+      if (d <= 1) this.emit('graze', this.actorOf(soldier), { soldierId: e.id, dist: Math.round(d * 1000) / 1000, shotEventId });
+    }
     soldier.lastExpr = `${C.MODE_LABELS[mode]} ${String(expr).slice(0, 80)}`;
     let message;
     if (shot.result.type === 'kill') {

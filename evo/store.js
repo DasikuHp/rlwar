@@ -86,13 +86,39 @@ export function gamesDir() {
   return base;
 }
 const GAME_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-export function saveGame(meta, events) {
+export function saveGame(meta, events, trajectories = null) {
   if (!meta || !GAME_ID_RE.test(String(meta.gameId))) return { ok: false, error: 'gameId inválido' };
   const file = join(gamesDir(), `${meta.gameId}.json`);
   const tmp = file + '.tmp';
-  writeFileSync(tmp, JSON.stringify({ meta, events }));
+  // los vectores de observación son Float64Array: en JSON van como listas normales
+  writeFileSync(tmp, JSON.stringify(trajectories ? { meta, events, trajectories } : { meta, events }, (k, v) => (v && ArrayBuffer.isView(v) ? Array.from(v) : v)));
   renameSync(tmp, file);
   return { ok: true, id: meta.gameId, file };
+}
+// lista de partidas guardadas (meta) ordenadas por ts ascendente; filtro opcional por red
+export function listGames({ netId = null } = {}) {
+  const out = [];
+  for (const fname of readdirSync(gamesDir())) {
+    if (!fname.endsWith('.json') || fname.endsWith('.nets.json')) continue;
+    try {
+      const g = JSON.parse(readFileSync(join(gamesDir(), fname), 'utf8'));
+      if (!g || !g.meta) continue;
+      if (netId && !(Array.isArray(g.meta.nets) && g.meta.nets.includes(netId))) continue;
+      out.push(g.meta);
+    } catch { /* fichero roto */ }
+  }
+  return out.sort((a, b) => (a.ts || 0) - (b.ts || 0) || String(a.gameId).localeCompare(String(b.gameId)));
+}
+// retención (spec/07 §1, §12.1): deja las `keep` más recientes de la red; los duelos de trono no se borran
+export function pruneGames(netId, keep = 200) {
+  const mine = listGames({ netId }).filter((m) => !m.throne);
+  const removed = [];
+  for (const m of mine.slice(0, Math.max(0, mine.length - keep))) {
+    try { unlinkSync(join(gamesDir(), `${m.gameId}.json`)); removed.push(m.gameId); } catch { /* ya no está */ }
+    const nets = join(gamesDir(), `${m.gameId}.nets.json`);
+    if (existsSync(nets)) { try { unlinkSync(nets); } catch { /* ignorar */ } }
+  }
+  return removed;
 }
 export function loadGame(id) {
   if (!GAME_ID_RE.test(String(id))) return null;
@@ -100,7 +126,64 @@ export function loadGame(id) {
   if (!existsSync(file)) return null;
   try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; }
 }
-export function appendLog(entry) {
+// registro (spec/07 §1, §12.1, §12.8): una línea por evento con id secuencial; rota a log.1.jsonl al superar maxBytes
+const logFile = () => join(evoDir(), 'log.jsonl');
+let logSeq = null;
+function lastLogId() {
+  try {
+    if (!existsSync(logFile())) return 0;
+    const lines = readFileSync(logFile(), 'utf8').trim().split('\n').filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) { try { const e = JSON.parse(lines[i]); if (Number.isInteger(e.id)) return e.id; } catch { /* seguir */ } }
+  } catch { /* sin registro */ }
+  return 0;
+}
+export function appendLog(entry, { maxBytes = 50 * 1024 * 1024 } = {}) {
   if (!existsSync(evoDir())) mkdirSync(evoDir(), { recursive: true });
-  writeFileSync(join(evoDir(), 'log.jsonl'), JSON.stringify({ ts: Date.now(), ...entry }) + '\n', { flag: 'a' });
+  if (logSeq === null) logSeq = lastLogId();
+  try { if (existsSync(logFile()) && statSync(logFile()).size > maxBytes) renameSync(logFile(), join(evoDir(), 'log.1.jsonl')); } catch { /* ignorar */ }
+  const id = ++logSeq;
+  const { id: entryId, ...rest } = entry || {};
+  writeFileSync(logFile(), JSON.stringify({ id, ts: Date.now(), ...rest, ...(entryId !== undefined ? { entryId } : {}) }) + '\n', { flag: 'a' });
+  return id;
+}
+export function readLog({ limit = 0 } = {}) {
+  if (!existsSync(logFile())) return [];
+  const out = [];
+  for (const line of readFileSync(logFile(), 'utf8').split('\n')) { if (!line.trim()) continue; try { out.push(JSON.parse(line)); } catch { /* línea rota */ } }
+  return limit > 0 ? out.slice(-limit) : out;
+}
+export function loadLogEntry(id) {
+  const n = Number(id);
+  if (!Number.isInteger(n)) return null;
+  for (const file of [logFile(), join(evoDir(), 'log.1.jsonl')]) {
+    if (!existsSync(file)) continue;
+    for (const line of readFileSync(file, 'utf8').split('\n')) { if (!line.trim()) continue; try { const e = JSON.parse(line); if (e.id === n) return e; } catch { /* seguir */ } }
+  }
+  return null;
+}
+// bofetadas y caricias pendientes por red (spec/07 §12.8)
+const feedbackFile = (netId) => join(netsDir(), netId, 'feedback.json');
+export function readFeedback(netId) {
+  try { return existsSync(feedbackFile(netId)) ? JSON.parse(readFileSync(feedbackFile(netId), 'utf8')) : []; } catch { return []; }
+}
+export function writeFeedback(netId, list) {
+  const dir = join(netsDir(), netId);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const tmp = feedbackFile(netId) + '.tmp';
+  writeFileSync(tmp, JSON.stringify(list));
+  renameSync(tmp, feedbackFile(netId));
+}
+
+// copia de los genomas de una partida (duelos de trono, spec/07 §10): evo/games/<gameId>.nets.json
+export function saveGameNets(gameId, nets) {
+  if (!GAME_ID_RE.test(String(gameId))) return { ok: false };
+  const file = join(gamesDir(), gameId + '.nets.json'), tmp = file + '.tmp';
+  writeFileSync(tmp, JSON.stringify(nets)); renameSync(tmp, file);
+  return { ok: true, file };
+}
+export function loadGameNets(gameId) {
+  if (!GAME_ID_RE.test(String(gameId))) return null;
+  const file = join(gamesDir(), gameId + '.nets.json');
+  if (!existsSync(file)) return null;
+  try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; }
 }

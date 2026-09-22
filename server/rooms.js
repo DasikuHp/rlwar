@@ -389,7 +389,7 @@ export class Room {
       message = `💥 ${shooter.name} eliminó a ${victimOwner?.name ?? '?'} con ${soldier.lastExpr}`;
       if (shooter.isBot) this.banter(shooter, soldier, agentMeta(shooter.agentType).banter?.kill, { victim: victimOwner?.name ?? 'rival' });
     } else if (shot.result.type === 'suicide') {
-      soldier.alive = false;
+      // fuego amigo: muere el aliado alcanzado; el tirador sigue vivo y se mueve (spec/01 §2.4, §9.1)
       message = `💀 ${shooter.name} eliminó a su propio aliado con ${soldier.lastExpr}`;
       const victimS = this.soldiers.find((s) => s.id === shot.result.soldierId);
       if (victimS) { victimS.alive = false; this.emit('friendlyFire', this.actorOf(soldier), { victimSoldierId: victimS.id, victimPlayerId: victimS.ownerId, victimName: shooter.name, shotEventId }); this.emit('death', this.actorOf(victimS), { killerSoldierId: soldier.id, killerPlayerId: playerId, killerName: shooter.name, shotEventId }); }
@@ -428,10 +428,11 @@ export class Room {
       // agente en proceso: chooseMove ahora mismo (ve el resultado), o el move de chooseShot, o quieto
       this.turn = { ...this.turn, stage: 'move', radius: C.MOVE_RADIUS };
       const pend = this.pending[playerId] || {};
+      const mover = pend.agent || this.agents[playerId]; // también si el disparo no vino de agentTurn (spec/01 §2.2)
       let requested = 'stay';
       try {
-        if (pend.agent && typeof pend.agent.chooseMove === 'function' && soldier.alive) {
-          requested = pend.agent.chooseMove({
+        if (mover && typeof mover.chooseMove === 'function' && soldier.alive) {
+          requested = mover.chooseMove({
             soldiers: this.soldiers, obstacles: this.obstacles, soldier,
             shot: { ...this.lastShot, points: shot.points }, moveOptions: this.moveOptionsFor(soldier),
             history: this.history.slice(-12), rng: this.rng, state: this.snapshot(),
@@ -464,10 +465,16 @@ export class Room {
     const soldier = this.soldiers.find((s) => s.id === this.turn.soldierId);
     const player = this.players.find((p) => p.id === playerId);
     if (!soldier || !player) return { error: 'Soldado o jugador inválido' };
-    if (!soldier.alive) return { error: 'Ese soldado ya está muerto' };
     const from = { x: soldier.x, y: soldier.y };
     const decisionEventId = requested && typeof requested === 'object' && requested.decision && Number.isInteger(requested.decision.eventId) ? requested.decision.eventId : null;
     const coverBefore = this.coverOf(soldier);
+    if (!soldier.alive) {
+      // el turno nunca se queda abierto (spec/01 §9.2): un soldado caído no se mueve, pero el turno se cierra
+      this.lastMove = { playerId, soldierId: soldier.id, from, to: { ...from }, requested: null, slid: false, stayed: true, reason: 'dead', ts: Date.now() };
+      this.emit('move', this.actorOf(soldier), { from, to: { ...from }, requested: null, slid: false, stayed: true, coverBefore, coverAfter: coverBefore, decisionEventId });
+      this.finishTurn();
+      return { ok: true, move: this.lastMove };
+    }
     if (requested && typeof requested === 'object' && requested.stay === true) requested = 'stay';
     const r = slideMove({ from, requested, soldiers: this.soldiers, obstacles: this.obstacles, selfId: soldier.id });
     soldier.x = r.to.x;

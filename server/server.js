@@ -51,7 +51,7 @@ async function api(req, res, parts, url) {
     if (method === 'GET') return json(res, 200, { rooms: roomList() });
     if (method === 'POST') {
       const b = await readBody(req);
-      const room = createRoom(b.name, { soldiersPerPlayer: b.soldiers, seed: b.seed });
+      const room = createRoom(b.name, { soldiersPerPlayer: b.soldiers, seed: b.seed, speed: b.speed });
       return json(res, 201, { code: room.code, name: room.name, soldiers: room.soldiersPerPlayer, seed: room.seed });
     }
     return json(res, 405, { error: 'Método no permitido' });

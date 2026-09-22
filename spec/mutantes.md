@@ -216,3 +216,16 @@ Cazados **14/30**, **13/30** y **8/30**. Lectura de los supervivientes (fuente e
 En curso al cerrar la sesión (`scratchpad/mutants-f7.log`). Se documenta en la siguiente sesión junto con la
 segunda ronda de F5/F6.
 
+
+## Arreglos de Opus (2026-09-23, `spec/revision-opus.md`)
+Mutantes dirigidos a las líneas cambiadas, con `tools/mutants.mjs` (`generateMutants`/`applyMutant`), cada uno
+contra el spec nuevo del arreglo.
+
+### R1 — motor: `server/rooms.js` (líneas 391–396, 430–436, 468–478) contra `test/arreglos-motor.spec.mjs` — cazados 14/24
+| línea | cambio | por qué sobrevive |
+|---|---|---|
+| 396 | `===` → `!==` en la rama `wall` | fuera del arreglo (texto del registro); lo cubre el resto de la batería por comportamiento |
+| 434 | `&&` → `\|\|` (×2) en `mover && … && soldier.alive` | equivalentes: los 5 agentes tienen `chooseMove` y, tras el arreglo, el tirador está siempre vivo al llegar aquí |
+| 469, 478 | `===`/`!==`, `true`/`false` en `decisionEventId` y en `requested.stay === true` | código anterior al arreglo; el spec del arreglo no usa decisiones. Lo cubren `politica.spec` y `motor.spec` |
+| 474 | `slid`/`stayed` del **evento** `move` en la rama del caído | **hueco pequeño**: el test mira `lastMove`, no el evento. Riesgo bajo: el evento copia los mismos valores |
+| 476 | `ok: true` → `false` en el retorno de la rama del caído | nadie consulta `ok` de `move()` en proceso; la API lo reenvía tal cual |

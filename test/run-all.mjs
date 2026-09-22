@@ -76,6 +76,7 @@ try {
   results.push(await run('API de trono (F6): duelos, trono, dinastías, explotadora', [join(ROOT, 'test', 'api-trono.spec.mjs'), BASE]));
   results.push(await run('verdad (F7): frases, confianza, emoción, memoria, boletín, neuronas, registro', [join(ROOT, 'test', 'verdad.spec.mjs')]));
   results.push(await run('API de la verdad (F7): moviola, boletín, diario, neuronas, bofetada', [join(ROOT, 'test', 'api-verdad.spec.mjs'), BASE]));
+  results.push(await run('arreglos del motor: fuego amigo, turno siempre cerrado, sala x10', [join(ROOT, 'test', 'arreglos-motor.spec.mjs'), BASE]));
 } finally {
   server.kill();
 }

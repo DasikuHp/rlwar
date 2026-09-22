@@ -46,7 +46,8 @@ Después de cada disparo, el soldado que disparó puede moverse hasta **2 u** (c
 Un destino inválido (dentro de un obstáculo, fuera del plano, a menos de 1 u de otro soldado, o al otro
 lado de un muro) **se desliza** al punto válido más cercano. `state.lastMove` y el evento SSE `move`
 (`{move:{from,to,requested,slid,stayed}}`) cuentan qué pasó. `POST /api/rooms` admite `seed` (partida
-reproducible; `state.config.seed` la expone siempre).
+reproducible; `state.config.seed` la expone siempre) y `speed` (`1` | `10`; una sala x10 solo admite agentes).
+Fuego amigo: si tu tiro mata a un aliado, muere **solo el aliado**; tu soldado sigue vivo y se mueve igual.
 El `state` incluye `players[]` (con `agentType`, `kills`, `deaths`, `alive`), `soldiers[]`, `obstacles[]`,
 `history[]` (últimas expresiones disparadas, para no repetir), `turn` con `deadline` y `result` al terminar.
 

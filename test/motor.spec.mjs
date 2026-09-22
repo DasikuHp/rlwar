@@ -343,12 +343,12 @@ await check('headless.playGame: devuelve seed, result, events[], trajectories, c
 
 // ---------- Room viva (FAST): etapa move, ventana y vencimiento ----------
 await check('Room viva: fire sin move → stage "move" con deadline y radius; move de otro → error; move válido; vencimiento → quieto', async () => {
-  const room = new Room('viva', { soldiersPerPlayer: 1, seed: 3 });
+  const room = new Room('viva', { soldiersPerPlayer: 1, seed: 1 }); // seed 1: empieza el humano
   const j = room.addPlayer('humano', 'left');
-  room.addAgent('greedy', { level: 1, team: 'right' });
+  room.addAgent('chaos', { level: 1, team: 'right' });
   room.start(j.player.id);
   const t0 = Date.now();
-  while (Date.now() - t0 < 15000 && !(room.turn && room.turn.playerId === j.player.id && room.turn.stage === 'shoot')) await sleep(50);
+  while (Date.now() - t0 < 15000 && room.phase === 'playing' && !(room.turn && room.turn.playerId === j.player.id && room.turn.stage === 'shoot')) await sleep(50);
   assert.ok(room.turn && room.turn.playerId === j.player.id, 'llega mi turno');
   assert.equal(room.turn.stage, 'shoot');
   const soldier = room.soldiers.find((s) => s.id === room.turn.soldierId);
@@ -399,16 +399,16 @@ if (BASE) {
     return res.json();
   };
   await check('API: POST /rooms acepta seed y la devuelve; fire.move; POST /move; state.turn.stage/radius; lastMove', async () => {
-    const room = await api('/api/rooms', 'POST', { name: 'api-move', soldiers: 1, seed: 21 });
-    assert.equal(room.seed, 21);
+    const room = await api('/api/rooms', 'POST', { name: 'api-move', soldiers: 1, seed: 1 }); // seed 1: empieza el humano
+    assert.equal(room.seed, 1);
     const j = await api(`/api/rooms/${room.code}/join`, 'POST', { name: 'yo', team: 'left' });
-    await api(`/api/rooms/${room.code}/addbot`, 'POST', { level: 1 });
+    await api(`/api/rooms/${room.code}/addagent`, 'POST', { type: 'chaos', level: 1, team: 'right' });
     await api(`/api/rooms/${room.code}/start`, 'POST', { playerId: j.player.id });
     let st = null;
     const t0 = Date.now();
-    while (Date.now() - t0 < 15000) { st = await api(`/api/rooms/${room.code}/state`); if (st.turn && st.turn.playerId === j.player.id && st.turn.stage === 'shoot') break; await sleep(100); }
+    while (Date.now() - t0 < 15000) { st = await api(`/api/rooms/${room.code}/state`); if (st.phase !== 'playing' || (st.turn && st.turn.playerId === j.player.id && st.turn.stage === 'shoot')) break; await sleep(100); }
     assert.ok(st.turn && st.turn.playerId === j.player.id, 'mi turno');
-    assert.equal(st.config.seed, 21); assert.equal(st.config.moveRadius, 2);
+    assert.equal(st.config.seed, 1); assert.equal(st.config.moveRadius, 2);
     const bad = await api(`/api/rooms/${room.code}/move`, 'POST', { playerId: j.player.id, x: 0, y: 0 });
     assert.ok(bad.error, 'antes de disparar no se puede mover');
     const f = await api(`/api/rooms/${room.code}/fire`, 'POST', { playerId: j.player.id, mode: 'function', expr: '0.2*x' });

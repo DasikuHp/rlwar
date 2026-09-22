@@ -19,7 +19,8 @@
 
 ```
 shared/            Lógica pura, sin I/O (servidor, hilos de entreno y navegador)
-  rng.js           PRNG con semilla: makeRng(seed) → {float(), int(n), pick(arr), gauss(), seed}
+  rng.js           PRNG con semilla (mulberry32): makeRng(seed) → rng, función `() → [0,1)` con
+                   rng.int(n), rng.pick(arr), rng.gauss(), rng.seed; compatible con Math.random
   constants.js     + MOVE_RADIUS, BODY, MIN_SEPARATION, MOVE_TIME, límites del laboratorio (LIMITS)
   geometry.js      validación y deslizamiento de movimiento (spec/01 §3): slideMove(...)
   genome.js        esquema del genoma, catálogo de bloques (BLOCKS), validate(), limits (spec/02)

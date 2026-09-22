@@ -70,7 +70,8 @@ Destinos candidatos para agentes y redes (`moveOptions(ctx)` en `agents/lib.js`,
 - Errores (`{error}`): partida no en curso · `turn` nulo o de otro jugador · `turn.stage !== 'move'`
   (para humanos/API) · soldado muerto.
 - Llama a `slideMove` y aplica `to` al soldado; registra
-  `lastMove = {playerId, soldierId, from, to, requested, slid, stayed, reason, ts}`; `log()` una
+  `lastMove = {playerId, soldierId, from, to, requested, slid, stayed, reason, ts}` (`from`/`to`/`requested`
+  son `{x, y}`; `requested` es `null` si fue `stay`, vencimiento o entrada inválida); `log()` una
   línea: `🦶 <nombre> se mueve a (x, y)` / `🦶 <nombre> se queda quieto` / `↪️ … (deslizado)`.
 - `fire()` con `move` en el cuerpo llama a este mismo método (con `stage` interno `'move'` durante la
   llamada). No hay otro camino para cambiar `soldier.x/y` durante la partida (salvo `reposition`).
@@ -84,10 +85,15 @@ Destinos candidatos para agentes y redes (`moveOptions(ctx)` en `agents/lib.js`,
 - Heurísticos con esquiva básica 🧭 (todos con el `rng` recibido; determinista):
   | Agente | Regla de `chooseMove` |
   |---|---|
-  | Sniper | destino con **menos enemigos con línea de tiro** sobre él (`cover`); empate → mayor distancia al enemigo más cercano; si `quedarse` empata con el mejor, se queda. |
-  | Greedy | entre los destinos con línea de tiro a **algún** enemigo, el más cercano al enemigo más cercano; si ninguno la tiene, el de menos enemigos con línea de tiro. |
-  | Artillery | menos enemigos con línea de tiro; empate → **más** lejos del enemigo más cercano. |
-  | Chaos | `rng.pick` de los 9. |
+  | Sniper | destino con **menos enemigos con línea de tiro** sobre él (`cover`); empate → mayor distancia al enemigo más cercano; **si `quedarse` tiene la misma cobertura que el mejor destino, se queda** (no se mueve solo por alejarse). |
+  | Greedy | entre los destinos con línea de tiro a **algún** enemigo, el más cercano al enemigo más cercano (empate → menor índice); si ninguno la tiene, el de menos enemigos con línea de tiro (empate → menor índice). |
+  | Artillery | menos enemigos con línea de tiro; empate → **más** lejos del enemigo más cercano (empate → menor índice). |
+  | Chaos | `options[Math.floor(rng() * 9)]`. |
+  Sin enemigos vivos: todos se quedan. `rng` es la función `() → [0,1)` de `shared/rng.js`
+  (`makeRng(seed)`, con `rng.int(n)`, `rng.pick(arr)`, `rng.gauss()`, `rng.seed`); por defecto
+  `Math.random`. `moveOptions(ctx)` devuelve `[{i, to:{x,y}, stay, slid, cover, distEnemy, los}]`
+  (`cover` = enemigos vivos con línea de tiro al destino; `distEnemy` = distancia desde el destino
+  al enemigo vivo más cercano; `los` = línea de tiro desde el destino a ese enemigo).
   "Línea de tiro" = segmento recto entre dos puntos sin cruzar obstáculos (muestreo cada 0.25 u).
 
 ## 6. Semilla y partidas sin pantalla (`server/rooms.js`, `server/headless.js`)

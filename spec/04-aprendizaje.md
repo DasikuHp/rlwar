@@ -218,3 +218,71 @@ retardo de los bots, y multiplica `SHOT_SPEED`; `TURN_TIME` no cambia. `snapshot
 | POST | `/api/lab/trainings/:id/stop` · `/pause` · `/resume` | `{ok, status}` |
 SSE global: `hello {trainings}` · `training` · `curve` · `sleep` · `lesson` · `milestone` · `error`.
 `GET /api/lab/nets` marca `training:true` en la red que entrena; `PUT`/`DELETE` sobre ella → 409.
+
+## 10. Arreglos tras la revisión de Opus (2026-09-23, `spec/revision-opus.md` C3, C4, A1, A2)
+Decisiones del usuario del 2026-09-23: "arréglalo tú"; evolución = concurso tras el duelo; a x1/x10 se ve la
+red real en vivo; bofetada con efecto inmediato. Completan §1–§9 sin cambiar lo que ya decían.
+
+### 10.1 Cada partida es un mundo aparte (C4)
+- `learnFromGames` agrupa las decisiones por **(partida, soldado)**: dos partidas nunca se mezclan en un episodio,
+  aunque sus ids de soldado o de evento coincidan (partidas de hilos distintos, partidas clonadas).
+- Devuelve además `episodes: [{game, soldierId, steps}]` (índice de la partida en `games`, soldado, nº de pasos),
+  y cada emoción lleva `game` (ese mismo índice).
+- Cada partida de muestra recibe **solo sus emociones**: como mucho una por decisión de la red que aprende.
+- Invariante de §9.4, ahora probada con 4 hilos y 2 soldados: los pesos finales son idénticos bit a bit a los de
+  1 hilo.
+
+### 10.2 Cómo aprende: gradiente, evolución o ambos (C3)
+- `method: 'gradient'`: como hasta ahora.
+- `method: 'evolution'` en un entreno. Cada **paso de evolución** `e = 0, 1, …`:
+  1. rival del paso = el sorteo de la mezcla de rivales (§6) con `makeRng(seed + 1000003·e)`; soldados =
+     `soldiersFor(e)`; la red juega a la izquierda en los pasos pares y a la derecha en los impares;
+  2. `population` copias antitéticas `θ ± σ·ε` (los bloques congelados no se perturban), y cada copia juega
+     `gamesPerCandidate` partidas sin pantalla con **las mismas semillas para todas**: `seed + 100003·(e+1) + j`;
+  3. fitness de una copia = media, sobre sus partidas, de la recompensa efectiva media por decisión (la misma
+     magnitud que la curva). Las estadísticas de normalización se congelan durante el paso, así todas las copias
+     se miden igual;
+  4. `θ ← θ + lr/(population·σ)·Σ F·ε`, con ranking si `rankNormalize` (= `evolutionStep`, §4);
+  5. **una partida de la red real** contra el mismo rival (turbo: sin pantalla; x1/x10: sala viva espectable,
+     `rooms[]`). Cuenta en la curva (`point.kind = 'showcase'`), en `stats`, en la memoria, y se guarda como
+     partida de muestra (con eventos `reward` y `emotion`).
+  - `training.games` cuenta **todas** las partidas jugadas (copias + red real) y es lo que mide
+    `duration.games`; la curva solo tiene las partidas de la red real. `training.steps` = pasos de evolución.
+  - Evento `sleep` por paso con `update = {kind: 'evolution', step, population, sigma, games, meanFitness,
+    bestFitness, perBlock, top}` y la lección como en el gradiente (bloque con mayor `relChange`). Línea `update`
+    en el log con `kind: 'evolution'`.
+  - Turbo con `workers ≥ 2`: las partidas de las copias se reparten entre hilos; el resultado es el mismo que con
+    1 hilo.
+- `method: 'both'`: un ciclo son `both.gradientGamesPerCycle` partidas con gradiente (con sus sueños por lote)
+  seguidas de `both.evolutionStepsPerCycle` pasos de evolución. El ciclo se repite.
+- Duelos (spec/06 §6.2): una red `gradient` aprende como hasta ahora (frozen/hot/mix). Una red `evolution` no
+  aprende partida a partida: **al acabar el duelo hace un paso de evolución contra la rival del duelo** (semillas
+  `duelSeed + 100003 + j`), sea cual sea el modo del duelo. Una red `both` aprende por gradiente según el modo y
+  además hace ese paso al final.
+- Exhibiciones con `learn:true` (§10.3): la misma regla.
+
+### 10.3 Exhibiciones (A2)
+- Salas creadas con `POST /api/rooms`: al terminar la partida, cada red sentada que no esté entrenando:
+  - suma `stats.games` (nunca `wins`/`kills`/`deaths`: es una exhibición, §7);
+  - guarda la partida (`meta.kind = 'exhibition'`, con eventos y trayectorias) para la moviola y la bofetada;
+  - absorbe la partida en su memoria (spec/07 §6);
+  - si `learn: true`, aprende según su método (§10.2), guarda red y `optim.json`, y emite `sleep`/`lesson` por el
+    SSE del laboratorio y las líneas `update`/`lesson` del log, como un sueño.
+- Una red que está entrenando no se toca: el entreno la sobrescribiría al guardar. Queda una línea
+  `exhibition.skipped` en el log.
+- Las salas del entrenador y de los duelos no pasan por aquí: ya aprenden a su manera.
+
+### 10.4 Bofetada y caricia con efecto inmediato (A1)
+- `POST /api/lab/nets/:id/slap|caress {game, decisionEventId, amount = 1}`:
+  - la decisión tiene que ser de esta red (`actor.netId === id`) y la partida tiene que guardar lo que vio en esa
+    decisión (la trayectoria); si no, `400` con el motivo;
+  - `reward = ∓amount·reward.slapCaress` (bofetada −, caricia +);
+  - si la red **no** está entrenando, se aplica **ya**: un paso de gradiente solo sobre esa decisión (ventaja =
+    `reward`, sin entropía ni valor; la memoria de la red se reproduce desde el principio de la trayectoria del
+    soldado, como en la moviola), con la tasa de aprendizaje de la red; se guardan red y `optim.json`; y queda un
+    recuerdo en su memoria (`slap` → `shame`, `caress` → `pride`, intensidad `min(1, |reward|)`, `ref` = el evento
+    `slap|caress` de la partida). Respuesta `{ok, reward, kind, applied: true, update: {pBefore, pAfter,
+    relChange, top}}`, donde `pBefore`/`pAfter` = probabilidad de lo que eligió en esa decisión antes y después;
+  - si la red está entrenando, queda pendiente y **el siguiente sueño** del entreno la aplica con el mismo paso.
+    Respuesta `{ok, reward, kind, applied: false, queued: true}`.
+- `GET /api/lab/nets/:id/feedback → {pending, applied}` (`applied`: las 50 últimas, con `pBefore`/`pAfter`).

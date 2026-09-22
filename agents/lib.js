@@ -232,8 +232,8 @@ export function moveOptions(ctx) {
 }
 
 // Reglas de esquiva de los heurísticos (spec/01 §5). Devuelven {x,y} o 'stay'.
-export function coverMove(options, { stayIfCovered = false, farther = true } = {}) {
-  const ranked = options.slice().sort((a, b) => a.cover - b.cover || (farther ? b.distEnemy - a.distEnemy : a.distEnemy - b.distEnemy) || a.i - b.i);
+export function coverMove(options, { stayIfCovered = false } = {}) {
+  const ranked = options.slice().sort((a, b) => a.cover - b.cover || b.distEnemy - a.distEnemy || a.i - b.i);
   const bestOpt = ranked[0];
   if (stayIfCovered && options[0].cover === bestOpt.cover) return 'stay';
   return bestOpt.stay ? 'stay' : { x: bestOpt.to.x, y: bestOpt.to.y };

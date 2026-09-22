@@ -56,7 +56,7 @@ export function create({ temperature = 0 } = {}) {
     // esquiva: lo más tapado y, a igualdad, lo más lejos (dispara por encima) (spec/01 §5)
     chooseMove({ soldiers, soldier, moveOptions }) {
       if (!soldiers.some((s) => s.alive && s.team !== soldier.team)) return 'stay';
-      return coverMove(moveOptions, { stayIfCovered: false, farther: true });
+      return coverMove(moveOptions, { stayIfCovered: false });
     },
   };
 }

@@ -6,7 +6,7 @@
   "test/motor.spec.mjs": "92901c90c30859c22f21f5aa49942f619b9eba81ab606b90473b88b9faee6996",
   "test/moves.spec.mjs": "90b9bb5721deabe830d54fd4d32d15ddbbae602339fdd158b54954b2031394e0",
   "test/parser.spec.mjs": "780fdae97a48dc8b8281406105c95b4ac88a86cf28e48373d8b2a3f529bbcf0b",
-  "test/red.spec.mjs": "e6593fd870a73e64215f059cac8962c61752b34b2a742a7a24702e281e0570bf",
+  "test/red.spec.mjs": "6c9a0c0d7e9a65f10aeb2b4f4aabc0e5c4b68f9c7960f27ba8886f6f62669220",
   "test/rng.spec.mjs": "4fc0264c161a540151bacbc2a4a11c8e5f6dafead07bae50eb6d6105fda0bc74",
   "test/rooms.spec.mjs": "a45a56fe0074c3e4258972a27a213fdfdc96409776d7903997415d322bf9b5eb",
   "test/smoke.mjs": "708013b5e37bf82e4d13315978d0645238a15b3b229e2b9ab0335add182b6854",

@@ -66,9 +66,11 @@ function lossOf(out, c) {
   return L;
 }
 // gradiente numérico (diferencias centrales) contra retropropagación, con BPTT de `steps` pasos
-function gradCheck(genome, { steps = 1, seed = 3, eps = 1e-6, tol = 1e-6, sample = 80 } = {}) {
+function gradCheck(genome, { steps = 1, seed = 3, eps = 1e-6, tol = 1e-6, sample = 600 } = {}) {
   const net = compile(genome);
   const rng = makeRng(seed);
+  // pesos perturbados al azar: con los iniciales (sesgos 0, g = 1) un error como g → 1/g pasaría desapercibido
+  net.setFlat(Float64Array.from(net.getFlat(), (v) => v + (rng() * 2 - 1) * 0.5));
   const obsList = Array.from({ length: steps }, () => obsFor(genome, rng));
   // pasada analítica
   const outs = []; let st = net.zeroState();
@@ -358,6 +360,9 @@ await check('gradiente: concat con difusión, add, mul, skip, norm, pool, atenci
   [W('f', 'q'), W('c', 'cd'), W('q', 'at'), W('cd', 'at'), W('q', 'cat'), W('at', 'cat'), W('cat', 'v'), W('cd', 'ch')], 16));
   gradCheck(build([B('m', 'eye.moves'), B('at', 'attention', { heads: 1, keyDim: 4 }), B('v', 'hand.value'), B('md', 'dense', { units: 3, activation: 'leaky' }), B('fm', 'foot.move', { adjust: true })],
     [W('m', 'at'), W('at', 'v'), W('m', 'md'), W('at', 'md'), W('md', 'fm')], 17));
+  // atención con DOS cables de candidatos (Candidatos + Simulador) y consulta de contexto
+  gradCheck(build([B('f', 'eye.features'), B('c', 'eye.candidates'), B('s', 'eye.simulator'), B('at', 'attention', { heads: 2, keyDim: 4 }), B('d', 'dense', { units: 3, activation: 'tanh' }), B('v', 'hand.value'), B('cd', 'dense', { units: 2, activation: 'tanh' }), B('ch', 'hand.choose')],
+    [W('f', 'at'), W('c', 'at'), W('s', 'at'), W('at', 'd'), W('d', 'v'), W('c', 'cd'), W('s', 'cd'), W('cd', 'ch')], 18));
 });
 await check('gradiente con BPTT (3 pasos): echo, gru, lstm, teamMemory, y truncado a 1 paso difiere', () => {
   for (const [type, units] of [['echo', 4], ['gru', 3], ['lstm', 3], ['teamMemory', 4]]) {
@@ -404,7 +409,7 @@ await check('20 grafos aleatorios válidos: compilan, validan y pasan el gradien
     const { blocks, wires } = randomGraph(rng);
     const g = build(blocks, wires, 2000 + k);
     assert.ok(validate(g, { forPlay: true }).ok, `grafo ${k}`);
-    gradCheck(g, { steps: 2, seed: 3000 + k, sample: 60 });
+    gradCheck(g, { steps: 2, seed: 3000 + k });
   }
 });
 

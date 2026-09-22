@@ -36,19 +36,28 @@ corto → se escribió `geometry.spec.mjs` (150 escenas aleatorias contra fuerza
 | 5 | `Math.random() * 2 ** 31` → `/`, `2 → 0`, `31 → 0/-31` (`randomSeed`) | la semilla sorteada sigue siendo un entero válido en [0, 2³¹); solo cambia su distribución. No afecta a nada reproducible (una vez sorteada, se expone y se reutiliza). |
 | 30 | `2 * Math.PI` → `3π`, `−2π` en Box-Muller | `cos(−2πv) = cos(2πv)`: equivalente; `cos(3πv)` da también media 0 y varianza 1 (el test estadístico no lo distingue y no hay contrato sobre la secuencia gaussiana exacta). |
 
-### `agents/lib.js` contra `test/moves.spec.mjs` (los 353) — (pendiente de la tirada)
+### `agents/lib.js` contra `test/moves.spec.mjs` (los 353) — cazados 77/353
 Con `motor.spec` (muestra de 25): 8/25; los 17 supervivientes eran **constantes de ajuste de los
 heurísticos de disparo** (puntuación 1000, radio 3 u, 6 disparos directos, 40 plantillas, pesos
 0.7/0.2/0.1, σ de pulso…): no son parte del contrato (los heurísticos son sparring, no lo crítico),
 así que no se fijan por test. Las funciones de movimiento (`los`, `moveOptions`, `coverMove`,
 `greedyMove`) sí son contrato y se cubren con `moves.spec.mjs` (120 escenas contra reglas
-reimplementadas). Resultado de la tirada completa: se rellena al terminar.
+reimplementadas). Los 276 supervivientes están en las líneas 11–193 (heurísticos de disparo, sin
+contrato) salvo estos de la zona de movimiento (201–243): `Math.max(1, …)` → 2 en el muestreo de la
+línea de tiro (más muestras: equivalente); bordes inferiores `>=` del rect en `los` (solo se prueba el
+borde superior); `d < distEnemy` → `<=` (empate exacto entre dos enemigos equidistantes); y la rama
+`farther:false` de `coverMove`, que nadie usaba → **eliminada** (código muerto).
 
-### `server/rooms.js` contra `test/rooms.spec.mjs` (los 486) — (pendiente de la tirada)
+### `server/rooms.js` contra `test/rooms.spec.mjs` (los 486) — cazados 202/486
 Con `motor.spec` (muestra de 25): 7/25. Los supervivientes eran lógica de sala sin test directo
 (equipos llenos, nombres repetidos, recortes de nivel/temperatura, desempates de `gameOver`,
-estancamiento, límites, `snapshot`) → se escribió `rooms.spec.mjs`. Resultado de la tirada completa:
-se rellena al terminar.
+estancamiento, límites, `snapshot`) → se escribió `rooms.spec.mjs`. Los 284 supervivientes que quedan
+son: tiempos de la sala viva (líneas 203–204, 259, 317–318, 354: retardos de animación, habla y
+ventana, que solo existen con pantalla y se prueban en `motor.spec` por comportamiento, no por
+constante); textos de los mensajes de chat (296–302, 337, 503); constantes de recorte de nombres y
+tokens (91–92, 116); límites del chat (61, 120 → 121) y de la limpieza de salas (528–530); el
+bucle de 300 intentos de `nextTurn` (187); y comparaciones de borde equivalentes (`>=`/`>` en
+`angle 85`, 275). Nada de ello cambia una regla del juego.
 
 ## F2
 

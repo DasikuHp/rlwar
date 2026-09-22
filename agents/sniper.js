@@ -51,7 +51,7 @@ export function create({ level = 2, temperature = 0 } = {}) {
     // esquiva: el destino menos visto; si ya está tan tapado como el mejor, se queda (spec/01 §5)
     chooseMove({ soldiers, soldier, moveOptions }) {
       if (!soldiers.some((s) => s.alive && s.team !== soldier.team)) return 'stay';
-      return coverMove(moveOptions, { stayIfCovered: true, farther: true });
+      return coverMove(moveOptions, { stayIfCovered: true });
     },
   };
 }

@@ -112,8 +112,70 @@ function requireSession() {
   return session;
 }
 
+// --- Selector de tropas (self-play): qué agente pelea en cada bando; las posiciones las sortea el servidor ---
+const BUILTIN_AGENTS = [
+  { id: 'sniper', name: 'Sniper', icon: '🎯' }, { id: 'greedy', name: 'Greedy', icon: '🤑' },
+  { id: 'artillery', name: 'Artillery', icon: '💣' }, { id: 'chaos', name: 'Chaos', icon: '🌀' },
+];
+const AGENT_TEMPS = { sniper: 0.1, artillery: 0.6, greedy: 0.4, chaos: 0.9 };
+let troopAgents = BUILTIN_AGENTS;
+
+function loadTroops() {
+  try { return JSON.parse(localStorage.getItem('gw-troops') || 'null') || {}; } catch { return {}; }
+}
+
+function troopSoldiers() {
+  const n = Number($('spSoldiers').value);
+  return n >= 1 && n <= 4 ? Math.floor(n) : 4;
+}
+
+function saveTroops() {
+  const soldiers = troopSoldiers();
+  try { localStorage.setItem('gw-troops', JSON.stringify({ left: $('spLeft').value, right: $('spRight').value, soldiers })); } catch { /* sin almacenamiento: no pasa nada */ }
+  return soldiers;
+}
+
+// la elección guardada gana si sigue existiendo; si no, "Aleatorio"
+function renderTroops(saved) {
+  const ids = troopAgents.map((a) => a.id);
+  const opts = '<option value="random">🎲 Aleatorio</option>' + troopAgents
+    .map((a) => `<option value="${escapeHtml(a.id)}">${escapeHtml(`${a.icon || ''} ${a.name || a.id}`.trim())}</option>`).join('');
+  for (const [id, side] of [['spLeft', 'left'], ['spRight', 'right']]) {
+    $(id).innerHTML = opts;
+    $(id).value = ids.includes(saved[side]) ? saved[side] : 'random';
+  }
+  const n = Number(saved.soldiers);
+  $('spSoldiers').value = String(n >= 1 && n <= 4 ? Math.floor(n) : 4);
+}
+
+// "Aleatorio" nunca repite el agente del otro bando (si hay más de uno)
+function pickTroops() {
+  const ids = troopAgents.map((a) => a.id);
+  const rnd = (exclude) => {
+    const pool = ids.filter((x) => x !== exclude);
+    const from = pool.length ? pool : ids;
+    return from[Math.floor(Math.random() * from.length)];
+  };
+  let left = ids.includes($('spLeft').value) ? $('spLeft').value : 'random';
+  let right = ids.includes($('spRight').value) ? $('spRight').value : 'random';
+  if (left === 'random' && right === 'random') { left = rnd(null); right = rnd(left); }
+  else if (left === 'random') left = rnd(right);
+  else if (right === 'random') right = rnd(left);
+  return { left, right };
+}
+
+function initTroops() {
+  renderTroops(loadTroops());
+  for (const id of ['spLeft', 'spRight', 'spSoldiers']) $(id).onchange = saveTroops;
+  api('/agents').then((d) => {
+    const list = Array.isArray(d.agents) ? d.agents.filter((a) => a && typeof a.id === 'string') : [];
+    if (list.length) { troopAgents = list; renderTroops(loadTroops()); }
+  }).catch(() => { /* sin /api/agents: se quedan los 4 de serie */ });
+}
+
 // --- UI events ---
 function init() {
+  initTroops();
   initRender($('board'));
   $('joinName').value = localStorage.getItem('gw-name') || 'Jugador';
 
@@ -161,13 +223,12 @@ function init() {
   $('btnSelfplay').onclick = async () => {
     try {
       spectating = true;
-      const r = await api('/rooms', 'POST', { name: 'Self-play de agentes', soldiers: 4 });
-      // pareja rotatoria para no ver siempre lo mismo (cada agente con su temperatura)
-      const pairs = [['sniper', 'artillery'], ['greedy', 'chaos'], ['sniper', 'chaos'], ['greedy', 'artillery'], ['artillery', 'chaos'], ['sniper', 'greedy']];
-      const temps = { sniper: 0.1, artillery: 0.6, greedy: 0.4, chaos: 0.9 };
-      const [a, b] = pairs[Math.floor(Math.random() * pairs.length)];
-      await api(`/rooms/${r.code}/addagent`, 'POST', { type: a, level: 3, team: 'left', temperature: temps[a] });
-      await api(`/rooms/${r.code}/addagent`, 'POST', { type: b, level: 3, team: 'right', temperature: temps[b] });
+      const soldiers = saveTroops();
+      const r = await api('/rooms', 'POST', { name: 'Self-play de agentes', soldiers });
+      // tropa elegida por el usuario (o sorteada); cada heurístico con su temperatura
+      const { left, right } = pickTroops();
+      await api(`/rooms/${r.code}/addagent`, 'POST', { type: left, level: 3, team: 'left', temperature: AGENT_TEMPS[left] });
+      await api(`/rooms/${r.code}/addagent`, 'POST', { type: right, level: 3, team: 'right', temperature: AGENT_TEMPS[right] });
       await api(`/rooms/${r.code}/start`, 'POST', {});
       // Esperar a que el estado llegue como playing para poder mostrar el gráfico
       const st = await api(`/rooms/${r.code}/state`);

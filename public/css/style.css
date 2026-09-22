@@ -18,6 +18,8 @@ input, select { background: #0e1526; border: 1px solid var(--line); color: var(-
 .subtitle { color: var(--dim); margin: 6px 0 18px; }
 .panel input, .panel select { width: 100%; margin-bottom: 10px; }
 .row { display: flex; gap: 8px; } .row input, .row select { flex: 1; margin-bottom: 0; }
+.troops .vs { align-self: center; color: var(--dim); font-size: 12px; }
+.troopsHint { margin-top: 6px; }
 #lobby { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
 #lobbyPlayers { list-style: none; margin-top: 8px; color: var(--dim); }
 

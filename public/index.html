@@ -31,9 +31,21 @@
         <button id="btnJoin">Unirse</button>
         <button id="btnSpectate" title="Ver la sala sin jugar">👀</button>
       </div>
+      <div class="row troops" style="margin-top:8px">
+        <select id="spLeft" title="Tropa del bando izquierdo (cyan)"></select>
+        <span class="vs">vs</span>
+        <select id="spRight" title="Tropa del bando derecho (naranja)"></select>
+        <select id="spSoldiers" title="Soldados por bando">
+          <option value="1">1 por bando</option>
+          <option value="2">2 por bando</option>
+          <option value="3">3 por bando</option>
+          <option value="4" selected>4 por bando</option>
+        </select>
+      </div>
       <div class="row" style="margin-top:8px">
         <button id="btnSelfplay">🤖 Ver IA vs IA (self-play)</button>
       </div>
+      <p class="hint troopsHint">Tú eliges la tropa de cada bando; las posiciones se sortean siempre.</p>
       <div id="lobby" hidden>
         <p>Código de sala: <b id="roomCode" class="accent"></b> (compártelo)</p>
         <div class="row" id="lobbyControls">

@@ -173,6 +173,19 @@ export function writeFeedback(netId, list) {
   writeFileSync(tmp, JSON.stringify(list));
   renameSync(tmp, feedbackFile(netId));
 }
+// bofetadas y caricias ya aplicadas (spec/04 §10.4): las 50 últimas
+const appliedFile = (netId) => join(netsDir(), netId, 'feedback-applied.json');
+export function readApplied(netId) {
+  try { const f = appliedFile(netId); return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : []; } catch { return []; }
+}
+export function appendApplied(netId, entry) {
+  const dir = join(netsDir(), netId);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const list = [...readApplied(netId), entry].slice(-50);
+  const f = appliedFile(netId), tmp = f + '.tmp';
+  writeFileSync(tmp, JSON.stringify(list)); renameSync(tmp, f);
+  return list;
+}
 
 // copia de los genomas de una partida (duelos de trono, spec/07 §10): evo/games/<gameId>.nets.json
 export function saveGameNets(gameId, nets) {

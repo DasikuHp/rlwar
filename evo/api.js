@@ -4,10 +4,10 @@ import { BLOCKS, LIMITS, validate, normalize, countParams, DEFAULT_TRAITS, TRAIT
 import { eyeLayout } from '../shared/percept.js';
 import { TEMPLATES } from '../shared/templates.js';
 import { listNets, loadNet, saveNet, deleteNet, entryOf } from './store.js';
-import { createTrainer, makeLearner } from './train.js';
+import { createTrainer, makeLearner, feedbackTarget, feedbackFromGame } from './train.js';
 import { runDuel, LEARNING_MODES, SPEEDS } from './duel.js';
 import { challenge, throneView, foundDynasties, runGeneration, readThroneFull, genealogyView, registerBirth } from './throne.js';
-import { loadGame, appendLog, readLog, loadLogEntry, listGames, saveGame, loadGameNets, readFeedback, writeFeedback, netsDir } from './store.js';
+import { loadGame, appendLog, readLog, loadLogEntry, listGames, saveGame, loadGameNets, readFeedback, writeFeedback, readApplied, appendApplied, netsDir } from './store.js';
 import { nameNeurons, diaryPhrase, memoryOf } from './truth.js';
 import { runBulletin } from './exam.js';
 import { compile } from '../shared/nn.js';
@@ -672,7 +672,7 @@ export async function labApi(req, res, parts, url) {
       }
     }
     if (seg.length === 3 && seg[2] === 'diary' && method === 'GET') return json(res, 200, { entries: diaryEntries((e) => e.netId === id && DIARY_KINDS.has(e.type)) });
-    if (seg.length === 3 && seg[2] === 'feedback' && method === 'GET') return json(res, 200, { pending: readFeedback(id) });
+    if (seg.length === 3 && seg[2] === 'feedback' && method === 'GET') return json(res, 200, { pending: readFeedback(id), applied: readApplied(id) });
     if (seg.length === 3 && seg[2] === 'memory' && method === 'GET') return json(res, 200, memoryOf(genome));
     if (seg.length === 3 && seg[2] === 'neurons' && method === 'GET') {
       const samples = neuronSamples(id, 500);
@@ -701,8 +701,9 @@ export async function labApi(req, res, parts, url) {
       const v = b.value || {};
       const game = loadGame(String(v.game || ''));
       if (!game) return bad(404, `Partida no encontrada: ${v.game}`);
-      const dec = game.events.find((e) => e.type === 'decision' && e.id === Number(v.decisionEventId));
-      if (!dec) return bad(404, `La partida no tiene la decisión ${v.decisionEventId}`);
+      const target = feedbackTarget(game, Number(v.decisionEventId), id); // de esta red y con lo que vio (spec/04 §10.4)
+      if (target.error) return bad(target.status, target.error);
+      const dec = target.dec;
       const amount = v.amount === undefined ? 1 : Number(v.amount);
       if (!(amount > 0 && amount <= 10)) return bad(400, 'amount tiene que estar entre 0 y 10');
       const kind = seg[2];
@@ -711,11 +712,21 @@ export async function labApi(req, res, parts, url) {
       const eid = game.events.reduce((m, e) => Math.max(m, e.id || 0), 0) + 1;
       game.events.push({ id: eid, t: Date.now(), game: game.meta.gameId, turn: dec.turn, type: kind, actor: { playerId: 'usuario', soldierId: null, netId: id }, data: { decisionEventId: dec.id, amount, term } });
       saveGame(game.meta, game.events, game.trajectories || null);
-      const pending = readFeedback(id);
-      pending.push({ kind, game: game.meta.gameId, decisionEventId: dec.id, amount, ts: Date.now() });
-      writeFeedback(id, pending);
-      appendLog({ type: kind, netId: id, game: game.meta.gameId, decisionEventId: dec.id, amount, term });
-      return json(res, 200, { ok: true, reward, kind });
+      if (activeTraining(id)) {
+        // entrenando: el siguiente sueño la aplica con el mismo paso
+        const pending = readFeedback(id);
+        pending.push({ kind, game: game.meta.gameId, decisionEventId: dec.id, eventId: eid, amount, ts: Date.now() });
+        writeFeedback(id, pending);
+        appendLog({ type: kind, netId: id, game: game.meta.gameId, decisionEventId: dec.id, amount, term, applied: false });
+        return json(res, 200, { ok: true, reward, kind, applied: false, queued: true });
+      }
+      const L = makeLearner(genome);
+      const out = feedbackFromGame({ net: L.net, genome: L.genome, game, decisionEventId: dec.id, reward, kind, eventId: eid });
+      if (out.error) return bad(out.status || 400, out.error);
+      L.save();
+      appendApplied(id, { kind, game: game.meta.gameId, decisionEventId: dec.id, amount, reward, pBefore: out.pBefore, pAfter: out.pAfter, relChange: out.relChange, ts: Date.now() });
+      appendLog({ type: kind, netId: id, game: game.meta.gameId, decisionEventId: dec.id, amount, term, applied: true, pBefore: out.pBefore, pAfter: out.pAfter, relChange: out.relChange });
+      return json(res, 200, { ok: true, reward, kind, applied: true, update: { pBefore: out.pBefore, pAfter: out.pAfter, relChange: out.relChange, top: out.top } });
     }
     if (seg.length === 3 && seg[2] === 'export' && method === 'GET') {
       return json(res, 200, normalize(genome), { 'Content-Disposition': `attachment; filename="${id}.json"` });

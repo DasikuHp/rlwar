@@ -9,8 +9,8 @@ import { compile } from '../shared/nn.js';
 import { normalize, validate, BLOCKS } from '../shared/genome.js';
 import { softmaxT } from '../shared/policy.js';
 import { assignRewards, returns } from '../shared/reward.js';
-import { loadNet, saveNet, netsDir, saveGame, appendLog, readFeedback, writeFeedback } from './store.js';
-import { emotionOf, memoryOf, updateMemory, rewardEvents, emotionEvents } from './truth.js';
+import { loadNet, saveNet, netsDir, saveGame, loadGame, appendLog, readFeedback, writeFeedback, appendApplied } from './store.js';
+import { emotionOf, memoryOf, updateMemory, addEpisode, rewardEvents, emotionEvents } from './truth.js';
 import { readThroneFull, pickOpponent } from './league.js';
 import { adaptImagination } from './mutate.js';
 import { playGame } from '../server/headless.js';
@@ -301,6 +301,51 @@ export function absorbGame(g, game, extra = []) {
   g.memory = mem;
   return mem;
 }
+// ---------- bofetada y caricia con efecto inmediato (spec/04 §10.4) ----------
+// ¿esta decisión es de esta red y la partida guarda lo que vio? → {dec, steps, index} | {status, error}
+export function feedbackTarget(game, decisionEventId, netId) {
+  const dec = game.events.find((e) => e.type === 'decision' && e.id === decisionEventId);
+  if (!dec) return { status: 404, error: `La partida no tiene la decisión ${decisionEventId}` };
+  if (dec.actor.netId !== netId) return { status: 400, error: `Esa decisión es de ${dec.actor.netId || 'un jugador que no es una red'}, no de ${netId}: la bofetada o la caricia tiene que ir a quien decidió.` };
+  const tr = game.trajectories && game.trajectories[dec.actor.playerId];
+  const steps = tr && tr.soldiers ? tr.soldiers[dec.actor.soldierId] : null;
+  const index = steps ? steps.findIndex((s) => s && s.decision && s.decision.eventId === dec.id) : -1;
+  if (index < 0) return { status: 400, error: 'Esta partida no guarda lo que vio la red en esa decisión (su trayectoria), así que no se le puede enseñar nada con ella.' };
+  return { dec, steps, index };
+}
+// un paso de gradiente solo sobre esa decisión (ventaja = reward, sin entropía ni valor), con Adam recién empezado:
+// así la dirección es siempre la de la bofetada o la caricia, sin la inercia del entreno
+export function feedbackStep({ net, genome, steps, index, reward }) {
+  const g = normalize(genome);
+  const T = g.traits.temperature;
+  const pOf = () => {
+    let st = net.zeroState(), out = null;
+    for (let i = 0; i <= index; i++) { out = net.forward(steps[i].obs, st); st = out.state; }
+    const d = steps[index].decision;
+    return d.phase === 'move' ? softmaxT(out.outputs.move.scores, T)[d.chosenMove] : softmaxT(out.outputs.choose.scores, T)[d.chosen];
+  };
+  const pBefore = pOf();
+  const episode = { steps: steps.slice(0, index + 1).map((s, i) => ({ obs: s.obs, phase: s.phase, chosen: s.decision.chosen, chosenMove: s.decision.chosenMove, adjustSample: s.decision.adjust ? s.decision.adjust.sample : null, moveAdjustSample: s.decision.moveAdjust ? s.decision.moveAdjust.sample : null, advantage: i === index ? reward : 0 })) };
+  const lc = g.learning.gradient;
+  const pg = policyGradient(net, g, [episode], { ...lc, entropy: 0, baseline: 'none' });
+  const up = applyUpdate(net, pg.grads, adamInit(net), { lr: lc.lr, clipNorm: lc.clipNorm, optimizer: lc.optimizer, frozen: g.frozen });
+  return { pBefore, pAfter: pOf(), relChange: up.top ? up.top.relChange : 0, top: up.top };
+}
+// aplica una bofetada/caricia a la red (pesos + recuerdo de vergüenza u orgullo); `g` es el genoma vivo de `net`
+export function feedbackFromGame({ net, genome: g, game, decisionEventId, reward, kind, eventId }) {
+  const target = feedbackTarget(game, decisionEventId, g.id);
+  if (target.error) return target;
+  const out = feedbackStep({ net, genome: g, steps: target.steps, index: target.index, reward });
+  g.weights = net.serialize();
+  const start = game.events.find((e) => e.type === 'game.start');
+  const rival = start && start.data && Array.isArray(start.data.players) ? start.data.players.find((p) => p.playerId !== target.dec.actor.playerId) : null;
+  const d = target.dec.data;
+  const family = d.phase === 'shoot' && Array.isArray(d.candidates) && d.candidates[d.chosen] ? d.candidates[d.chosen].family || null : null;
+  const mem = memoryOf(g);
+  addEpisode(mem, { ref: { game: game.meta.gameId, id: eventId }, rivalId: rival ? rival.netId || rival.agentType || rival.name : null, biome: start && start.data.map ? start.data.map.biome : null, family, outcome: kind, emotion: kind === 'slap' ? 'shame' : 'pride', intensity: Math.min(1, Math.abs(reward)), gamesAgo: 0 });
+  g.memory = mem;
+  return { ok: true, ...out };
+}
 // bofetadas y caricias pendientes de esta partida → términos extra para assignRewards
 export function takeFeedback(netId, gameId, slapCaress = 1) {
   const pending = readFeedback(netId);
@@ -464,7 +509,21 @@ export function createTrainer(opts = {}) {
       saveGame({ gameId, kind: 'training', trainingId: t.id, seed: game.seed, soldiers: game.soldiers, left: start ? (start.data.players.find((p) => p.team === 'left') || {}).netId || null : null, right: start ? (start.data.players.find((p) => p.team === 'right') || {}).netId || null : null, nets: [...new Set(nets)], winner, kills: { [g.id]: game.kills }, rival: game.rivalKind, ts: Date.now() }, events, { [game.playerId]: game.trajectory });
       t.sampleGames.push(gameId);
     };
+    // bofetadas y caricias que llegaron mientras entrenaba: las aplica el siguiente sueño (spec/04 §10.4)
+    const applyQueued = () => {
+      const queued = readFeedback(g.id);
+      if (!queued.length) return;
+      writeFeedback(g.id, []);
+      for (const f of queued) {
+        const game = loadGame(f.game);
+        if (!game) continue;
+        const reward = (f.kind === 'slap' ? -1 : 1) * (f.amount || 1) * (g.reward.slapCaress ?? 1);
+        const out = feedbackFromGame({ net, genome: g, game, decisionEventId: f.decisionEventId, reward, kind: f.kind, eventId: f.eventId ?? null });
+        if (out.ok) appendApplied(g.id, { kind: f.kind, game: f.game, decisionEventId: f.decisionEventId, amount: f.amount || 1, reward, pBefore: out.pBefore, pAfter: out.pAfter, relChange: out.relChange, trainingId: t.id, ts: Date.now() });
+      }
+    };
     const sleep = () => {
+      applyQueued();
       if (!batch.length) return;
       const r = learnFromGames({ net, genome: g, games: batch, optim, cfg: lc });
       t.updates++;
@@ -558,6 +617,7 @@ export function createTrainer(opts = {}) {
       const nG = Math.max(1, evoCfg.gamesPerCandidate || 1);
       const base = cfg.seed + 100003 * (e + 1);
       const sold = soldiersFor(e);
+      applyQueued();
       const out = await evolutionRound({ net, genome: g, rival: rival.spec, soldiers: sold, seeds: Array.from({ length: nG }, (_, j) => base + j), cfg: { ...evoCfg, frozen: g.frozen }, rng: makeRng(cfg.seed + 7 * (e + 1)), play: playAsync });
       t.games += out.update.games; t.steps++; t.updates++;
       // la red real contra el mismo rival: cuenta en la curva y se guarda (a x1/x10, en una sala viva)

@@ -174,6 +174,12 @@ export function updateMemory(memory, { netId = null, playerId, events = [], rewa
   trimEpisodes(memory);
   return memory;
 }
+// un recuerdo suelto (bofetada o caricia, spec/04 §10.4), con el mismo tope
+export function addEpisode(memory, episode) {
+  memory.episodes.push(episode);
+  trimEpisodes(memory);
+  return memory;
+}
 // tope de 300 episodios: se borra el de menor intensidad·0.9^gamesAgo (spec/07 §12.5)
 function trimEpisodes(memory) {
   while (memory.episodes.length > 300) {

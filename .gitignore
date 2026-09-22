@@ -9,3 +9,5 @@ node_modules/
 $null
 # Sesión del CLI de agente (contiene token)
 agent/.agent-session.json
+# Experimentos desechables (su código se borra; solo sus números pasan a spec/)
+experimentos/

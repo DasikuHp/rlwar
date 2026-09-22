@@ -33,7 +33,13 @@ el único punto de validación de disparos.
    contra otra red tuya.
 
 ## 2. Estado de partida (verificado 2026-09-22)
-- F0 **a medias**: `plan.md` escrito; **falta** el selector de tropas en la UI.
+- **Actualización (fin de sesión Opus, 2026-09-22):** **F0 hecho** (commit `93c4d44`): selector de
+  tropas por bando (o Aleatorio) + 1–4 soldados; test congelado antes del código (11/11); mutantes
+  9/10 (el superviviente es un recorte redundante); probado en vivo. Arreglado `client.spec`, que
+  estaba en rojo y fuera de la batería (`af67185`). Suite **5/5**. **Siguiente paso: el usuario abre
+  la sesión de Fable con el prompt de `spec/README.md` §0.**
+- F0 **a medias**: `plan.md` escrito; **falta** el selector de tropas en la UI. *(superado: ver
+  arriba)*
 - F1–F5 sin empezar: no hay `move` en `rooms.js`, no existe `evo/`.
 - Coste medido del motor: **~6 ms por decisión** con 42 candidatos (barrido grueso) → ~0.2 s por
   partida → **~5 partidas/s por núcleo**. Da para entrenar de verdad; con hilos, más.

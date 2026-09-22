@@ -125,4 +125,54 @@ Los 49 supervivientes, agrupados:
   pesos por defecto y para n = 10 (comprobado a mano); no cambian ningún caso de la spec.
 
 ### `evo/store.js` (los 20) contra `test/politica.spec.mjs`
-(pendiente: la primera tirada no dejó resumen; se repite)
+Primera tirada (los 20) contra `politica.spec` — cazados **15/20**. Los 5 supervivientes eran huecos reales
+(`mkdirSync` sin `recursive`, el texto del aviso de un fichero inválido, `deleteNet` con id inválido) →
+cubiertos en **`test/aprendizaje-extra.spec.mjs`**. Segunda tirada con `politica + aprendizaje-extra`:
+**20/20, sin supervivientes** ✔.
+
+## F4
+
+### `shared/reward.js` contra `test/aprendizaje.spec.mjs` (muestra de 40 de 131, semilla 41) — cazados 31/40
+Los 9 supervivientes eran bordes sin caso: `α = 1/min(n, 500)` exacto, `τ` por defecto, trayectoria
+ausente, `minAllyDist ≤ 1.5` (inclusive), ventana de 10 tiros de "repetir", ganancia de cobertura,
+`own/team/effective` iniciales → cubiertos en `aprendizaje-extra.spec`. **Segunda tirada, los 131**
+contra `aprendizaje + aprendizaje-extra`: **124/131**. Los 7 supervivientes son equivalentes:
+- línea 4 (`mean`/`var` iniciales 0 → 1): el primer valor entra con α = 1 y los sobreescribe;
+- línea 29 (`own/team/effective` iniciales): se recalculan siempre antes de devolver;
+- línea 51 (`<` → `<=` entre id de decisión e id de muerte): nunca son iguales (ids distintos por evento);
+- línea 69 (media de equipo con 0 entradas): no se usa cuando no hay entradas.
+
+### `evo/train.js` contra `aprendizaje.spec` (muestra de 60, semilla 41) — 28/60 → 33/60 → 39/60
+Tres rondas: cada una destapó huecos que se cubrieron en `aprendizaje-extra`, `entrenador-extra` y
+`entrenador-extra-b` (recorte exacto de la norma, atribución por bloque, congelado que no es el primero,
+momento de Adam con gradiente 0, fórmula exacta de la evolución antitética y sus valores por defecto,
+`gameSummary`, duración por minutos y por meseta con ventana 2, referencia media exacta, entropía y
+`valueLoss` exactos, `optim.mean` heredado, semilla aleatoria amplia, `speed` de las salas x10/x1, mezcla de
+rivales sin normalizar, `reward.stats` guardado). Los 21 supervivientes de la tercera ronda (ficheros de
+antes de F6; F6 cambia `pickRival` y se vuelve a tirar al cerrar F6), agrupados:
+- **Valores por defecto de la configuración** (líneas 25 `bptt ≥ 1`, 245 `self 0.15`, 270 `mean` de un
+  optim antiguo, 362 `window 50`/`minGain`): la spec/04 fija los defaults; los tests pasan valores explícitos.
+  No cambian ningún caso con configuración completa.
+- **Equivalentes**: 37 (`H` inicial: se sobreescribe en cada rama con salida), 46 (`<` → `<=` en un bucle
+  cuyo índice extra cae fuera del `Float64Array`), 197 (`optim.mean` con `|| 1` solo si falta el objeto),
+  201 (`>` → `>=` en flotantes), 238 (numeración de entrenos), 273 (`Pool(1)` para turbo con 1 hilo: mismos
+  pesos, solo cambia el hilo), 283/287/290 (constantes de las semillas por partida: determinismo con
+  cualquier constante; la spec no fija la fórmula), 284/285 (mezclas con claves ausentes: el entrenador
+  siempre rellena las tres), 324 (`speed 0` → la sala lo lleva a 1), 350 (`mkdir recursive`: el padre existe).
+
+### `evo/store.js` (los 20) contra `politica + aprendizaje-extra` — 20/20 ✔ (ver F3).
+
+## F5
+
+### `evo/mutate.js` contra `test/evolucion.spec.mjs` (muestra de 40 de 616, semilla 41) — en curso al cerrar la sesión
+Registro en `scratchpad/mutants-f5.log` (mutate 40, labels 20, diff 20, children 20; cada mutante corre el
+spec completo, ~1 min). Supervivientes vistos hasta ahora y su lectura:
+- 57 (`n >= 0` → `> 0` en las letras de hermano): solo cambia con ≥ 26 hermanos; `n` está limitado a 16.
+- 202/203 (`removeWire`: recuento de entradas/salidas y umbral `≥ 2`): equivalentes en los genomas del
+  test; **hueco real** en general (permitiría quitar la única entrada de un bloque no-ojo) →
+  pendiente `evolucion-extra.spec` (caso: origen con 2 salidas y destino con 1 entrada).
+- 279 (`eyeParams` int: `rng.int(2) + 1` → siempre 1; `<` → `<=`): el test solo cubre el Radar (enum) →
+  pendiente extra con `obstacles.slots`.
+- 287 (rama `number` de `eyeParams`): ningún ojo tiene parámetros `number` → inalcanzable.
+- 296 (`imagination.n ± rng.int(0..4)`): el test acota |Δn| ≤ 4 pero no exige que suba y baje →
+  pendiente extra (en 60 semillas aparecen subidas, bajadas y |Δn| = 4).

@@ -50,7 +50,11 @@ el único punto de validación de disparos.
   deshace y anota el motivo, textos exactos, nombres 🧭, congelados intactos, adaptImagination), evo/diff.js
   (same/changed/added/removed, relChange, heat), evo/children.js (pre-torneo justo, ranking), rutas
   /children + /jobs + /diff + cirugía (frozen, weights, transplant) y SSE job/children. spec/05 §10 fija
-  las precisiones. Batería 25 specs (23 congelados). Siguiente: F6 trono (evo/duel.js, evo/throne.js).**
+  las precisiones. **F6 trono**: código hecho (evo/league.js, duel.js, throne.js; makeLearner en train.js;
+  rutas duels/throne/hall-of-fame/genealogy/dynasties/games; explotadora; spec/06 §6) y API verificada en vivo;
+  **sin commit**: trono.spec (congelado) tiene 5 aserciones defectuosas (referencia de hash32 fuera de rango,
+  un −1 que es −2, una edición inválida, un montaje de liga contradictorio, un huérfano ajeno) → pendiente OK
+  del usuario para corregirlas. Batería 28 specs (26 congelados). Siguiente: OK → commit F6 → F7 verdad.**
 - F0 **a medias**: `plan.md` escrito; **falta** el selector de tropas en la UI. *(superado: ver
   arriba)*
 - F1–F5 sin empezar: no hay `move` en `rooms.js`, no existe `evo/`.

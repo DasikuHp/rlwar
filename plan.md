@@ -103,9 +103,28 @@ E:\grafwar
 │   ├── launch-selfplay.mjs Crea sala 4v4 con pareja aleatoria, start y abre el
 │   │                        navegador (lo que ejecuta Graphwar.bat)
 │   └── room-debug.mjs
+├── shared/ (lab)    F2: genome.js (genoma JSON, catálogo BLOCKS, validate/normalize/repair,
+│                    pesos Xavier con semilla) · nn.js (compile → forward/backward con BPTT) ·
+│                    templates.js (4 plantillas). F3: percept.js (ojos, Imaginación, destinos) ·
+│                    policy.js (decideShot/decideMove con registro de decisión). F4: reward.js
+├── evo/             F3: store.js (evo/nets/<id>.json o GW_EVO_DIR, escritura atómica, throne.json)
+│   ├── api.js       /api/lab: catálogo, plantillas, redes CRUD/validar/exportar/importar, entrenos,
+│   │                trabajos (jobs), hijos + pre-torneo, diff, cirugía (frozen/weights/transplant), SSE
+│   ├── train.js     F4: gradiente de política (REINFORCE + Corazonada + BPTT), Adam/SGD, evolución
+│   │                antitética, learnFromGames, createTrainer (turbo con hilos / x1 / x10 en salas)
+│   ├── worker.js    F4: hilo que juega partidas sin pantalla
+│   ├── labels.js    F5: etiquetas de posiciones ("ojo:k", "bloque#u") para recolocar y comparar pesos
+│   ├── mutate.js    F5: mutate() con 12 ops siempre válidas (deshace y anota), nombres 🧭,
+│   │                adaptImagination (🎲 por uso)
+│   ├── diff.js      F5: diffGenomes (same/changed/added/removed, relChange, heat ≤ 64)
+│   └── children.js  F5: pre-torneo justo (mismas semillas/soldados, lados alternos) y ranking
+├── agents/net.js    F3: agente-red (net:<id>), memoria por soldado, trayectorias para aprender
 ├── test/            run-all.mjs (comprueba FROZEN.json y levanta servidor 8791 → TODO OK ✔)
 │                    parser.spec / smoke / agents.spec / client.spec / troops.spec (F0) /
-│                    tools.spec (freeze+mutants) / motor.spec (F1). FROZEN.json = huellas SHA-256
+│                    tools.spec (freeze+mutants) / motor.spec, geometry, rng, moves, rooms (F1) /
+│                    red, genoma, api-lab (F2) / percepcion(+extra), politica (F3) / aprendizaje(+extra),
+│                    entrenador-extra, api-trainings (F4) / evolucion, api-evolucion (F5).
+│                    FROZEN.json = huellas SHA-256
 ├── tools/           freeze.mjs (congela tests) · mutants.mjs (prueba de mutantes) ·
 │                    launch-selfplay.mjs · room-debug.mjs
 ├── Graphwar.bat     Doble clic: servidor si hace falta + partida IA vs IA +

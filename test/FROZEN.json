@@ -6,6 +6,7 @@
   "test/aprendizaje-extra.spec.mjs": "2a48c48c1d52088e53e56fa754b4a419ed655f25da2bb343ccc1a2cdb49a2da8",
   "test/aprendizaje.spec.mjs": "25c7544b912e59aa3b067246cdebae1856db2855372627934364035e35c185ea",
   "test/client.spec.mjs": "65659173d8eca4e4291675bcadc8e9e64d1dbba5c77400c88be063e70119156a",
+  "test/entrenador-extra.spec.mjs": "cec48ae69fe22a2ae66db3ad80e5962768905efb64f53d83abcff1058edbbbea",
   "test/evolucion.spec.mjs": "0fc059d07f7eaa172251d6258c95ba673e8171ab4dcb23fc8ec9a311a84f2284",
   "test/genoma.spec.mjs": "147045817e4f51959ac6b181a114344f1e486ae6c522f8cb1eed5ca0ede6cb3c",
   "test/geometry.spec.mjs": "2c8b83388a6bb9b8159676f3d9dc62f512605cfc65280eb7e35413b768e0ca94",

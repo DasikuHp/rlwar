@@ -488,6 +488,14 @@ export function analyzeGenome(genome, opts = {}) {
   return { genome: g, ...a };
 }
 
+// Análisis sin validar (para el laboratorio, que ya trabaja con genomas normalizados y válidos):
+// null si la estructura no cuadra (ciclo, corrientes mezcladas, tamaños). No comprueba los pesos.
+export function analyzeUnchecked(genome) {
+  const errors = [];
+  const a = analyze(genome, errors);
+  return a ? { genome, ...a } : null;
+}
+
 export function outDims(genome) {
   const a = analyzeGenome(genome);
   return Object.fromEntries(a.order.map((id) => [id, { stream: a.streams[id], dim: a.dims[id].out }]));

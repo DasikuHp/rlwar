@@ -68,3 +68,12 @@ export function deleteNet(id) {
   unlinkSync(file);
   return true;
 }
+
+// Carpeta del laboratorio (evo/ o GW_EVO_DIR) y lectura del trono (spec/06 §2; F5 solo lo lee para elegir rival)
+export function evoDir() {
+  return process.env.GW_EVO_DIR ? process.env.GW_EVO_DIR : join(ROOT, 'evo');
+}
+export function readThrone() {
+  const file = join(evoDir(), 'throne.json');
+  try { return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null; } catch { return null; }
+}

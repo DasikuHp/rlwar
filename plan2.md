@@ -46,7 +46,11 @@ el único punto de validación de disparos.
   contra derivada numérica, Adam/SGD, evolución antitética, learnFromGames, entrenador turbo con hilos
   y x1/x10 en salas vivas, hitos, meseta), evo/worker.js, eventos de sala, /api/lab/trainings + SSE.
   Tareas de resultado conocido en verde (tragaperras, recordar un bit, evolución, Corazonada).
-  Batería 20 specs (19 congelados). Siguiente: F5 evolución (mutate.js).**
+  **F5 evolución** hecho: evo/labels.js (etiquetas de posiciones), evo/mutate.js (12 ops siempre válidas,
+  deshace y anota el motivo, textos exactos, nombres 🧭, congelados intactos, adaptImagination), evo/diff.js
+  (same/changed/added/removed, relChange, heat), evo/children.js (pre-torneo justo, ranking), rutas
+  /children + /jobs + /diff + cirugía (frozen, weights, transplant) y SSE job/children. spec/05 §10 fija
+  las precisiones. Batería 25 specs (23 congelados). Siguiente: F6 trono (evo/duel.js, evo/throne.js).**
 - F0 **a medias**: `plan.md` escrito; **falta** el selector de tropas en la UI. *(superado: ver
   arriba)*
 - F1–F5 sin empezar: no hay `move` en `rooms.js`, no existe `evo/`.

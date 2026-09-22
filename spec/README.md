@@ -134,7 +134,10 @@ servidor) · regresión (la suite actual).
   vivo (evento SSE `decision`, `state.lastDecision`), selector de tropas con redes (`net:<id>`).
 - **F4 aprendizaje** hecho (reward.js, evo/train.js, evo/worker.js, eventos de sala, /api/lab/trainings, SSE
   /api/lab/events, sala x10). Desbloqueado para Opus: curvas y panel de entreno (spec/04 §9.6).
-- Siguiente: F5 evolución.
+- **F5 evolución** hecho (evo/labels.js, mutate.js, diff.js, children.js; /api/lab/nets/:id/children, /jobs,
+  /diff, /frozen, /weights, /transplant; SSE job y children; spec/05 §10). Desbloqueado para Opus: panel de
+  hijos con pre-torneo y ranking, vista de diferencias con mapa de calor, cirugía (spec/08 §4).
+- Siguiente: F6 trono.
 
 ## 7. Cierre de cada sesión
 1. Actualiza `plan2.md` (estado de la fase) y `plan.md` §4 si cambia el stack.

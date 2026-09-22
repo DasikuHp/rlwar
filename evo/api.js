@@ -5,9 +5,47 @@ import { eyeLayout } from '../shared/percept.js';
 import { TEMPLATES } from '../shared/templates.js';
 import { listNets, loadNet, saveNet, deleteNet, entryOf } from './store.js';
 import { createTrainer } from './train.js';
+import { mutate, mutationConfig, slugify } from './mutate.js';
+import { diffGenomes } from './diff.js';
+import { runPretournamentAsync } from './children.js';
+import { readThrone } from './store.js';
+import { analyzeGenome, weightShapes, repair } from '../shared/genome.js';
+import { makeRng, randomSeed } from '../shared/rng.js';
 
 // ---------- entrenos y SSE global (spec/04 §9.6) ----------
 const trainings = new Map();
+// trabajos (spec/08 §5): hijos + pre-torneo; más adelante exámenes y generaciones
+const jobs = new Map();
+let jobSeq = 1;
+const jobView = (j) => ({ id: j.id, kind: j.kind, status: j.status, progress: j.progress, result: j.result, error: j.error, netId: j.netId, createdAt: j.createdAt });
+function startChildrenJob({ genome, n, mutation, games, opponent, soldiers, seed }) {
+  const job = { id: `j${jobSeq++}`, kind: 'children', status: 'running', progress: { done: 0, total: n * games }, result: null, error: null, netId: genome.id, createdAt: Date.now() };
+  jobs.set(job.id, job);
+  (async () => {
+    try {
+      await new Promise((r) => setImmediate(r));
+      const existing = new Set(listNets().map((x) => x.id));
+      const children = [];
+      for (let k = 0; k < n; k++) {
+        const { child } = mutate(genome, mutation, makeRng(seed + k), { sibling: k, existingIds: existing });
+        existing.add(child.id);
+        const r = saveNet(child);
+        if (!r.ok) throw new Error(`el hijo ${child.id} no se pudo guardar: ${JSON.stringify(r.errors && r.errors[0])}`);
+        children.push(loadNet(child.id));
+      }
+      const res = await runPretournamentAsync({ children, opponent, games, seed, soldiers, onGame: (done, total) => { job.progress = { done, total }; pushEvent('job', jobView(job)); } });
+      job.status = 'done';
+      job.result = { parentId: genome.id, opponentId: opponent.id, soldiers: res.soldiers, seed, ranking: res.ranking };
+      pushEvent('job', jobView(job));
+      pushEvent('children', { jobId: job.id, parentId: genome.id, ranking: res.ranking });
+    } catch (e) {
+      job.status = 'error'; job.error = e.message;
+      pushEvent('job', jobView(job));
+      pushEvent('error', { message: `hijos de ${genome.id}: ${e.message}` });
+    }
+  })();
+  return job;
+}
 const sseClients = new Set();
 function pushEvent(ev, data) { for (const res of sseClients) { try { res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* ignorar */ } } }
 const activeTraining = (netId) => [...trainings.values()].find((t) => t.netId === netId && ['queued', 'running', 'paused'].includes(t.status)) || null;
@@ -127,12 +165,7 @@ export function catalog() {
 }
 
 // ---------- utilidades de ids ----------
-export function slugify(name) {
-  let s = String(name || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-  if (s.length < 3) s = `red-${s}`.replace(/-+$/, '');
-  if (s.length < 3) s = 'red-nueva';
-  return s.slice(0, 32).replace(/-+$/, '');
-}
+export { slugify };
 function uniqueId(base) {
   const taken = new Set(listNets().map((n) => n.id));
   if (!taken.has(base)) return base;
@@ -158,11 +191,16 @@ export async function labApi(req, res, parts, url) {
   if (seg[0] === 'events' && method === 'GET') {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive', 'Access-Control-Allow-Origin': '*' });
     res.write('retry: 2000\n\n');
-    res.write(`event: hello\ndata: ${JSON.stringify({ trainings: [...trainings.values()].map((t) => trainingView(t)) })}\n\n`);
+    res.write(`event: hello\ndata: ${JSON.stringify({ trainings: [...trainings.values()].map((t) => trainingView(t)), jobs: [...jobs.values()].map(jobView) })}\n\n`);
     sseClients.add(res);
     const ping = setInterval(() => { try { res.write(': ping\n\n'); } catch { clearInterval(ping); } }, 20000);
     req.on('close', () => { sseClients.delete(res); clearInterval(ping); });
     return;
+  }
+  if (seg[0] === 'jobs' && method === 'GET') {
+    if (seg.length === 1) return json(res, 200, { jobs: [...jobs.values()].map(jobView) });
+    const j = jobs.get(seg[1]);
+    return j ? json(res, 200, jobView(j)) : bad(404, 'Trabajo no encontrado');
   }
   if (seg[0] === 'trainings') {
     if (seg.length === 1 && method === 'GET') return json(res, 200, { trainings: [...trainings.values()].map((t) => trainingView(t)) });
@@ -248,6 +286,103 @@ export async function labApi(req, res, parts, url) {
       if (!b.ok) return bad(b.status, b.error);
       const val = validate(b.value);
       return json(res, 200, { ok: val.ok, errors: val.errors, warnings: val.warnings, paramCount: val.ok ? countParams(b.value) : null });
+    }
+    // ----- F5: hijos, diferencias, cirugía (spec/05 §4, §5, §7, §10.4–10.5) -----
+    if (seg.length === 3 && seg[2] === 'children' && method === 'POST') {
+      const b = await body();
+      if (!b.ok) return bad(b.status, b.error);
+      const v = b.value || {};
+      const n = v.n ?? 4;
+      if (!(Number.isInteger(n) && n >= 1 && n <= 16)) return bad(400, 'n tiene que ser un entero entre 1 y 16');
+      const pt = v.pretournament || {};
+      const games = pt.games ?? 4;
+      if (!(Number.isInteger(games) && games >= 0 && games <= 20)) return bad(400, 'pretournament.games tiene que ser un entero entre 0 y 20');
+      const soldiers = pt.soldiers ?? 'random';
+      if (!(soldiers === 'random' || (Number.isInteger(soldiers) && soldiers >= 1 && soldiers <= 4))) return bad(400, 'pretournament.soldiers tiene que ser "random" o un entero entre 1 y 4');
+      if (v.mutation !== undefined && (typeof v.mutation !== 'object' || v.mutation === null)) return bad(400, 'mutation tiene que ser un objeto (spec/05 §1)');
+      const seed = v.seed === undefined ? randomSeed() : v.seed;
+      if (!Number.isInteger(seed) || seed < 0) return bad(400, 'seed tiene que ser un entero ≥ 0');
+      let opponent = null;
+      if (pt.opponentId !== undefined && pt.opponentId !== null) { opponent = loadNet(pt.opponentId); if (!opponent) return bad(404, `Rival no encontrado: ${pt.opponentId}`); }
+      if (!opponent) { const th = readThrone(); if (th && th.queen) opponent = loadNet(th.queen); }
+      if (!opponent) opponent = genome;
+      if (activeTraining(id)) return bad(409, `La red ${id} está entrenando: para el entreno antes de pedir hijos.`);
+      const job = startChildrenJob({ genome, n, mutation: mutationConfig(v.mutation), games, opponent, soldiers, seed });
+      return json(res, 202, { jobId: job.id, status: job.status });
+    }
+    if (seg.length === 4 && seg[2] === 'diff' && method === 'GET') {
+      const other = ID_RE.test(seg[3]) ? loadNet(seg[3]) : null;
+      if (!other) return bad(404, `Red no encontrada: ${seg[3]}`);
+      try { return json(res, 200, diffGenomes(genome, other)); } catch (e) { return bad(400, e.message); }
+    }
+    if (seg.length === 3 && seg[2] === 'frozen' && method === 'PUT') {
+      if (activeTraining(id)) return bad(409, `La red ${id} está entrenando: para el entreno antes de operarla.`);
+      const b = await body();
+      if (!b.ok) return bad(b.status, b.error);
+      const list = b.value && b.value.blocks;
+      if (!Array.isArray(list) || !list.every((x) => typeof x === 'string')) return bad(400, 'blocks tiene que ser una lista de ids de bloque');
+      const ids = new Set(genome.blocks.map((x) => x.id));
+      const missing = list.find((x) => !ids.has(x));
+      if (missing !== undefined) return bad(400, `El bloque "${missing}" no existe en ${id}`);
+      const frozen = [...new Set(list)];
+      saveNet({ ...genome, frozen });
+      return json(res, 200, { ok: true, frozen });
+    }
+    if (seg.length === 4 && seg[2] === 'weights' && method === 'PUT') {
+      if (activeTraining(id)) return bad(409, `La red ${id} está entrenando: para el entreno antes de operarla.`);
+      const block = genome.blocks.find((x) => x.id === seg[3]);
+      if (!block) return bad(404, `El bloque "${seg[3]}" no existe en ${id}`);
+      const b = await body();
+      if (!b.ok) return bad(b.status, b.error);
+      const shapes = weightShapes(block, analyzeGenome(genome).dims[block.id]);
+      if (!shapes) return bad(400, `El bloque ${BLOCKS[block.type].name} "${block.id}" no tiene pesos`);
+      const errors = [];
+      const w = b.value;
+      if (!w || typeof w !== 'object' || Array.isArray(w)) return json(res, 400, { error: 'Pesos inválidos', errors: [{ code: 'weights-shape', blockId: block.id, message: 'El cuerpo tiene que ser un objeto {W:[…], b:[…]}' }] });
+      for (const [key, arr] of Object.entries(w)) {
+        if (!(key in shapes)) { errors.push({ code: 'weights-shape', blockId: block.id, message: `El bloque "${block.id}" no tiene pesos "${key}" (tiene: ${Object.keys(shapes).join(', ')})` }); continue; }
+        if (!Array.isArray(arr) || arr.length !== shapes[key]) { errors.push({ code: 'weights-shape', blockId: block.id, message: `Los pesos "${key}" del bloque "${block.id}" tienen que tener ${shapes[key]} números (llegan ${Array.isArray(arr) ? arr.length : 'ninguno'})` }); continue; }
+        const badIdx = arr.findIndex((x) => typeof x !== 'number' || !Number.isFinite(x));
+        if (badIdx >= 0) errors.push({ code: 'weights-nan', blockId: block.id, message: `Los pesos "${key}" del bloque "${block.id}" llevan un valor que no es un número finito en la posición ${badIdx}` });
+      }
+      if (errors.length) return json(res, 400, { error: 'Pesos inválidos', errors });
+      const g2 = { ...genome, weights: { ...genome.weights, [block.id]: { ...genome.weights[block.id], ...w } } };
+      const val = validate(g2);
+      if (!val.ok) return json(res, 400, { error: 'Genoma inválido', errors: val.errors });
+      saveNet(g2);
+      return json(res, 200, { ok: true, warnings: val.warnings });
+    }
+    if (seg.length === 3 && seg[2] === 'transplant' && method === 'POST') {
+      if (activeTraining(id)) return bad(409, `La red ${id} está entrenando: para el entreno antes de operarla.`);
+      const b = await body();
+      if (!b.ok) return bad(b.status, b.error);
+      const v = b.value || {};
+      const donor = ID_RE.test(String(v.fromNetId)) ? loadNet(v.fromNetId) : null;
+      if (!donor) return bad(404, `Red donante no encontrada: ${v.fromNetId}`);
+      const dblock = donor.blocks.find((x) => x.id === v.blockId);
+      if (!dblock) return bad(404, `El bloque "${v.blockId}" no existe en ${donor.id}`);
+      const g2 = JSON.parse(JSON.stringify(genome));
+      let targetId;
+      if (v.replaceBlockId !== undefined && v.replaceBlockId !== null) {
+        const t = g2.blocks.find((x) => x.id === v.replaceBlockId);
+        if (!t) return bad(404, `El bloque "${v.replaceBlockId}" no existe en ${id}`);
+        t.type = dblock.type; t.params = JSON.parse(JSON.stringify(dblock.params));
+        targetId = t.id;
+      } else {
+        const ids = new Set(g2.blocks.map((x) => x.id));
+        targetId = dblock.id;
+        for (let k = 2; ids.has(targetId); k++) targetId = `${dblock.id}-${k}`;
+        g2.blocks.push({ id: targetId, type: dblock.type, params: JSON.parse(JSON.stringify(dblock.params)) });
+      }
+      if (donor.weights[dblock.id]) g2.weights[targetId] = JSON.parse(JSON.stringify(donor.weights[dblock.id])); else delete g2.weights[targetId];
+      const rep = repair(g2, makeRng(genome.emblem));
+      const val = validate(rep.genome);
+      if (!val.ok) return json(res, 400, { error: 'El trasplante deja la red inválida', errors: val.errors });
+      const warnings = rep.fixes.map((f) => `Formas distintas: ${f}`);
+      const text = `Trasplanté ${BLOCKS[dblock.type].name} ${dblock.id} de ${donor.name} como ${targetId}${v.replaceBlockId ? ` (sustituye a ${v.replaceBlockId})` : ' (sin cables)'}${warnings.length ? '; pesos reiniciados' : ''}`;
+      rep.genome.lineage.mutations.push({ op: 'transplant', from: donor.id, blockId: targetId, sourceBlockId: dblock.id, text });
+      saveNet(rep.genome);
+      return json(res, 200, { ok: true, blockId: targetId, warnings });
     }
     if (seg.length === 3 && seg[2] === 'export' && method === 'GET') {
       return json(res, 200, normalize(genome), { 'Content-Disposition': `attachment; filename="${id}.json"` });

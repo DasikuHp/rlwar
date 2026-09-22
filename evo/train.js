@@ -10,6 +10,7 @@ import { normalize, validate, BLOCKS } from '../shared/genome.js';
 import { softmaxT } from '../shared/policy.js';
 import { assignRewards, returns } from '../shared/reward.js';
 import { loadNet, saveNet, netsDir } from './store.js';
+import { adaptImagination } from './mutate.js';
 import { playGame } from '../server/headless.js';
 import { createRoom } from '../server/rooms.js';
 import { AGENTS } from '../agents/registry.js';
@@ -182,6 +183,14 @@ export function learnFromGames({ net, genome, games, optim, cfg = {} }) {
     game.rewards = r;
     for (const e of r.entries) { allEntries.push(e); steps++; sumEff += e.effective; }
   }
+  // 🎲 Imaginación por uso (spec/05 §10.6): familias elegidas en las últimas 200 decisiones de disparo del lote
+  const decisions = [];
+  for (const game of games) {
+    const tr = game.trajectory && game.trajectory.soldiers ? game.trajectory.soldiers : {};
+    const steps = Object.values(tr).flat().filter((s) => s && s.decision && Number.isInteger(s.decision.eventId)).sort((x, y) => x.decision.eventId - y.decision.eventId);
+    for (const s of steps) decisions.push(s.decision);
+  }
+  const imagination = adaptImagination(g.imagination, decisions);
   const { episodes, values } = episodesFromRewards(allEntries);
   const hasValue = g.blocks.some((b) => b.type === 'hand.value');
   const baseline = lc.baseline === 'value' && !hasValue ? 'mean' : lc.baseline;
@@ -190,7 +199,7 @@ export function learnFromGames({ net, genome, games, optim, cfg = {} }) {
   const update = applyUpdate(net, pg.grads, optim, { lr: lc.lr, clipNorm: lc.clipNorm, optimizer: lc.optimizer, frozen: g.frozen });
   const threshold = g.learning.sleep.lessonThreshold;
   const lesson = update.top ? { blockId: update.top.blockId, name: update.top.name, relChange: update.top.relChange, bulb: update.top.relChange > threshold } : null;
-  return { update: { loss: pg.stats.loss, entropy: pg.stats.entropy, valueLoss: pg.stats.valueLoss, gradNorm: update.gradNorm, clipped: update.clipped, perBlock: update.perBlock, top: update.top, steps: pg.stats.steps }, lesson, rewards: { steps, meanEffective: steps ? sumEff / steps : 0 }, stats: pg.stats };
+  return { imagination, update: { loss: pg.stats.loss, entropy: pg.stats.entropy, valueLoss: pg.stats.valueLoss, gradNorm: update.gradNorm, clipped: update.clipped, perBlock: update.perBlock, top: update.top, steps: pg.stats.steps }, lesson, rewards: { steps, meanEffective: steps ? sumEff / steps : 0 }, stats: pg.stats };
 }
 
 // ---------- partidas (en proceso o en hilo) ----------
@@ -292,6 +301,10 @@ export function createTrainer(opts = {}) {
       if (!batch.length) return;
       const r = learnFromGames({ net, genome: g, games: batch, optim, cfg: lc });
       t.updates++;
+      if (r.imagination) {
+        g.imagination.usage = { ...r.imagination.usage };
+        if (r.imagination.changed) for (const f of Object.keys(r.imagination.weights)) g.imagination.families[f].weight = r.imagination.weights[f];
+      }
       const last = t.curve[t.curve.length - 1];
       if (last) { last.loss = r.update.loss; last.entropy = r.update.entropy; }
       t.lastLesson = r.lesson;

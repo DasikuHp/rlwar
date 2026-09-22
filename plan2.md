@@ -36,8 +36,8 @@ el único punto de validación de disparos.
 - **Actualización (fin de sesión Opus, 2026-09-22):** **F0 hecho** (commit `93c4d44`): selector de
   tropas por bando (o Aleatorio) + 1–4 soldados; test congelado antes del código (11/11); mutantes
   9/10 (el superviviente es un recorte redundante); probado en vivo. Arreglado `client.spec`, que
-  estaba en rojo y fuera de la batería (`af67185`). Suite **5/5**. **Siguiente paso: el usuario abre
-  la sesión de Fable con el prompt de `spec/README.md` §0.**
+  estaba en rojo y fuera de la batería (`af67185`). Suite **5/5**. **Sesión 1 de Fable (2026-09-22): experimento hecho, contratos `spec/00`–`08`
+  escritos; siguiente: revisión del usuario → herramientas (freeze, mutants) → F1.**
 - F0 **a medias**: `plan.md` escrito; **falta** el selector de tropas en la UI. *(superado: ver
   arriba)*
 - F1–F5 sin empezar: no hay `move` en `rooms.js`, no existe `evo/`.
@@ -110,6 +110,17 @@ el único punto de validación de disparos.
 | Más extras | **Los 4**: diario de la red · exportar/importar (validado: una red rota no rompe nada) · pesos a mano y congelar cables (nivel Científico) · cronista de temporadas (trono y dinastías). |
 | **Exacto y real** | "Necesito que sea exacto y real" → **regla verificable**: cada frase (voz, lección, diario, cronista) lleva referencias a los eventos registrados de los que sale. Cada número y cada nombre que aparece en ella debe estar en esos eventos. Un test lo comprueba; nada se inventa. |
 | Duración del entreno | **Las 3 formas**: por nº de partidas · por tiempo · "hasta que deje de mejorar" (se para si la curva no sube en X partidas). Siempre se puede parar a mano y se guarda lo aprendido. |
+
+### Ronda 12 — sesión 1 de Fable (2026-09-22) ✅
+| Tema | Decisión |
+|---|---|
+| Movimiento de agentes | **Las dos vías**: `move` dentro de `fire` (pre-decidido) **o** `POST /move` después de ver el resultado, dentro del margen; los agentes en proceso pueden implementar `chooseMove()` opcional (gana sobre `move` de `chooseShot`). |
+| Experimento desechable | Presupuesto **~5 min de CPU** (usados 4,2). Resultados en `spec/03-percepcion.md` §8; código borrado. |
+| Semilla | **Todo determinista**: la sala reparte un `rng` con semilla a mapgen y a cada agente (`rng` nuevo en `chooseShot`, por defecto `Math.random`); los 4 heurísticos lo usan. |
+| Contratos | `spec/00`…`spec/08` **aprobados tal cual** por el usuario (incluidos los defaults: empate en reto → reina; memoria de equipo sin gradiente a compañeros; dos pasadas por turno; `BODY` 0.5 u, separación 1 u). |
+| Claves de datos | **Inglés** en claves JSON/API nuevas; **español** en todo texto para personas. |
+| Ángulo de artillería | Bug previo en `solver.js` (ángulo positivo baja para el equipo derecho): **se arregla en F1** (spec/01 §7b). |
+| Tests viejos | `test/smoke.mjs` y `agent.mjs autopilot` reciben una línea (`stage==='move'` → `stay`), en commit propio con motivo. |
 
 ## 4. Diseño resultante (borrador, se cierra al acabar las preguntas)
 

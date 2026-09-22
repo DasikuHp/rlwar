@@ -86,3 +86,89 @@
   actualiza `history` y `generation`; genealogía sin huérfanos; `sha` detecta edición.
 - Modos de aprendizaje: `frozen` no cambia pesos durante las 6 partidas y sí tras el repaso; `hot`
   cambia tras la 1ª; `mix` cambia menos que `hot` tras la 1ª (norma de Δ) y más tras el repaso.
+
+## 6. Precisiones de F6 (fijadas al escribir los tests; completan §1–§5 sin cambiarlos)
+
+### 6.1 Semillas y plan del duelo (`evo/duel.js`)
+- `hash32(seed, k)` (en `shared/rng.js`) = primer valor de `makeRng((seed ^ Math.imul(k + 1, 0x9E3779B1)) >>> 0)`
+  convertido a entero: `Math.floor(r · 2³¹)`. Determinista, en `[0, 2³¹)`.
+- `duelPlan({a, b, seed, soldiers}) → games[6]`: para `k = 0..5`, mapa `m = ⌊k/2⌋`, `seed = hash32(seed, m)`,
+  `left = k par ? a : b`, `right` el otro, `soldiers = 'random' ? 1 + hash32(seed, 100 + m) mod 4 : soldiers`.
+  Cada fila: `{k, seed, soldiers, left, right}` (ids).
+- `duelScore(rows, a, b, {throne, queen}) → {wins:{[a],[b]}, killDiff (a − b), winner, tie}`: más victorias;
+  empate → `killDiff` (positivo gana `a`, negativo `b`); empate total → `tie: true` y `winner: null`, salvo
+  `throne: true`, donde `winner = queen` y `tie: true` se mantiene (quien defiende gana los empates).
+- Resultado de cada partida: `winner` = id de la red que ganó (`null` en tablas), `kills = {[a]: n, [b]: n}`.
+
+### 6.2 Aprendizaje durante el duelo
+`runDuel({a, b, learning, speed, soldiers, seed, throne, play, learner, onGame, shouldStop})`:
+- `play(row) → {winner, kills, events, trajectories, players, gameId, roomCode}` inyectable (por defecto:
+  `turbo` → `playGame` sin pantalla; `x1`/`x10` → sala viva encadenada, `roomCode` en la fila).
+- `learner(netId) → {learn(games, {lrScale}), review(games), save()}` inyectable (por defecto el de
+  `evo/train.js`: `makeLearner(genome)` con Adam y `optim.json`, como el entrenador). Reglas exactas:
+  | modo | tras cada partida | al acabar |
+  |---|---|---|
+  | `frozen` | nada | `review(las 6)` = un lote con las 6 partidas, `lrScale 1` |
+  | `hot` | `learn([partida], {lrScale: 1})` | nada |
+  | `mix` | `learn([partida], {lrScale: 0.25})` | `review(las 6)` con `lrScale 1` |
+  Se aplica a las dos redes (cada una aprende de su propia trayectoria). Con `a === b` no se aprende.
+- Las 6 partidas se guardan en `evo/games/<gameId>.json` (`{meta, events}`, meta con `duelId`, `seed`,
+  `soldiers`, `left`, `right`, `winner`, `kills`, `ts`). `stop` → `status: 'stopped'`, se puntúa lo jugado.
+- Registro del duelo: `{id, a, b, status: running|done|stopped, learning, speed, throne, games[], wins,
+  killDiff, winner, tie, ms, roomCodes, startedAt}`. `games[k].roomCode` es `null` en turbo.
+
+### 6.3 Trono (`evo/throne.js`)
+- `throne.json` por defecto: `{queen: null, since: null, reigns: [], challenges: [], hallOfFame: [],
+  league: {pairs: {}}, dynasties: {A: null, B: null}, genealogy: {}}`. Escritura atómica (`tmp` + `rename`).
+- `challenge({challenger, learning = 'mix', speed = 'turbo', seed?}, {runDuel})`: la red debe existir y poder
+  jugar (404 / 400); `challenger === queen` → 400. Sin reina → `queen = challenger`, `since = ahora`,
+  `reigns.push({netId, from, to: null, defenses: 0, won: 0, lost: 0})`, evento `reign.start`. Con reina →
+  duelo `{a: challenger, b: queen, throne: true}`; `challenges.push({id: 'c<n>', challenger, queen, duelId,
+  result: queen|challenger|tie, ts})`; si gana la retadora: el reinado saliente recibe `to`, `lost++`; se
+  guarda **copia congelada** de la reina en `evo/nets/<queen>/hof-<n>.json` y `hallOfFame.push({netId,
+  snapshot, reignIdx, reignGames, sha})`; eventos `reign.end` y `reign.start`; si no: `defenses++`, `won++`
+  (empate cuenta como defensa). Devuelve `{duelId?, result, queen}`.
+- `league.pairs["x|y"]` con `x < y` (orden alfabético): `{wins, losses, last[≤20]}` desde la perspectiva de `x`
+  (`last[i] = 1` si ganó `x`); se actualiza por **partida** (tablas no cuentan). `winrate(x, y)` =
+  `wins/(wins+losses)` o `0.5` sin datos.
+- Genealogía: `registerBirth(genome)` → `genealogy[id] = {parents, generation, born, sha}` con `sha` =
+  SHA-256 de `JSON.stringify({blocks, wires})` (la **estructura**: aprender no cuenta como editar);
+  `genealogyView()` → `{nets: {id: {…, edited, orphan}}}`: `edited = sha actual ≠ sha al nacer`,
+  `orphan = algún parent no está ni en genealogy ni en evo/nets`. Los hijos de F5 y las importaciones
+  llaman a `registerBirth`.
+- `pickOpponent(netId, mix, rng, {throne, hall})`: `mix = {antagonist, hallOfFame, self, ghost, hard,
+  antagonistId}`; `hall = [{netId, snapshot|genome, kind: 'hallOfFame'|'milestone'}]`. Orden: (1) si
+  `rng() < ghost` y existe una ex-reina de `hallOfFame` contra la que `netId` perdió en sus últimos 20
+  resultados de `league.pairs` → `{kind: 'ghost', ...esa}`; (2) sorteo entre `antagonist / hallOfFame /
+  self` con pesos (normalizados; los 0 no entran); `antagonist` sin `antagonistId` → la reina si existe y no
+  es `netId`, si no cae a `self`; `hallOfFame` vacía → `self`; (3) dentro de la sala de la fama, peso
+  `f_hard = (1 − winrate(netId, rival))^hard` (0.5 sin datos), `hard = 2` por defecto.
+- El entrenador (spec/04 §6) usa `pickOpponent` con `throne.json` y sus hitos como `hall`; `exploiter: true`
+  en `POST /trainings` fija `opponents = {antagonist: 1, hallOfFame: 0, self: 0, antagonistId: reina}` y
+  queda en `config.exploiter` (400 si no hay reina).
+
+### 6.4 Dinastías (§3) y trabajos
+- `POST /api/lab/dynasties {A:{name, netId}, B:{name, netId}}` (o `?house=A` con solo esa casa) →
+  `{name, champion, generation: 0, founder, history: []}`; 404 si la red no existe; 400 si las dos casas
+  usan la misma red.
+- `POST /api/lab/dynasties/generation` → `202 {jobId}` (`kind: 'generation'`); pasos exactos por casa:
+  1. entreno de la campeona con `antagonistId` = campeona rival (`training` del cuerpo; por defecto
+     `{speed:'turbo', duration:{games: 20}, soldiers: 'random'}`);
+  2. `n` hijos (`children.n`, por defecto 4) con pre-torneo `children.pretournament` contra la campeona
+     rival; el mejor hijo reta a su madre en un duelo normal; si gana (no empate) sustituye a la campeona;
+  3. duelo entre casas (`duel.learning`, `duel.speed`); la ganadora `generation++` (empate: ninguna).
+  `history.push({generation, champion, trainingId, childrenJobId, duelId, won})` en las dos casas.
+  Progreso `{done, total: 6}` (2 entrenos, 2 crías, 2 duelos: madre-hija y entre casas cuentan como uno
+  cada uno… total = 6). Eventos SSE `dynasty {house, event: train|children|promote|duel|generation}`.
+- `POST /api/lab/dynasties/:house/challenge-throne {learning, speed}` → `challenge` con la campeona.
+
+### 6.5 API y eventos
+- `POST /api/lab/duels` → `202 {id, status, roomCodes}`; `GET /api/lab/duels` → `{duels: [...]}`;
+  `GET /api/lab/duels/:id`; `POST /api/lab/duels/:id/stop`. 404 red inexistente; 400 `a === b`,
+  `learning` o `speed` fuera de lista, `soldiers` fuera de `'random'|1..4`; 409 si una red está entrenando.
+- `GET /api/lab/throne` → `throne.json` completo más `queenName`; `GET /api/lab/hall-of-fame` →
+  `{hallOfFame}`; `GET /api/lab/genealogy` → `genealogyView()`; `POST /api/lab/throne/challenge` →
+  `202 {duelId?, result?, queen}` (síncrono si no había reina: `200`).
+- SSE: `duel {id, game?, result?}` por partida y al final; `throne {queen, event: reign.start|reign.end|
+  challenge}`; `dynasty {house, event, …}`. `hello` lleva `throne: {queen, since}`.
+- Todo evento de trono/dinastía/entreno se añade también a `evo/log.jsonl` (`{ts, type, ...}`), que F7 lee.

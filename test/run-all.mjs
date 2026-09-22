@@ -67,9 +67,12 @@ try {
   results.push(await run('aprendizaje (F4): recompensa, gradiente, tareas, entrenador', [join(ROOT, 'test', 'aprendizaje.spec.mjs')]));
   results.push(await run('aprendizaje (F4): casos extra', [join(ROOT, 'test', 'aprendizaje-extra.spec.mjs')]));
   results.push(await run('entrenador (F4): casos extra 2', [join(ROOT, 'test', 'entrenador-extra.spec.mjs')]));
+  results.push(await run('entrenador (F4): casos extra 3', [join(ROOT, 'test', 'entrenador-extra-b.spec.mjs')]));
   results.push(await run('API de entrenos (F4)', [join(ROOT, 'test', 'api-trainings.spec.mjs'), BASE]));
   results.push(await run('evolución (F5): mutación, diferencias, pre-torneo, Imaginación por uso', [join(ROOT, 'test', 'evolucion.spec.mjs')]));
   results.push(await run('API de evolución (F5): hijos, diff, cirugía, importar', [join(ROOT, 'test', 'api-evolucion.spec.mjs'), BASE]));
+  results.push(await run('trono (F6): duelos, reto, liga, genealogía, dinastías', [join(ROOT, 'test', 'trono.spec.mjs')]));
+  results.push(await run('API de trono (F6): duelos, trono, dinastías, explotadora', [join(ROOT, 'test', 'api-trono.spec.mjs'), BASE]));
 } finally {
   server.kill();
 }

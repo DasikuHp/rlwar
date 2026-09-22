@@ -39,7 +39,10 @@ el único punto de validación de disparos.
   estaba en rojo y fuera de la batería (`af67185`). Suite **5/5**. **Sesión 1 de Fable (2026-09-22): experimento hecho, contratos `spec/00`–`08`
   aprobados; herramientas `tools/freeze.mjs` + `tools/mutants.mjs` (test propio, 7 tests congelados en
   `test/FROZEN.json`); F1 motor (movimiento, semilla, sin pantalla, ángulo y'') con `test/motor.spec.mjs`
-  congelado antes del código y suite 8/8 en verde. Siguiente: F2 (red: genoma + nn).**
+  congelado antes del código. **F2 red** (genome.js, nn.js, templates.js) y **F3 percepción**
+  (percept.js, policy.js, evo/store.js, agents/net.js, sala con shotLog/decision) hechos, más la API
+  del laboratorio para redes/catálogo (evo/api.js). Batería 18 specs (17 congelados). Siguiente: F4
+  aprendizaje (reward.js, train.js, worker.js, entrenos por API).**
 - F0 **a medias**: `plan.md` escrito; **falta** el selector de tropas en la UI. *(superado: ver
   arriba)*
 - F1–F5 sin empezar: no hay `move` en `rooms.js`, no existe `evo/`.

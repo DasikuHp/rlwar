@@ -124,6 +124,16 @@ servidor) · regresión (la suite actual).
 - `referencia/` (Graphwar original en Java, GPL-3) está ignorado en git: consúltalo, no lo toques.
 - `.gitattributes` fija LF para que las huellas SHA-256 sean estables en Windows.
 
+## 6b. Estado tras la sesión 1 de Fable (2026-09-22)
+- Contratos `spec/00`–`08` aprobados; `spec/mutantes.md` con los supervivientes justificados.
+- Hecho y commiteado: herramientas (freeze, mutants), **F1** motor, **F2** red, **F3** percepción y
+  política, API del laboratorio para catálogo/plantillas/redes (`/api/lab`). Batería: 18 specs,
+  17 congelados (`test/FROZEN.json`).
+- Desbloqueado para Opus: clic tras disparar y destino (F1), editor de cables sobre el catálogo
+  (`GET /api/lab/catalog`, `validate`, CRUD de redes, plantillas), overlay de candidatos y cerebro en
+  vivo (evento SSE `decision`, `state.lastDecision`), selector de tropas con redes (`net:<id>`).
+- Siguiente: F4 aprendizaje.
+
 ## 7. Cierre de cada sesión
 1. Actualiza `plan2.md` (estado de la fase) y `plan.md` §4 si cambia el stack.
 2. Commit en verde.

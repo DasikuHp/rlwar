@@ -101,3 +101,28 @@ Los 27 supervivientes son las **constantes de las plantillas** (32 → 33 neuron
 `survive` 0.3 → 1.3, `adjust` true/false): son elecciones de diseño de las plantillas, no contrato
 (la spec/08 §7 fija la forma, y el test comprueba bloques clave, `survive` 0.5 de la Tortuga y que
 validan y disparan). Se aceptan.
+
+## F3
+
+### `shared/policy.js` (muestra de 120 de 194) y `agents/net.js` (los 40) contra `test/politica.spec.mjs`
+**Cazados 120/120 y 40/40: sin supervivientes.**
+
+### `shared/percept.js` contra `test/percepcion.spec.mjs` (muestra de 200 de 1 272, semilla 31) — cazados 151/200
+Los 49 supervivientes, agrupados:
+- **Gaps reales** (no había test) → cubiertos en **`test/percepcion-extra.spec.mjs`** (añadido; no toca
+  el spec congelado): conversión grados→radianes del ángulo en `simulateCandidate` (línea 213),
+  `victimIsNearest` positivo (226), espejo del equipo derecho para obstáculos/radar/mapa/destinos (17),
+  media x de compañeros con aliados asimétricos (347), escala `p1` del ajuste de senos/parábolas (161),
+  resultado "otro fin" en el historial (266) y minDist al tope, rama `invalid` de la simulación (212),
+  la recta exacta va la primera (143).
+- **Equivalentes para cualquier entrada válida**: comparaciones de borde en flotantes (`<` → `<=`
+  en 217, 308, 360), guardas de nulos que las entradas válidas no activan (177, 294, 324, 169, 388),
+  `fine = false` por defecto (208; los tests pasan el valor), `maxSteps 20000 → 20001` (214).
+- **Sin contrato exacto**: el barajado de Fisher–Yates (117: el contrato fija la rejilla y el cupo, no
+  el orden), el objetivo virtual `+20` (99), el texto de `eyeLayout` (421), detalles de recorte de la
+  polilínea (202–205).
+- **Cupos**: `total = 0 → 1` y el desempate del reparto (106, 112) dan los mismos cupos para los
+  pesos por defecto y para n = 10 (comprobado a mano); no cambian ningún caso de la spec.
+
+### `evo/store.js` (los 20) contra `test/politica.spec.mjs`
+(pendiente: la primera tirada no dejó resumen; se repite)

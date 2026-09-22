@@ -7,6 +7,7 @@
   "test/motor.spec.mjs": "92901c90c30859c22f21f5aa49942f619b9eba81ab606b90473b88b9faee6996",
   "test/moves.spec.mjs": "90b9bb5721deabe830d54fd4d32d15ddbbae602339fdd158b54954b2031394e0",
   "test/parser.spec.mjs": "780fdae97a48dc8b8281406105c95b4ac88a86cf28e48373d8b2a3f529bbcf0b",
+  "test/percepcion-extra.spec.mjs": "7ccc7d5d5fa8a2080c80237038c7c8a52b139a4abd160cf409112cc3a575b983",
   "test/percepcion.spec.mjs": "827c77aed11f6c62da4c182b2ae353d830cc61d7f6d47d7382e7af6aacfa1323",
   "test/politica.spec.mjs": "81bbc315ab64eb7062071d931d35e7e95747d1130589a151d8f463c90da49d51",
   "test/red.spec.mjs": "6c9a0c0d7e9a65f10aeb2b4f4aabc0e5c4b68f9c7960f27ba8886f6f62669220",

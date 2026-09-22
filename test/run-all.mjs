@@ -61,6 +61,7 @@ try {
   results.push(await run('red (F2): genoma, validación, cálculo y BPTT', [join(ROOT, 'test', 'red.spec.mjs')]));
   results.push(await run('genoma (F2): defaults fijados y validación', [join(ROOT, 'test', 'genoma.spec.mjs')]));
   results.push(await run('percepción (F3): ojos, Imaginación, ajuste, destinos', [join(ROOT, 'test', 'percepcion.spec.mjs')]));
+  results.push(await run('percepción (F3): casos extra', [join(ROOT, 'test', 'percepcion-extra.spec.mjs')]));
   results.push(await run('política (F3): decisión, agente-red, almacén, sala', [join(ROOT, 'test', 'politica.spec.mjs')]));
   results.push(await run('API del laboratorio: catálogo, plantillas, redes', [join(ROOT, 'test', 'api-lab.spec.mjs'), BASE]));
 } finally {

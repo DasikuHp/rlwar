@@ -117,8 +117,9 @@ Aprobados por el usuario ("arréglalo tú"; frases en el navegador "hazlo lo mej
   antigua. Cada partida guardada deja al lado su `meta` (`<gameId>.meta.json`) para listar sin abrir la partida.
 
 ### 9.2 Retención de partidas (M16)
-- `saveGame` aplica la retención de spec/07 §12.1 a cada red de `meta.nets`: como mucho 200 partidas por red; se
-  borran las más antiguas que no sean duelos de trono.
+- Quien guarda una partida nueva (entrenos, duelos, exhibiciones) usa `saveGameKept`, que guarda y aplica la
+  retención de spec/07 §12.1 a cada red de `meta.nets`: como mucho 200 partidas por red; se borran las más
+  antiguas que no sean duelos de trono. `saveGame` por sí solo no borra nada (así lo fija `verdad.spec`).
 
 ### 9.3 `shared/` y la verdad en el navegador (M14)
 - `shared/*.js`, `evo/truth.js` y `evo/voice.js` no usan nada de Node: `constants.js` mira `process` solo si existe

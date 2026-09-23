@@ -1,6 +1,5 @@
 // Política (spec/03 §7, §9.2): la red decide disparo (+ajuste) y movimiento; log-probabilidades,
 // atribución "tapar y comparar", registro `decision` para el overlay y el aprendizaje.
-import { performance } from 'node:perf_hooks';
 import { gaussFrom, makeRng } from './rng.js';
 import { normalize, BLOCKS } from './genome.js';
 import { observe, generateCandidates, applyAdjust, adjustScales, simulateCandidate, toLocal, toWorld } from './percept.js';

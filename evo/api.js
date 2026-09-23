@@ -7,13 +7,14 @@ import { listNets, loadNet, saveNet, deleteNet, entryOf } from './store.js';
 import { createTrainer, makeLearner, feedbackTarget, feedbackFromGame } from './train.js';
 import { runDuel, newDuelId, LEARNING_MODES, SPEEDS } from './duel.js';
 import { challenge, throneView, foundDynasties, runGeneration, readThroneFull, genealogyView, registerBirth, vacateNet } from './throne.js';
-import { loadGame, appendLog, readLog, loadLogEntry, listGames, saveGame, loadGameNets, readFeedback, writeFeedback, readApplied, appendApplied, netsDir } from './store.js';
+import { loadGame, appendLog, readLog, loadLogEntry, listGames, saveGame, loadGameNets, readFeedback, writeFeedback, readApplied, appendApplied, readCurves, saveGameKept, netsDir } from './store.js';
 import { nameNeurons, diaryPhrase, memoryOf } from './truth.js';
 import { runBulletin } from './exam.js';
 import { compile } from '../shared/nn.js';
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { mutate, mutationConfig, slugify } from './mutate.js';
+import { mutate, mutationConfig, slugify, DEFAULT_MUTATION } from './mutate.js';
+import { decideShot, decideMove } from '../shared/policy.js';
 import { diffGenomes } from './diff.js';
 import { runPretournamentAsync } from './children.js';
 import { readThrone } from './store.js';
@@ -194,7 +195,7 @@ export function onExhibitionOver(room) {
   const side = (team) => room.players.find((p) => p.team === team);
   const idOf = (p) => (p ? p.netId || p.agentType || p.name : null);
   const winner = room.result && room.result.winner ? idOf(side(room.result.winner)) : null;
-  saveGame({ gameId: room.gameId, kind: 'exhibition', roomCode: room.code, seed: room.seed, soldiers: room.soldiersPerPlayer, left: idOf(side('left')), right: idOf(side('right')), nets: [...new Set(nets.map((p) => p.netId))], winner, kills: Object.fromEntries(room.players.map((p) => [idOf(p), p.kills || 0])), ts: Date.now() }, room.events, trajectories);
+  saveGameKept({ gameId: room.gameId, kind: 'exhibition', roomCode: room.code, seed: room.seed, soldiers: room.soldiersPerPlayer, left: idOf(side('left')), right: idOf(side('right')), nets: [...new Set(nets.map((p) => p.netId))], winner, kills: Object.fromEntries(room.players.map((p) => [idOf(p), p.kills || 0])), ts: Date.now() }, room.events, trajectories);
   const byNet = new Map();
   for (const p of nets) (byNet.get(p.netId) || byNet.set(p.netId, []).get(p.netId)).push(p);
   for (const [netId, players] of byNet) {
@@ -315,6 +316,34 @@ function learningCatalog() {
   walk(DEFAULT_LEARNING, '');
   return out;
 }
+const MUTATION_META = {
+  weights: ['Mover pesos', 'Mueve un poco una parte de los pesos de cada bloque que no esté congelado.', 'σ 0.05 y fracción 0.3: el 30 % de los pesos se mueve alrededor de un 5 %.', L.A],
+  addNeurons: ['Añadir neuronas', 'Añade entre 1 y «máx.» neuronas a una capa o a una memoria.', 'Con máx. 8, una capa de 32 puede pasar a 35.', L.B],
+  removeNeurons: ['Quitar neuronas', 'Quita las neuronas que menos pesan en lo que viene después.', 'Con máx. 4, una capa de 32 puede quedarse en 29.', L.B],
+  addWire: ['Añadir cable', 'Conecta dos bloques que aún no lo estaban, si la red sigue siendo válida.', 'Un cable del Radar a una capa: esa capa también ve el Radar.', L.B],
+  removeWire: ['Quitar cable', 'Quita un cable sin dejar ningún bloque sin entradas ni salidas.', 'Quitar Rasgos → Instinto si Instinto tiene otras entradas.', L.B],
+  addBlock: ['Añadir bloque', 'Inserta un bloque nuevo en un cable (al principio casi no cambia nada) o un ojo nuevo.', 'Una capa densa entre Candidatos y Elegir.', L.C],
+  removeBlock: ['Quitar bloque', 'Quita un bloque que no sea mano, pie ni el único ojo, y une sus cables.', 'Quitar una capa intermedia: lo que le entraba pasa a lo que salía de ella.', L.C],
+  activation: ['Cambiar activación', 'Cambia la función de una capa densa (tanh, relu, seno…).', 'De tanh a relu: la capa deja de saturarse con valores grandes.', L.C],
+  eyeParams: ['Ajustar un ojo', 'Cambia un parámetro de un ojo: celdas del Mapa, bigotes del Radar…', 'Radar de 16 a 32 bigotes.', L.C],
+  imagination: ['Imaginación', 'Mueve el peso de cada familia de candidatos y cuántos imagina; a veces enciende o apaga una familia.', 'Más parábolas y menos senos; 24 → 26 candidatos.', L.B],
+  traits: ['Rasgos', 'Cambia un poco la temperatura, el pulso y el espíritu de equipo; a veces el carácter.', 'Temperatura 1.00 → 0.83.', L.A],
+  emblem: ['Emblema', 'El hijo recibe un emblema distinto (nuevo o con unos bits cambiados).', 'Así cada hijo se distingue a simple vista.', L.A],
+};
+const MUTATION_PARAM = {
+  on: { name: 'Activado', type: 'bool' },
+  rate: { name: 'Probabilidad', type: 'number', min: 0, max: 1, step: 0.05 },
+  sigma: { name: 'Intensidad (σ)', type: 'number', min: 0, max: 1, step: 0.01 },
+  fraction: { name: 'Fracción de pesos', type: 'number', min: 0, max: 1, step: 0.05 },
+  max: { name: 'Máximo por vez', type: 'int', min: 1, max: 64, step: 1 },
+  types: { name: 'Tipos de bloque', type: 'set', options: ['dense', 'norm', 'skip', 'attention', 'pool', 'echo', 'gru', 'lstm', 'teamMemory', 'eye.*'] },
+};
+function mutationCatalog() {
+  return Object.entries(DEFAULT_MUTATION).map(([key, def]) => {
+    const [name, explain, example, level] = MUTATION_META[key];
+    return { key, name, level, explain, example, params: Object.entries(def).map(([k, v]) => ({ key: k, ...MUTATION_PARAM[k], default: Array.isArray(v) ? [...v] : v })) };
+  });
+}
 export function catalog() {
   return {
     blocks: Object.values(BLOCKS).map((b) => ({ ...b })),
@@ -323,7 +352,7 @@ export function catalog() {
     traits: TRAITS,
     rewardTerms: REWARD_TERMS_CAT,
     learning: learningCatalog(),
-    mutation: [],
+    mutation: mutationCatalog(),
     limits: LIMITS,
     levels: [L.A, L.B, L.C],
     defaults: { traits: DEFAULT_TRAITS, traitRanges: TRAIT_RANGES, reward: DEFAULT_REWARD, learning: DEFAULT_LEARNING, imagination: DEFAULT_IMAGINATION },
@@ -374,6 +403,13 @@ export async function labApi(req, res, parts, url) {
     if (!Number.isInteger(turn)) return bad(400, 'turno inválido');
     const r = brainOf(seg[1], turn, url.searchParams.get('player'));
     return r.status === 200 ? json(res, 200, r.body) : bad(r.status, r.error);
+  }
+  if (seg[0] === 'games' && seg.length === 1 && method === 'GET') {
+    // lista de partidas guardadas, de la más reciente a la más antigua (spec/08 §9.1)
+    const q = (k) => url.searchParams.get(k);
+    const limit = Math.max(1, Math.min(500, Number(q('limit')) || 50));
+    const games = listGames({ netId: q('netId') || null }).filter((m) => (!q('duelId') || m.duelId === q('duelId')) && (!q('trainingId') || m.trainingId === q('trainingId')) && (!q('kind') || m.kind === q('kind'))).reverse().slice(0, limit);
+    return json(res, 200, { games });
   }
   if (seg[0] === 'games' && seg.length === 2 && method === 'GET') {
     const g = loadGame(seg[1]);
@@ -680,6 +716,38 @@ export async function labApi(req, res, parts, url) {
         const job = startExamJob(genome);
         return json(res, 202, { jobId: job.id, status: job.status });
       }
+    }
+    if (seg.length === 3 && seg[2] === 'curves' && method === 'GET') {
+      return json(res, 200, { netId: id, trainings: readCurves(id), reigns: th.reigns.filter((r) => r.netId === id) });
+    }
+    if (seg.length === 3 && seg[2] === 'whatif' && method === 'POST') {
+      // "¿qué pasaría si…?" (spec/08 §9.1): la decisión en una escena congelada, sin guardar nada
+      const b = await body();
+      if (!b.ok) return bad(b.status, b.error);
+      const v = b.value || {};
+      const g = v.genome || genome;
+      const val = validate(g, { forPlay: true });
+      if (!val.ok) return json(res, 400, { error: 'Genoma inválido: la red tiene que poder jugar', errors: val.errors });
+      const sc = v.scene;
+      if (!sc || !Array.isArray(sc.soldiers) || !sc.soldiers.length || sc.soldiers.length > 32) return bad(400, 'scene.soldiers tiene que ser una lista de 1 a 32 soldados {id, team, x, y}');
+      const obstacles = Array.isArray(sc.obstacles) ? sc.obstacles : [];
+      if (obstacles.length > 64) return bad(400, 'Como mucho 64 obstáculos');
+      for (const s of sc.soldiers) {
+        if (typeof s.id !== 'string' || !['left', 'right'].includes(s.team)) return bad(400, 'Cada soldado lleva id (texto) y team (left o right)');
+        if (!(Number.isFinite(s.x) && Number.isFinite(s.y) && Math.abs(s.x) <= 25 && Math.abs(s.y) <= 15)) return bad(400, `El soldado ${s.id} está fuera del plano (x entre −25 y 25, y entre −15 y 15)`);
+      }
+      for (const o of obstacles) if (![o.x, o.y, o.w, o.h].every(Number.isFinite) || o.w <= 0 || o.h <= 0) return bad(400, 'Cada obstáculo es {x, y, w, h} con w y h positivos');
+      const soldiers = sc.soldiers.map((s) => ({ ownerId: s.ownerId || (s.team === 'left' ? 'pL' : 'pR'), alive: s.alive !== false, turns: 0, ...s, alive: s.alive !== false }));
+      const me = soldiers.find((s) => s.id === sc.soldierId);
+      if (!me) return bad(400, `scene.soldierId (${sc.soldierId}) no es ningún soldado de la escena`);
+      if (!me.alive) return bad(400, `El soldado ${me.id} está muerto: no puede decidir`);
+      const state = { soldiers, obstacles, shotLog: Array.isArray(sc.shots) ? sc.shots : [], stats: sc.stats || { shots: 0, shotsNoKill: 0, remaps: 0 }, players: [] };
+      const net = compile(g);
+      const rng = makeRng(Number.isInteger(v.seed) ? v.seed : 1);
+      const r = v.phase === 'move'
+        ? decideMove({ net, genome: g, state, soldierId: me.id, memory: net.zeroState(), team: null, rng, shot: null })
+        : decideShot({ net, genome: g, state, soldierId: me.id, memory: net.zeroState(), team: null, rng, attribution: true });
+      return json(res, 200, { decision: r.decision });
     }
     if (seg.length === 3 && seg[2] === 'diary' && method === 'GET') return json(res, 200, { entries: diaryEntries((e) => e.netId === id && DIARY_KINDS.has(e.type)) });
     if (seg.length === 3 && seg[2] === 'feedback' && method === 'GET') return json(res, 200, { pending: readFeedback(id), applied: readApplied(id) });

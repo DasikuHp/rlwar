@@ -3,7 +3,7 @@
 import { hash32 } from '../shared/rng.js';
 import { playGame } from '../server/headless.js';
 import { createRoom } from '../server/rooms.js';
-import { loadNet, saveGame, saveGameNets, appendLog } from './store.js';
+import { loadNet, saveGameKept, saveGameNets, appendLog } from './store.js';
 import { makeLearner } from './train.js';
 
 export const LEARNING_MODES = ['frozen', 'hot', 'mix'];
@@ -69,7 +69,7 @@ export function makePlay({ speed = 'turbo', duelId = null, saveGames = true, gen
       out = { ...summarize(room, row), roomCode: room.code };
     }
     if (saveGames) {
-      saveGame({ gameId: out.gameId, kind: 'duel', duelId, throne: !!throne, seed: row.seed, soldiers: row.soldiers, left: row.left, right: row.right, nets: [row.left, row.right], winner: out.winner, kills: out.kills, ts: Date.now() }, out.events, out.trajectories);
+      saveGameKept({ gameId: out.gameId, kind: 'duel', duelId, throne: !!throne, seed: row.seed, soldiers: row.soldiers, left: row.left, right: row.right, nets: [row.left, row.right], winner: out.winner, kills: out.kills, ts: Date.now() }, out.events, out.trajectories);
       if (throne) saveGameNets(out.gameId, { [row.left]: left.genome, [row.right]: right.genome });
     }
     return out;

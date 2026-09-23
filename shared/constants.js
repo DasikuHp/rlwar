@@ -1,6 +1,6 @@
 // Constantes del juego (inspiradas en el Graphwar original, src/GraphServer/Constants.java)
 // Modo rápido para tests (GW_FAST=1): turnos y animaciones más cortos.
-const FAST = process.env.GW_FAST === '1';
+const FAST = typeof process !== 'undefined' && !!process.env && process.env.GW_FAST === '1'; // también en el navegador (spec/08 §9.3)
 export const PLANE = { xMin: -25, xMax: 25, yMin: -15, yMax: 15 };
 export const HIT_RADIUS = 0.7;        // distancia a la que un disparo mata (el original: ~0.5u)
 export const OBSTACLE_MARGIN = 0.06;  // margen de colisión de obstáculos

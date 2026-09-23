@@ -93,18 +93,32 @@ export function saveGame(meta, events, trajectories = null) {
   // los vectores de observación son Float64Array: en JSON van como listas normales
   writeFileSync(tmp, JSON.stringify(trajectories ? { meta, events, trajectories } : { meta, events }, (k, v) => (v && ArrayBuffer.isView(v) ? Array.from(v) : v)));
   renameSync(tmp, file);
+  // su meta al lado, para listar sin abrir la partida (spec/08 §9.1)
+  const mfile = join(gamesDir(), `${meta.gameId}.meta.json`), mtmp = mfile + '.tmp';
+  writeFileSync(mtmp, JSON.stringify(meta)); renameSync(mtmp, mfile);
   return { ok: true, id: meta.gameId, file };
+}
+// guarda y aplica la retención de 200 partidas a cada red de la partida (spec/07 §12.1, spec/08 §9.2);
+// la usan quienes guardan partidas nuevas: entrenos, duelos y exhibiciones
+export function saveGameKept(meta, events, trajectories = null) {
+  const r = saveGame(meta, events, trajectories);
+  if (r.ok) for (const netId of new Set(Array.isArray(meta.nets) ? meta.nets : [])) pruneGames(netId, 200);
+  return r;
 }
 // lista de partidas guardadas (meta) ordenadas por ts ascendente; filtro opcional por red
 export function listGames({ netId = null } = {}) {
   const out = [];
-  for (const fname of readdirSync(gamesDir())) {
-    if (!fname.endsWith('.json') || fname.endsWith('.nets.json')) continue;
+  const dir = gamesDir();
+  const names = readdirSync(dir), metas = new Set(names.filter((f) => f.endsWith('.meta.json')));
+  for (const fname of names) {
+    if (!fname.endsWith('.json') || fname.endsWith('.nets.json') || fname.endsWith('.meta.json')) continue;
+    const id = fname.slice(0, -5);
     try {
-      const g = JSON.parse(readFileSync(join(gamesDir(), fname), 'utf8'));
-      if (!g || !g.meta) continue;
-      if (netId && !(Array.isArray(g.meta.nets) && g.meta.nets.includes(netId))) continue;
-      out.push(g.meta);
+      // la meta de al lado si existe; si no (partidas antiguas), la del fichero entero
+      const meta = metas.has(`${id}.meta.json`) ? JSON.parse(readFileSync(join(dir, `${id}.meta.json`), 'utf8')) : (JSON.parse(readFileSync(join(dir, fname), 'utf8')) || {}).meta;
+      if (!meta) continue;
+      if (netId && !(Array.isArray(meta.nets) && meta.nets.includes(netId))) continue;
+      out.push(meta);
     } catch { /* fichero roto */ }
   }
   return out.sort((a, b) => (a.ts || 0) - (b.ts || 0) || String(a.gameId).localeCompare(String(b.gameId)));
@@ -115,8 +129,7 @@ export function pruneGames(netId, keep = 200) {
   const removed = [];
   for (const m of mine.slice(0, Math.max(0, mine.length - keep))) {
     try { unlinkSync(join(gamesDir(), `${m.gameId}.json`)); removed.push(m.gameId); } catch { /* ya no está */ }
-    const nets = join(gamesDir(), `${m.gameId}.nets.json`);
-    if (existsSync(nets)) { try { unlinkSync(nets); } catch { /* ignorar */ } }
+    for (const side of [`${m.gameId}.nets.json`, `${m.gameId}.meta.json`]) { const f = join(gamesDir(), side); if (existsSync(f)) { try { unlinkSync(f); } catch { /* ignorar */ } } }
   }
   return removed;
 }
@@ -199,4 +212,28 @@ export function loadGameNets(gameId) {
   const file = join(gamesDir(), gameId + '.nets.json');
   if (!existsSync(file)) return null;
   try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; }
+}
+
+// curvas de entreno en disco (spec/08 §9.1): una línea por punto, las 5 000 últimas por red
+const curvesFile = (netId) => join(netsDir(), netId, 'curves.jsonl');
+export function appendCurve(netId, trainingId, points) {
+  if (!points || !points.length) return;
+  const dir = join(netsDir(), netId);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const t = Date.now();
+  writeFileSync(curvesFile(netId), points.map((p) => JSON.stringify({ trainingId, t, ...p })).join('\n') + '\n', { flag: 'a' });
+  const lines = readFileSync(curvesFile(netId), 'utf8').split('\n').filter(Boolean);
+  if (lines.length > 6000) { const tmp = curvesFile(netId) + '.tmp'; writeFileSync(tmp, lines.slice(-5000).join('\n') + '\n'); renameSync(tmp, curvesFile(netId)); }
+}
+export function readCurves(netId) {
+  const f = curvesFile(netId);
+  if (!existsSync(f)) return [];
+  const byTraining = new Map();
+  for (const line of readFileSync(f, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    let p; try { p = JSON.parse(line); } catch { continue; }
+    const { trainingId, ...point } = p;
+    (byTraining.get(trainingId) || byTraining.set(trainingId, []).get(trainingId)).push(point);
+  }
+  return [...byTraining].map(([trainingId, points]) => ({ trainingId, points }));
 }

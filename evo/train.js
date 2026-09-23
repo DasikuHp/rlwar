@@ -9,7 +9,7 @@ import { compile } from '../shared/nn.js';
 import { normalize, validate, BLOCKS } from '../shared/genome.js';
 import { softmaxT } from '../shared/policy.js';
 import { assignRewards, returns } from '../shared/reward.js';
-import { loadNet, saveNet, netsDir, saveGame, loadGame, appendLog, readFeedback, writeFeedback, appendApplied } from './store.js';
+import { loadNet, saveNet, netsDir, saveGameKept, loadGame, appendLog, readFeedback, writeFeedback, appendApplied, appendCurve } from './store.js';
 import { emotionOf, memoryOf, updateMemory, addEpisode, rewardEvents, emotionEvents } from './truth.js';
 import { readThroneFull, pickOpponent } from './league.js';
 import { adaptImagination } from './mutate.js';
@@ -490,7 +490,10 @@ export function createTrainer(opts = {}) {
     const soldiersFor = (k) => (cfg.soldiers === 'random' ? 1 + makeRng(cfg.seed + 31 * k + 1).int(4) : cfg.soldiers);
     const wins = [];
     let bestWinRate = -1, milestoneN = 0, batch = [];
+    let flushedGame = 0; // último punto de la curva ya escrito en disco (spec/08 §9.1)
     const saveAll = () => {
+      const fresh = t.curve.filter((p) => p.game > flushedGame);
+      if (fresh.length) { appendCurve(g.id, t.id, fresh); flushedGame = fresh[fresh.length - 1].game; }
       g.weights = net.serialize();
       // tras stop() el usuario ya puede editar la red: no pisar su nombre, nombres de neuronas ni congelados
       if (t._stop) { const disk = loadNet(g.id); if (disk) { g.name = disk.name; g.names = disk.names; g.frozen = disk.frozen; } }
@@ -506,7 +509,7 @@ export function createTrainer(opts = {}) {
       const start = events.find((e) => e.type === 'game.start');
       const nets = start && start.data && Array.isArray(start.data.players) ? start.data.players.map((p) => p.netId).filter(Boolean) : [g.id];
       const winner = game.win ? g.id : (start && start.data.players.find((p) => p.playerId !== game.playerId) || {}).netId || null;
-      saveGame({ gameId, kind: 'training', trainingId: t.id, seed: game.seed, soldiers: game.soldiers, left: start ? (start.data.players.find((p) => p.team === 'left') || {}).netId || null : null, right: start ? (start.data.players.find((p) => p.team === 'right') || {}).netId || null : null, nets: [...new Set(nets)], winner, kills: { [g.id]: game.kills }, rival: game.rivalKind, ts: Date.now() }, events, { [game.playerId]: game.trajectory });
+      saveGameKept({ gameId, kind: 'training', trainingId: t.id, seed: game.seed, soldiers: game.soldiers, left: start ? (start.data.players.find((p) => p.team === 'left') || {}).netId || null : null, right: start ? (start.data.players.find((p) => p.team === 'right') || {}).netId || null : null, nets: [...new Set(nets)], winner, kills: { [g.id]: game.kills }, rival: game.rivalKind, ts: Date.now() }, events, { [game.playerId]: game.trajectory });
       t.sampleGames.push(gameId);
     };
     // bofetadas y caricias que llegaron mientras entrenaba: las aplica el siguiente sueño (spec/04 §10.4)

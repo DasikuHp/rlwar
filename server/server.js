@@ -10,7 +10,11 @@ import { labApi, onExhibitionOver } from '../evo/api.js';
 import * as C from '../shared/constants.js';
 
 const PORT = Number(process.env.PORT) || 8787;
-const PUBLIC_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'public');
+const ROOT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
+const PUBLIC_DIR = join(ROOT_DIR, 'public');
+// módulos que el navegador comparte con el servidor (spec/08 §9.3): shared/*.js y la verdad; nada más
+const SHARED_JS = /^\/shared\/[a-z0-9-]+\.js$/;
+const EVO_JS = new Set(['/evo/truth.js', '/evo/voice.js']);
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png',
@@ -110,6 +114,12 @@ const server = http.createServer(async (req, res) => {
     try { await api(req, res, parts, url); }
     catch (e) { json(res, 500, { error: e.message }); }
     return;
+  }
+  if (SHARED_JS.test(url.pathname) || EVO_JS.has(url.pathname)) {
+    const file = join(ROOT_DIR, url.pathname.slice(1));
+    if (!existsSync(file)) { res.writeHead(404, { 'Content-Type': 'text/plain' }); return res.end('404'); }
+    res.writeHead(200, { 'Content-Type': MIME['.js'] });
+    return res.end(readFileSync(file));
   }
   const rel = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
   const path = normalize(join(PUBLIC_DIR, rel));

@@ -11,7 +11,7 @@
   "evolution": { "population": 16, "sigma": 0.02, "lr": 0.01, "gamesPerCandidate": 2,
                  "antithetic": true, "rankNormalize": true },
   "both":      { "gradientGamesPerCycle": 16, "evolutionStepsPerCycle": 1 },
-  "sleep":     { "lessonThreshold": 0.05 } }
+  "sleep":     { "lessonThreshold": 0.015 } }
 ```
 Rangos: `lr` 1e-5..0.1 · `gamma` 0..1 · `entropy` 0..0.5 · `clipNorm` 0.1..100 · `batchGames` 1..64 ·
 `bpttSteps` 1..64 · `baseline` ∈ {value, mean, none} (`value` cae a `mean` si no hay `hand.value`,
@@ -109,7 +109,7 @@ p. ej. `survive` alto → "cobarde: se esconde tras los muros y dispara poco".
   games, updates, elapsedMs, curve:[{game, reward, win, kills, deaths, loss?, entropy?}],
   sampleGames:[gameId], lastLesson}`. SSE `training` y `curve` (spec/08 §6).
 - Fase de **sueño** ✅ entre lotes: evento `sleep` `{netId, games, update}` → `lesson` (bombilla si
-  `relChange > lessonThreshold`).
+  `relChange > lessonThreshold`; por defecto 0.015 desde M13, 2026-09-23: un sueño típico cambia un 1–2 %).
 
 ## 7. Exhibición contra heurísticos ✅
 Sala con una red y un heurístico: `learn:false` por defecto (no cuenta para trono ni entreno);
@@ -206,7 +206,9 @@ createTrainer({ netId, genome?, opponents, speed, workers, duration, soldiers, s
 
 ### 9.5 Sala a velocidad x10 (`server/rooms.js`)
 `new Room(name, {speed: 1 | 10})`: divide por `speed` `NEXT_TURN_DELAY`, la espera de habla y el
-retardo de los bots, y multiplica `SHOT_SPEED`; `TURN_TIME` no cambia. `snapshot().config.speed`.
+retardo de los bots; `TURN_TIME` no cambia. La animación de un disparo dura lo mismo que en x1 dividido **una vez**
+entre `speed` (M7, 2026-09-23): `animMsOf(puntos, speed) = mín(9000, máx(700, puntos·NETWORK_STEP/SHOT_SPEED·1000)) /
+speed`, exportada por `server/rooms.js`; en x10, de 70 a 900 ms (un tiro de 5 s en x1 dura 0,5 s). `snapshot().config.speed`.
 `POST /api/rooms {speed}` (solo agentes; si hay humanos, 400).
 
 ### 9.6 API (`/api/lab/trainings`, SSE `/api/lab/events`)

@@ -126,3 +126,23 @@ Aprobados por el usuario ("arréglalo tú"; frases en el navegador "hazlo lo mej
   y `policy.js` usa el `performance` global. El servidor los sirve tal cual en `/shared/<fichero>.js`,
   `/evo/truth.js` y `/evo/voice.js` (solo esos; nada más de `evo/`), así la interfaz compone y verifica frases con
   el mismo código que el servidor.
+
+## 10. Arreglos de la parte 3 (2026-09-23, `spec/revision-opus.md` §3.3 y §9)
+### 10.1 Cuerpos demasiado grandes (M10)
+- Si el cuerpo de una petición pasa del tope (48 MB en `/api/lab`, 100 kB en las rutas de sala), el servidor deja de
+  guardarlo, lo lee hasta el final sin guardarlo y responde **413** `{error: "El cuerpo supera N bytes."}`; la
+  conexión sigue sana. Si pasa de 4 veces el tope, corta la conexión sin responder (nadie legítimo manda tanto).
+### 10.2 Soldados de un entreno (B2)
+- `POST /api/lab/trainings` y el `training` de `POST /api/lab/dynasties/generation`: `soldiers` tiene que ser
+  `"random"` o un entero de 1 a 4; si no, **400** `soldiers tiene que ser "random" o un entero entre 1 y 4` (como en
+  los duelos). Sin `soldiers` (o `null`), `"random"`.
+### 10.3 CORS (B4)
+- `Access-Control-Allow-Methods: GET,POST,PUT,DELETE,OPTIONS` en todas las respuestas y en la de `OPTIONS`.
+### 10.4 Registros que sobreviven a un reinicio (M9)
+- Al terminar (bien, parados o con error), los duelos, entrenos y trabajos se guardan en `evo/records/<duels|trainings|jobs>/<id>.json`
+  con la misma forma que devuelve la API (`duelView`, `trainingView(t, true)`, `jobView`). `GET /api/lab/duels/:id`,
+  `/trainings/:id` y `/jobs/:id` miran la memoria y, si no, el disco; los listados suman los guardados que no están en
+  memoria. Los ids de entrenos (`t7`) y trabajos (`j12`) siguen detrás de los guardados: tras reiniciar no se repiten.
+### 10.5 Errores de pesos (B1)
+- Cada error de `PUT /api/lab/nets/:id/weights/:bloque` lleva `example` con la forma que espera ese bloque, p. ej.
+  `{"W": [512 números], "b": [16 números]}`.

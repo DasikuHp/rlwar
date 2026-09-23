@@ -100,6 +100,11 @@ Regla de dependencia: `shared/*` no importa nada de `server/`, `evo/` ni `agents
   Si el servidor mutado sale antes de responder, o no responde a tiempo, el mutante cuenta como **cazado** con el
   detalle `el servidor no arranca`. En proceso: `runMutants({…, lines, server: true, port})`.
   Tests: `test/tools-servidor.spec.mjs`.
+- **Línea base** (2026-09-23): antes del primer mutante corre los tests sobre la copia **sin mutar** (con su
+  servidor si hay `--server`). Si alguno falla, no hay tirada: `runMutants` lanza `los tests fallan sin mutante:
+  <test> (sale N)` y la CLI sale 1. Sin esto, un test que falla por otra causa (p. ej. el orden de las suites en un
+  mismo servidor: `api-trono` falla si corre después de `arreglos-trono`) contaría como cazador de todos los
+  mutantes. Tests: `test/tools-base.spec.mjs`.
 
 ## 5. Fases y qué congela cada una (para Opus)
 | Fase | Ficheros críticos | Congela para la interfaz |
@@ -121,7 +126,7 @@ Regla de dependencia: `shared/*` no importa nada de `server/`, `evo/` ni `agents
 | parámetros totales | 2 000 000 | JSON ≈ 40 MB máx.; carga < 1 s |
 | candidatos de disparo (N) | 4–64 | overlay legible; 64 sims ≈ 8 ms |
 | destinos de movimiento | 9 fijos (8 dir + quedarse) | ✅ ronda 2 |
-| tamaño de un genoma JSON | 48 MB | `readBody` del servidor sube a ese tope solo en /api/lab |
+| tamaño de un genoma JSON | 48 MB | `readBody` del servidor sube a ese tope solo en /api/lab; si se pasa, 413 (spec/08 §10.1) |
 | redes guardadas | 500 | listado rápido |
 | partidas guardadas (moviola) | 200 por red, borra las más viejas | disco acotado |
 | eventos por partida | 5 000 | 90 disparos × (decisión + candidatos) sobra |

@@ -183,7 +183,9 @@ initWeights(block, inDim, rng) → weights del bloque
 
 ## 6. Validación (`validate(genome, {forPlay} = {}) → {ok, errors:[{code, blockId?, wire?, message, example}], warnings}`)
 `forPlay: true` exige `hand.choose` (`missing-choose`); sin él, una red "solo pies" o una pieza para
-trasplantar valida. Avisos (`warnings[].code`): `unconnected` (bloque sin camino ojo → mano/pie).
+trasplantar valida, con el aviso `missing-choose` ("Esta red no puede jugar…", B1). Avisos (`warnings[].code`):
+`unconnected` (bloque sin camino ojo → mano/pie), `missing-choose`. El error `cycle` cita solo los bloques del bucle
+(no los que cuelgan de él) y su `blockId` es uno de ellos (B1).
 Códigos (todos con mensaje en español y ejemplo de cómo arreglarlo):
 `format` · `id` · `name` · `unknown-field` · `block-type` · `block-param` (rango) · `wire-ref`
 (id inexistente) · `stream-mix` · `cycle` · `dim` · `missing-choose` · `duplicate-hand` ·

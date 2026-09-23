@@ -54,6 +54,7 @@ try {
   results.push(await run('selector de tropas (F0)', [join(ROOT, 'test', 'troops.spec.mjs')]));
   results.push(await run('herramientas: congelado y mutantes', [join(ROOT, 'test', 'tools.spec.mjs')]));
   results.push(await run('herramientas: mutantes por líneas y con servidor', [join(ROOT, 'test', 'tools-servidor.spec.mjs')]));
+  results.push(await run('herramientas: línea base de los mutantes', [join(ROOT, 'test', 'tools-base.spec.mjs')]));
   results.push(await run('motor (F1): movimiento, semilla, sin pantalla', [join(ROOT, 'test', 'motor.spec.mjs'), BASE]));
   results.push(await run('geometría (F1): propiedades del deslizamiento', [join(ROOT, 'test', 'geometry.spec.mjs')]));
   results.push(await run('rng (F1): secuencia fijada y distribución', [join(ROOT, 'test', 'rng.spec.mjs')]));
@@ -91,6 +92,10 @@ try {
   results.push(await run('arreglos (revisión de Fable): método de aprendizaje, casos extra', [join(ROOT, 'test', 'arreglos-metodo-extra.spec.mjs')]));
   results.push(await run('arreglos: voz, casos extra (huecos de mutantes de A3)', [join(ROOT, 'test', 'arreglos-voz-extra.spec.mjs')]));
   results.push(await run('arreglos (revisión de Fable): red ocupada y huecos de mutantes, casos extra b', [join(ROOT, 'test', 'arreglos-ocupada-extra-b.spec.mjs'), BASE]));
+  results.push(await run('parte 3: sala y servidor (M7, R5, M10, B2, B4)', [join(ROOT, 'test', 'arreglos-sala.spec.mjs'), BASE]));
+  results.push(await run('parte 3: verdad y registro (M1, M3, M4, M5, M6, M8)', [join(ROOT, 'test', 'arreglos-verdad.spec.mjs'), BASE]));
+  results.push(await run('parte 3: almacenamiento (M2, M9, M15, B3)', [join(ROOT, 'test', 'arreglos-almacen.spec.mjs'), BASE]));
+  results.push(await run('parte 3: liga y validación (M11, M13, B1)', [join(ROOT, 'test', 'arreglos-liga.spec.mjs'), BASE]));
 } finally {
   server.kill();
 }

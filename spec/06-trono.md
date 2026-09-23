@@ -33,7 +33,7 @@
 { "queen": "hydra-7", "since": 1758540000000,
   "reigns": [ { "netId": "hydra-7", "from": 1758540000000, "to": null, "defenses": 3, "won": 3, "lost": 0 } ],
   "challenges": [ { "id": "c9", "challenger": "orca-2", "queen": "hydra-7", "duelId": "d17", "result": "queen"|"challenger"|"tie", "ts": 1758541111111 } ],
-  "hallOfFame": [ { "netId": "hydra-5", "snapshot": "evo/nets/hydra-5/hof-1.json", "reignIdx": 0, "reignGames": 12 } ],
+  "hallOfFame": [ { "netId": "hydra-5", "snapshot": "nets/hydra-5/hof-1.json", "reignIdx": 0, "reignGames": 12 } ],
   "league": { "pairs": { "hydra-7|orca-2": { "wins": 4, "losses": 2, "last": [1,1,0,1,1,0] } } },
   "dynasties": { "A": null, "B": null },
   "genealogy": { "hydra-8a": { "parents": ["hydra-7"], "generation": 1, "born": 1758542222222, "sha": "…" } } }
@@ -42,10 +42,15 @@
   directamente (evento `reign.start`). Con reina → duelo §1 con `throne:true`; si gana la retadora:
   `reign.end` (la reina saliente entra en `hallOfFame` con una **copia congelada** de sus pesos al
   perder) + `reign.start`; si no, `defenses++`. Una red no puede retarse a sí misma.
+- `snapshot` es relativa a la carpeta de datos y con `/` (B3, 2026-09-23): sigue valiendo si se mueve la carpeta (las
+  absolutas de antes se siguen leyendo). Si al entrenar falta una copia, el registro lleva un `warning {netId,
+  snapshot, message}` y esa ex-reina no juega.
 - La reina y las retadoras **siguen aprendiendo** entre retos (los ficheros vivos); la sala de la
   fama guarda las copias de cada reinado (estilos antiguos: piedra-papel-tijera).
 - `league.pairs` alimenta `f_hard` (spec/04 §6) y las partidas fantasma; `last` = últimos 20
-  resultados (1 = ganó el primero del par).
+  resultados (1 = ganó el primero del par). La alimentan los retos al trono, los duelos de dinastía y, desde M11
+  (2026-09-23), también los duelos libres de `POST /api/lab/duels`; cada duelo cuenta una sola vez (quien lanza el
+  reto o la generación lo apunta él y pide `league: false`).
 - Genealogía: al guardar cualquier red se comprueba que sus `parents` existen en `genealogy` o en
   `evo/nets/` (si no, aviso `orphan`); `sha` = SHA-256 del genoma al nacer (integridad: el árbol
   detecta si una red fue editada después: `edited:true`).
@@ -115,7 +120,9 @@
 - Las 6 partidas se guardan en `evo/games/<gameId>.json` (`{meta, events}`, meta con `duelId`, `seed`,
   `soldiers`, `left`, `right`, `winner`, `kills`, `ts`). `stop` → `status: 'stopped'`, se puntúa lo jugado.
 - Registro del duelo: `{id, a, b, status: running|done|stopped, learning, speed, throne, games[], wins,
-  killDiff, winner, tie, ms, roomCodes, startedAt}`. `games[k].roomCode` es `null` en turbo.
+  killDiff, winner, tie, ms, roomCodes, liveRoom, startedAt}`. `games[k].roomCode` es `null` en turbo. `liveRoom` (M8,
+  2026-09-23) = código de la sala que se está jugando ahora (x1/x10), para espectarla; `null` entre partidas, en turbo y
+  al acabar.
 
 ### 6.3 Trono (`evo/throne.js`)
 - `throne.json` por defecto: `{queen: null, since: null, reigns: [], challenges: [], hallOfFame: [],
@@ -163,7 +170,7 @@
 - `POST /api/lab/dynasties/:house/challenge-throne {learning, speed}` → `challenge` con la campeona.
 
 ### 6.5 API y eventos
-- `POST /api/lab/duels` → `202 {id, status, roomCodes}`; `GET /api/lab/duels` → `{duels: [...]}`;
+- `POST /api/lab/duels` → `202 {id, status, roomCodes, liveRoom}`; `GET /api/lab/duels` → `{duels: [...]}`;
   `GET /api/lab/duels/:id`; `POST /api/lab/duels/:id/stop`. 404 red inexistente; 400 `a === b`,
   `learning` o `speed` fuera de lista, `soldiers` fuera de `'random'|1..4`; 409 si una red está entrenando.
 - `GET /api/lab/throne` → `throne.json` completo más `queenName`; `GET /api/lab/hall-of-fame` →

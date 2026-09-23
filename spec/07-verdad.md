@@ -60,7 +60,9 @@ Evento `decision.attribution`. Frase mínima de Opus: "Miraba sobre todo el Mapa
 #4 baja de 0.82 a 0.40" → números `60`, `4`, `0.82`, `0.40` están en la `decision`.
 
 ## 4. Confianza (real) — por decisión
-- `certainty = margin` (spec/03 §7) ∈ [0, 1].
+- `certainty = certaintyOf(candidates)` = p(favorita) − p(segunda) de la decisión ∈ [0, 1] (1 con un solo candidato,
+  0 sin ninguno): lo decidida que estaba la red, sea cual sea el candidato que salió del sorteo (M1, 2026-09-23). El
+  `margin` del registro (spec/03 §7) sigue siendo el del elegido: negativo si el muestreo no cogió a la favorita.
 - `experience = (1 − e^(−games/50)) · (0.5 + 0.5·recentAccuracy)`, con `recentAccuracy` = kills /
   disparos en los últimos 20 disparos de la red (0.5 si no hay).
 - `confidence = certainty × experience`; nivel: `< 0.15` novata (piensa en voz baja, duda) ·
@@ -118,6 +120,9 @@ no borren la unidad). Evento `neuron.name` con `corr`, `feature`, `m` (para la f
   activaciones completas de la `decision` del turno `n` (recalculadas desde `obs` y el genoma de
   entonces: se guarda `netSha` en `game.start` y una copia del genoma en `evo/games/<id>.nets.json`
   solo para duelos de trono; para el resto, se recalcula con la red actual y se marca `approx:true`).
+  **Desde M2 (2026-09-23)** toda partida guardada lleva en `meta.snaps = {netId: huella}` la red tal como jugó
+  (duelos, exhibiciones y partidas de muestra de los entrenos), así que la moviola es exacta (`approx:false`) salvo en
+  partidas antiguas sin copia.
 
 ## 11. Tests de F7 (`test/verdad.spec.mjs`)
 - `checkPhrase`: 10 frases válidas sobre una partida fija pasan; número inventado, nombre inventado,
@@ -132,12 +137,22 @@ no borren la unidad). Evento `neuron.name` con `corr`, `feature`, `m` (para la f
 ## 12. Precisiones de F7 (fijadas al escribir los tests; completan §1–§11 sin cambiarlos)
 
 ### 12.1 Registro y ficheros
-- Fichero de partida `evo/games/<gameId>.json` = `{meta, events, trajectories}`. `meta = {gameId, kind:
+- Fichero de partida `evo/games/<gameId>.json.gz` (M15, 2026-09-23: gzip del JSON; las antiguas en `.json` se siguen
+  leyendo) = `{meta, events, trajectories}`. `meta = {gameId, kind:
   duel|training|exam, duelId?, trainingId?, seed, soldiers, left, right, nets: [ids], winner, kills, throne?,
-  netSha: {id: sha de estructura}, ts}`. `trajectories` = las de spec/04 §9.2 (con `obs`), para la moviola.
+  netSha: {id: sha de estructura}, snaps?: {id: huella}, ts}`. `trajectories` = las de spec/04 §9.2 (con `obs`), para
+  la moviola.
+- **Índice (M15)**: `evo/games/index.jsonl`, una línea `{a: meta}` al guardar y `{d: gameId}` al borrar; `listGames`
+  lee solo el índice (si falta, lo reconstruye con las metas `<id>.meta.json` de al lado) y lo compacta cuando pasa
+  del doble de líneas que partidas vivas + 200.
+- **Copias de las redes (M2)**: `saveGame(meta, events, trajectories, {genomes})` guarda cada genoma una sola vez en
+  `evo/snapshots/<huella>.json.gz` (huella = sha-256 del JSON, 20 cifras) y lo cita en `meta.snaps`;
+  `loadSnapshot(huella)` lo devuelve. Al podar partidas (retención) se borran las copias que ya no cita ninguna.
 - `decision` en la sala: `data` = el registro completo de spec/03 §7 (`candidates`, `chosen`, `margin`, `adjust`,
   `moves`, `chosenMove`, `moveAdjust`, `value`, `attention`, `attribution`, `logp`, `confidence`) **sin** `points`
-  si la sala es sin pantalla y **sin** `activationsSummary`. Tope: al llegar a 5 000 eventos la sala emite un
+  si la sala es sin pantalla y **sin** `activationsSummary`. Tope: al llegar a 5 000 eventos de la partida (sin contar los de la voz, `say` y el `error` de frase no
+  verificable, que solo existen con pantalla: así una sala con pantalla y su gemela sin pantalla llegan al tope en el
+  mismo disparo; R5, 2026-09-23; el tope es por partida: una revancha en la misma sala empieza de cero) la sala emite un
   `error {message: 'tope de eventos', fallback: 'decisiones sin registro completo'}` (una vez) y desde ahí las
   `decision` llevan solo `{phase, chosen, chosenMove, truncated: true}`.
 - `graze`: tras cada disparo, por cada enemigo vivo no alcanzado con `dist ≤ 1` u a la trayectoria:
@@ -203,7 +218,7 @@ API: `POST /api/lab/nets/:id/bulletin` → `202 {jobId}` (`kind: 'exam'`), event
 en `evo/nets/<id>/bulletin.json`; `GET /api/lab/nets/:id/bulletin` → el último o `404`.
 
 ### 12.7 Neuronas con nombre (§9)
-`nameNeurons(genome, samples, {min = 50, threshold = 0.3})`, `samples = [{obs, decision?}]` (las
+`nameNeurons(genome, samples, {min = 50, threshold = 0.3})`, `samples = [{obs, decision?, ep?, use?}]` (las
 más recientes primero; usa todas las que recibe y devuelve en `m` cuántas usó; la **API** recoge como mucho las 500 decisiones más recientes): para cada `dense`/memoria y cada unidad, correlación de
 Pearson de su activación (recalculada con `net.forward`) con cada entrada nombrada por `eyeLayout`: para
 bloques `ctx`, las entradas de contexto; para bloques `cand`/`move`, además las entradas por fila
@@ -211,14 +226,27 @@ bloques `ctx`, las entradas de contexto; para bloques `cand`/`move`, además las
 `min` muestras → `{name: 'sin datos', corr: 0, m}`. Nombre = entrada con mayor `|corr|` si `> threshold`, si no
 `'sin nombre claro'`. `genome.names.neurons[blockId][i]` (texto del usuario) manda. Muestras de la API: las
 trayectorias de las partidas guardadas de la red (más recientes primero).
+**Estado real (M6, 2026-09-23)**: las activaciones las calcula `activationsOf(net, samples)`, que recorre las muestras
+en orden llevando el estado de la red y lo pone a cero al cambiar de `ep` (sin `ep`, cada muestra empieza de cero); solo
+cuentan las muestras con `use !== false`. La API manda cada soldado entero y en orden (`ep = partida|jugador|soldado`,
+todas sus decisiones, `use` solo en las de disparo) hasta pasar de 500 de disparo; `m` = cuántas de disparo usó.
 
 ### 12.8 Diario, cronista, moviola
 - Cada línea de `log.jsonl` lleva `id` (secuencial) para poder referenciarla (`{log, id}`).
 - `diary(netId)` = entradas `lesson | milestone | reign.start | reign.end | challenge | exam` de esa red, más
   recientes primero, cada una con `text` compuesto con `compose` y plantilla fija en español (verificable) y
   `refs: [{log, id}]`. `chronicle()` = `reign.* | challenge | dynasty` de todas las redes.
+- **Nombres y español (M4, M5, 2026-09-23)**: el diario de una red incluye también los retos en que fue retadora o
+  reina. Las entradas del registro guardan los nombres del momento (`name`, `challengerName`, `queenName`,
+  `houseName`, `motherName`, `childName`, `againstName`, `aName`, `bName`, `winnerName`), y las frases los usan (las
+  entradas antiguas, los ids). Retos: `ganó la retadora` · `la reina defendió el trono` · `empate, la reina conserva el
+  trono` · `reto anulado`. Fin de reinado: `pierde el trono` · `deja el trono: la borraron` · `deja el trono: ya no
+  existe`. Dinastía: `<casa>: <x> entrena contra <y>` · `<casa>: <madre> tiene hijos` · `<casa>: <hija> sucede a
+  <madre>` (solo si hubo relevo) o `<casa>: <madre> sigue de campeona, <hija> no la supera` · `Duelo de campeonas: gana
+  <x>` / `empate` · `<casa>: se borró a su campeona <x>`.
 - `GET /api/lab/games/:id/turns/:n/brain?player=<playerId>` → `{decision, activations, attention, approx}`:
-  la `decision` es la del evento `decision` con `turn === n` del jugador; las activaciones se recalculan
+  la `decision` es la del evento `decision` con `turn === n` del jugador; sin `?player=`, la de disparo de ese turno (la
+  de quien disparó; la de moverse del tirador anterior ya lleva el turno siguiente, M3), y si no hay, la primera; las activaciones se recalculan
   reproduciendo la trayectoria del soldado desde el principio con el genoma actual (`approx: true`) o con la
   copia `evo/games/<id>.nets.json` (duelos de trono, `approx: false`).
 - `POST /api/lab/nets/:id/slap|caress {game, decisionEventId, amount = 1}` → evento `slap|caress {decisionEventId,

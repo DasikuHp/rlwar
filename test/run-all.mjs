@@ -100,6 +100,7 @@ try {
   results.push(await run('interfaz: editor de redes (lógica)', [join(ROOT, 'test', 'ui-editor.spec.mjs')]));
   results.push(await run('interfaz: editor de redes, casos extra', [join(ROOT, 'test', 'ui-editor-extra.spec.mjs')]));
   results.push(await run('interfaz: inicio del laboratorio (lógica)', [join(ROOT, 'test', 'ui-inicio.spec.mjs')]));
+  results.push(await run('interfaz: sala viva con redes (lógica)', [join(ROOT, 'test', 'ui-sala.spec.mjs')]));
 } finally {
   server.kill();
 }

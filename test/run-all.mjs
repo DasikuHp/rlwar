@@ -98,6 +98,8 @@ try {
   results.push(await run('parte 3: liga y validación (M11, M13, B1)', [join(ROOT, 'test', 'arreglos-liga.spec.mjs'), BASE]));
   results.push(await run('parte 3: moviola de una partida antigua (sin copia de la red)', [join(ROOT, 'test', 'moviola-antigua.spec.mjs')]));
   results.push(await run('interfaz: editor de redes (lógica)', [join(ROOT, 'test', 'ui-editor.spec.mjs')]));
+  results.push(await run('interfaz: editor de redes, casos extra', [join(ROOT, 'test', 'ui-editor-extra.spec.mjs')]));
+  results.push(await run('interfaz: inicio del laboratorio (lógica)', [join(ROOT, 'test', 'ui-inicio.spec.mjs')]));
 } finally {
   server.kill();
 }

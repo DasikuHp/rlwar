@@ -277,11 +277,74 @@ contra el spec nuevo del arreglo.
   - La constante de semilla 100003 y el `7·(e+1)` de 643: cazados. `evo/duel.js` 159 (la rival con `learn: false`):
     cazado.
 
-### R3–R5 — trono, verdad, API
-Sin tirada de mutantes todavía. Varios specs de estos arreglos (`arreglos-exhibicion`, `arreglos-bofetada` y las
-partes API de `arreglos-trono` y `arreglos-api`) necesitan un servidor, y el probador dirigido de esta sesión (un script sobre `generateMutants`/`applyMutant` de `tools/mutants.mjs`) no lo levanta en la copia.
-Hay que adaptarlo (levantar el servidor mutado en la copia) antes de poder tirar esos mutantes. Queda anotado como
-trabajo pendiente, no como justificación.
+### R3–R5 — trono, bofetada, exhibiciones, voz, boletín y rutas (2026-09-23)
+Con `tools/mutants.mjs --lines … [--server]`, en las líneas de cada arreglo (sacadas con `git blame`). Dos pasos:
+1. contra el spec de su arreglo (columna "spec del arreglo");
+2. los supervivientes, contra el spec del arreglo + los dos specs nuevos que cierran sus huecos
+   (`arreglos-ocupada-extra-b`, `arreglos-voz-extra`), sobre una copia exacta del estado sin la parte 3; se tiran
+   **todos** los mutantes de las líneas con supervivientes (también los que la muestra no cogió).
+
+Hubo una pasada intermedia contra "todas las suites que tocan el módulo" en un mismo servidor, y **se descartó**:
+sin mutante, `api-trono` falla si corre después de `arreglos-trono`, y `api-evolucion` después de la serie de `store`,
+así que sus "cazados" eran falsos. De ahí la línea base de `tools/mutants.mjs` (parte 3, spec/00 §4): ya no tira
+nada si los tests fallan sin mutante. Los órdenes de los pasos 1 y 2 se comprobaron sin mutante antes de tirar.
+
+| arreglo | fichero (líneas) | spec del arreglo | con los specs nuevos |
+|---|---|---|---|
+| C5/C6 trono (`bb8d39b`) | `evo/throne.js` 60–71, 79–87, 111–127, 159–161 | 21/36 | **34/36** |
+| | `evo/api.js` 9–10, 85, 114, 119, 126, 513, 523, 618–627 | 23/45 | **39/45** |
+| A1 bofetada (`0bab49e`) | `evo/train.js` 312–356, 545, 548, 642 (muestra de 40 de 61, semilla 23) | 23/40 | líneas con supervivientes: **38/45** |
+| | `evo/api.js` 792, 821–823, 834–846 | 27/36 | **31/36** |
+| A2 exhibiciones (`aea1299`) | `evo/api.js` 191–251 (13) | 6/13 | **12/13** |
+| A3 voz (`226addd`) | `evo/voice.js` 1–175 | 30/115 | **114/115** |
+| | `server/rooms.js` 617–682 | 14/129 | **116/129** |
+| A4 boletín (`4aab4a1`) | `evo/exam.js` 7–16, 83–103 | 25/34 | **34/34** |
+| A5 rutas (`acbe00a`) | `evo/api.js` 347–374, 383, 435–441, 759–790 (muestra de 40 de 179, semilla 23) | 22/40 | líneas con supervivientes: **103/106** |
+| | `evo/store.js` 96–121, 132, 216–239 | 10/31 | **27/31** |
+
+Qué cerró cada test nuevo (todos en `arreglos-ocupada-extra-b` salvo la voz):
+- trono: reinado nuevo a cero con la reina borrada del disco; duelo parado con partidas que decide; motivo de un
+  reto anulado; `vacateNet` de una campeona (y de una red que no es nada); `runGeneration` sin campeona (400 con la casa).
+- bofetada: `feedbackTarget` sin trayectoria (5 formas); oráculo del paso en una decisión que no es la primera;
+  red toda congelada; el recuerdo que deja (rival, bioma, familia, emoción, intensidad, hace 0 partidas); decisión
+  recortada; `GET /feedback` 200; registro `applied` true/false; respuesta en cola `ok:true`.
+- exhibiciones: oráculo de pesos del paso de evolución contra una persona, una red sentada y un agente (2 partidas por
+  copia, para que la copia juegue también a la derecha); meta guardada (lados, ganador); sin red con netId no se guarda.
+- boletín: oráculo de las 16 partidas de adaptación; avisos escena a escena; `adaptationScore({}) = 0`.
+- rutas: catálogo de parámetros de mutación; `/games` con `limit` (1, −5, 50 por defecto) y filtros `kind`/`duelId`;
+  `whatif`: sin escena, sin soldados, 32/33 soldados, 64/65 obstáculos, obstáculos finos o planos, dueño por equipo
+  (con la tortuga, que cuenta los suyos), `turns` 0 y semilla 1 por defecto; examen como trabajo con progreso.
+- almacén: `listGames` con la meta de al lado aunque la partida esté rota y sin ella (partidas antiguas); curvas
+  recortadas a 5000 al pasar de 6000; sin curvas, `[]`.
+- voz (`arreglos-voz-extra`): lista exacta de frases candidatas de cada momento según nivel y hechos; en la sala,
+  `eventsFor`, `sayVerified`, el sorteo con `makeRng(hash32(semilla, clave))`, el presupuesto, la presentación con
+  recuerdo y 36 disparos con probabilidad 0.5 para fijar las claves de réplica y muerte.
+
+**Supervivientes que quedan: todos equivalentes** (salvo los dos marcados):
+| fichero:línea | mutante | por qué es equivalente |
+|---|---|---|
+| `throne.js:64`, `:117` | `old && !old.to` → `\|\|` (y `reign`) | la reina siempre tiene su reinado abierto como último: con reina, `old`/`reign` existe y `to` es null |
+| `api.js:114` ×4 | `progress` inicial `{done: 0, total: 96}` → otras constantes | **no se puede ver desde fuera de forma fiable**: el primer aviso llega a las 10 escenas (unos ms en `GW_FAST`); el sondeo ya ve 20/96. Anotado como hueco sin test |
+| `api.js:119` | `done % 10` → `% -10` | en JS el signo del resto sigue al dividendo: igual |
+| `api.js:625` | `ok && (…)` → `ok \|\| (…)` | `ok` siempre es true aquí (la red existía); `vacateNet` de una red que no es reina ni campeona no hace nada |
+| `train.js:320` | `-1` → `-2` | sigue siendo `< 0` |
+| `train.js:336` | `index + 1` → `+ 2` | el paso extra tiene ventaja 0, sin entropía ni valor: gradiente exactamente cero, y la BPTT es causal |
+| `train.js:340` | `: 0` → `: 1` | `top` solo es null sin bloques con pesos; con todo congelado `top` existe (relChange 0) |
+| `train.js:345`, `api.js:842` ×5 | el error de `feedbackFromGame` | la ruta ya validó con `feedbackTarget` (mismos datos, determinista) y la cola solo guarda lo validado |
+| `train.js:349` ×2, `:353` | `start && start.data…` → `\|\|` | `game.start` siempre lleva `data.players` y `data.map` |
+| `api.js:198`, `:524` | `&&` → `\|\|` | las redes sentadas llevan genoma y los agentes no; si la reina es la campeona, su ocupación ya la miró la primera comprobación |
+| `api.js:214` | `room.result && …` → `\|\|` | `onExhibitionOver` solo se llama al acabar la partida, con `result` |
+| `api.js:438` | `min(500, …)` → `501` | **hueco sin test**: haría falta tener más de 500 partidas guardadas |
+| `api.js:779` ×2 | el primer `alive:` del objeto | lo pisa el `alive:` final del mismo objeto: código muerto |
+| `store.js:114` ×2 | `\|\|` → `&&` en el filtro de ficheros | los `.nets.json` y `.meta.json` no tienen `meta` dentro: se saltan igual |
+| `store.js:220`, `:222` | vacío/`recursive` | `appendCurve` solo se llama con puntos; la carpeta de la red ya existe |
+| `voice.js:16` | `\|\|` → `&&` | la elegida se busca con `c.i === d.chosen` (índices enteros): una elegida no entera ya da null |
+| `rooms.js:635` ×2, `:652` | `\|\|` → `&&` en las guardas | toda red lleva genoma y ningún agente; siempre llega un jugador |
+| `rooms.js:636`, `:639`, `:643`, `:646` (×8) | lo que devuelve `voiceTry` | nadie usa su valor; `rng() >= p` → `>` solo difiere con probabilidad cero |
+| `rooms.js:655` | `margin: 1` → `2` | la certeza se recorta a 1 |
+| `rooms.js:677` | `!kill && !ff` → `\|\|` | la réplica ya calla ante un disparo que mata o se suicida |
+
+Los huecos sin test que quedan (`api.js:114` ×4 y `:438` `500 → 501`) son de bajo riesgo y están explicados arriba.
 
 ## Revisión de Fable (2026-09-23): arreglo de R1, R2 y R4 (`e0d87f4`)
 Mutantes solo en las líneas del arreglo, con `generateMutants`/`applyMutant` de `tools/mutants.mjs`. Para `evo/api.js`
@@ -316,3 +379,13 @@ En resumen hay 1 equivalente y 43 huecos. El 409 de una red ocupada está probad
 un duelo y retar con la reina en un duelo. Faltan tests para pedir hijos, operar, examinar, criar, el reto de
 dinastía, la reina entrenando y el nombre en el mensaje. También falta la rival de las copias en una exhibición
 contra una persona o contra una red bot.
+
+**Cerrados con `arreglos-ocupada-extra-b` (2026-09-23)**, tirando todos los mutantes de esas líneas contra el spec
+nuevo, sobre una copia exacta sin la parte 3: **41/48**.
+| líneas | cazados | los que quedan |
+|---|---|---|
+| 67, 73 (nombre en el 409, reina entrenando) | 4/4 | — |
+| 197 (rival `self` con `learn:false`) | 2/2 | — (hizo falta comparar también `meanFitness`/`bestFitness`: con dos copias y `rankNormalize` solo cuenta su orden, y el orden salía igual) |
+| 198 (rival: red sentada o agente) | 4/10 | `&& → ||` y `level || 2` ×3: **equivalentes** (las redes sentadas llevan genoma y los agentes no; la sala recorta el nivel a 1–3, nunca llega 0). `temperature || 0` → `&&` y `|| 1`: **test que falta** — la temperatura sí cambia los tiros de `greedy`/`sniper`, pero con estas semillas no altera ninguna partida de las copias; haría falta una escena en la que la rival dispare antes con incertidumbre |
+| 515, 524 (criar, reto de dinastía) | 11/12 | 524 `&& → ||`: **equivalente** (si la reina es la campeona, su ocupación ya la miró la primera comprobación) |
+| 666, 677, 691, 716, 752 (pedir hijos, operar ×3, examinar) | 20/20 | — |

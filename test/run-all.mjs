@@ -89,6 +89,8 @@ try {
   results.push(await run('arreglos (revisión de Fable): red ocupada y evolución que cede el bucle', [join(ROOT, 'test', 'arreglos-ocupada.spec.mjs'), BASE]));
   results.push(await run('arreglos (revisión de Fable): red ocupada, casos extra', [join(ROOT, 'test', 'arreglos-ocupada-extra.spec.mjs')]));
   results.push(await run('arreglos (revisión de Fable): método de aprendizaje, casos extra', [join(ROOT, 'test', 'arreglos-metodo-extra.spec.mjs')]));
+  results.push(await run('arreglos: voz, casos extra (huecos de mutantes de A3)', [join(ROOT, 'test', 'arreglos-voz-extra.spec.mjs')]));
+  results.push(await run('arreglos (revisión de Fable): red ocupada y huecos de mutantes, casos extra b', [join(ROOT, 'test', 'arreglos-ocupada-extra-b.spec.mjs'), BASE]));
 } finally {
   server.kill();
 }

@@ -262,3 +262,12 @@ Aprobados por el usuario ("arréglalo tú"; adaptación "equilibrar y penalizar 
   confidence: {certainty, experience, confidence, level}}`.
 - El carácter (`traits.character`: frío, chulo, dramático, desquiciado) elige el estilo; los números y los nombres
   salen siempre de los eventos.
+- API de `evo/voice.js`: `speak(moment, ctx, rng) → {text, refs, kind} | null`, compuesto siempre con `compose`.
+  `moment` ∈ `intro | decision | kill | graze | miss | friendlyFire | death | retort`; `ctx = {character, level,
+  confidence, rivalName, events: {start, decision?, shot?, kill?, graze?, death?, friendlyFire?, rivalDecision?,
+  rivalShot?, recall?}}` (eventos completos del registro; `recall` = eventos recordados de otras partidas).
+  `null` si no hay nada verdadero que decir. En la sala: `sayVerified(player, soldier, phrase, kind, confidence)`
+  verifica con `checkPhrase` contra sus eventos (y partidas guardadas o el log para lo recordado) y devuelve
+  `true`/`false`.
+- Las frases de relleno desaparecen, pero el sorteo que las elegía se mantiene: así las partidas con redes siguen
+  siendo las mismas con la misma semilla.

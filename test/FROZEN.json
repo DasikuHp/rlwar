@@ -14,6 +14,7 @@
   "test/arreglos-motor.spec.mjs": "43748ef56a06588598255abc267487641609e9b97ea8a4ca8e6214645e6d9dd9",
   "test/arreglos-partidas.spec.mjs": "06cf30c62d4f0ba5e395475196a749a991a4b6f0a13f6ee6b0037cc7fe57c65f",
   "test/arreglos-trono.spec.mjs": "881f48337f7b7939133f49fd07253ab4157532a9964953e479a9ba5198a20591",
+  "test/arreglos-voz.spec.mjs": "5f17b282e8f88d6d82867d60c0a0909f1bfcab8537e622cc173fdb1dbba7a75a",
   "test/client.spec.mjs": "65659173d8eca4e4291675bcadc8e9e64d1dbba5c77400c88be063e70119156a",
   "test/entrenador-extra-b.spec.mjs": "fd6daa5e4ebe0eccfdc2408a7dca249fb34524794d1b2980d8d491a303addf8f",
   "test/entrenador-extra.spec.mjs": "cec48ae69fe22a2ae66db3ad80e5962768905efb64f53d83abcff1058edbbbea",

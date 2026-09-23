@@ -37,10 +37,14 @@ function snapshotQueen(t, queenId, now) {
   const tmp = file + '.tmp';
   writeFileSync(tmp, JSON.stringify(snap)); renameSync(tmp, file);
   const reignIdx = t.reigns.length - 1;
-  return { netId: queenId, snapshot: file, reignIdx, reignGames: t.reigns[reignIdx] ? t.reigns[reignIdx].defenses + t.reigns[reignIdx].lost : 0, sha: structureSha(g), ts: now };
+  // ruta relativa a la carpeta de datos, con /: sigue valiendo si se mueve la carpeta (B3)
+  return { netId: queenId, snapshot: `nets/${queenId}/hof-${n}.json`, reignIdx, reignGames: t.reigns[reignIdx] ? t.reigns[reignIdx].defenses + t.reigns[reignIdx].lost : 0, sha: structureSha(g), ts: now };
 }
 
 // challenge(opts, hooks) → {result: seated|queen|challenger|tie, queen, duelId?}
+// nombre de una red en este momento, para el registro (M5): el cronista no tiene otro sitio de donde sacarlo
+const nameOf = (id) => (id && (loadNet(id) || {}).name) || null;
+
 export async function challenge({ challenger, learning = 'mix', speed = 'turbo', seed } = {}, hooks = {}) {
   const now = hooks.now || Date.now;
   const emit = (ev) => { if (hooks.onEvent) hooks.onEvent(ev); appendLog(ev); };
@@ -54,7 +58,7 @@ export async function challenge({ challenger, learning = 'mix', speed = 'turbo',
     t.queen = challenger; t.since = ts;
     t.reigns.push({ netId: challenger, from: ts, to: null, defenses: 0, won: 0, lost: 0 });
     writeThrone(t);
-    emit({ type: 'reign.start', netId: challenger, queen: challenger, ts });
+    emit({ type: 'reign.start', netId: challenger, queen: challenger, name: nameOf(challenger), ts });
     return { result: 'seated', queen: challenger };
   }
   if (!loadNet(t.queen)) {
@@ -66,7 +70,7 @@ export async function challenge({ challenger, learning = 'mix', speed = 'turbo',
     t.reigns.push({ netId: challenger, from: ts, to: null, defenses: 0, won: 0, lost: 0 });
     writeThrone(t);
     emit({ type: 'reign.end', netId: gone, queen: challenger, reason: 'missing', ts });
-    emit({ type: 'reign.start', netId: challenger, queen: challenger, ts });
+    emit({ type: 'reign.start', netId: challenger, queen: challenger, name: nameOf(challenger), ts });
     return { result: 'seated', queen: challenger };
   }
   const queen = t.queen;
@@ -82,7 +86,7 @@ export async function challenge({ challenger, learning = 'mix', speed = 'turbo',
     const error = (rec && rec.error) || 'el duelo no jugó ninguna partida';
     t.challenges.push({ id: cid, challenger, queen, duelId: rec ? rec.id : duelId, result: 'void', error, ts });
     writeThrone(t);
-    emit({ type: 'challenge', id: cid, challenger, queen, duelId: rec ? rec.id : duelId, result: 'void', error, ts });
+    emit({ type: 'challenge', id: cid, challenger, queen, duelId: rec ? rec.id : duelId, result: 'void', error, challengerName: nameOf(challenger), queenName: nameOf(queen), ts });
     return { result: 'void', queen, duelId: rec ? rec.id : duelId };
   }
   recordDuelInLeague(t, rec);
@@ -97,13 +101,13 @@ export async function challenge({ challenger, learning = 'mix', speed = 'turbo',
     t.queen = challenger; t.since = ts;
     t.reigns.push({ netId: challenger, from: ts, to: null, defenses: 0, won: 0, lost: 0 });
     writeThrone(t);
-    emit({ type: 'challenge', id: cid, challenger, queen, duelId: rec.id, result, ts });
-    emit({ type: 'reign.end', netId: queen, queen: challenger, duelId: rec.id, ts });
-    emit({ type: 'reign.start', netId: challenger, queen: challenger, duelId: rec.id, ts });
+    emit({ type: 'challenge', id: cid, challenger, queen, duelId: rec.id, result, challengerName: nameOf(challenger), queenName: nameOf(queen), ts });
+    emit({ type: 'reign.end', netId: queen, queen: challenger, duelId: rec.id, name: nameOf(queen), ts });
+    emit({ type: 'reign.start', netId: challenger, queen: challenger, duelId: rec.id, name: nameOf(challenger), ts });
   } else {
     if (reign) { reign.defenses++; reign.won++; }
     writeThrone(t);
-    emit({ type: 'challenge', id: cid, challenger, queen, duelId: rec.id, result, ts });
+    emit({ type: 'challenge', id: cid, challenger, queen, duelId: rec.id, result, challengerName: nameOf(challenger), queenName: nameOf(queen), ts });
   }
   return { result, queen: t.queen, duelId: rec.id };
 }
@@ -120,7 +124,8 @@ export function vacateNet(netId, hooks = {}) {
   for (const h of ['A', 'B']) if (t.dynasties[h] && t.dynasties[h].champion === netId) { t.dynasties[h].champion = null; out.houses.push(h); }
   if (!out.queen && !out.houses.length) return out;
   writeThrone(t);
-  const events = [...(out.queen ? [{ type: 'reign.end', netId, queen: null, reason: 'deleted', ts }] : []), ...out.houses.map((h) => ({ type: 'dynasty', house: h, event: 'champion.deleted', netId, ts }))];
+  const name = hooks.name || nameOf(netId); // al borrar, la red ya no está en el disco: el nombre llega en hooks.name
+  const events = [...(out.queen ? [{ type: 'reign.end', netId, queen: null, reason: 'deleted', name, ts }] : []), ...out.houses.map((h) => ({ type: 'dynasty', house: h, houseName: t.dynasties[h].name, event: 'champion.deleted', netId, name, ts }))];
   for (const ev of events) { appendLog(ev); if (hooks.onEvent) hooks.onEvent(ev); }
   return out;
 }
@@ -148,8 +153,8 @@ function nextJobId() { return `cj${Date.now().toString(36)}${Math.floor(Math.ran
 
 // una generación completa (spec/06 §3, §6.4). hooks: onEvent, registerJob, startDuel, onProgress
 export async function runGeneration(body = {}, hooks = {}) {
-  const emit = (house, event, extra = {}) => { const ev = { type: 'dynasty', house, event, ...extra }; if (hooks.onEvent) hooks.onEvent(ev); appendLog(ev); };
   let t = readThroneFull();
+  const emit = (house, event, extra = {}) => { const ev = { type: 'dynasty', house, houseName: (t.dynasties[house] || {}).name || null, event, ...extra }; if (hooks.onEvent) hooks.onEvent(ev); appendLog(ev); };
   if (!t.dynasties.A || !t.dynasties.B) throw httpError(400, 'Primero funda las dos casas (POST /api/lab/dynasties)');
   const seed = Number.isInteger(body.seed) ? body.seed : randomSeed();
   const training = { speed: 'turbo', duration: { games: 20 }, soldiers: 'random', workers: 1, ...(body.training || {}) };
@@ -168,7 +173,7 @@ export async function runGeneration(body = {}, hooks = {}) {
     const other = h === 'A' ? 'B' : 'A';
     const tr = createTrainer({ ...training, netId: champ(h), opponents: { antagonist: 1, hallOfFame: 0, self: 0, ...(training.opponents || {}), antagonistId: champ(other) }, seed: seed + (h === 'A' ? 1 : 2) });
     if (hooks.registerTraining) hooks.registerTraining(tr);
-    emit(h, 'train', { trainingId: tr.id, netId: champ(h), against: champ(other) });
+    emit(h, 'train', { trainingId: tr.id, netId: champ(h), against: champ(other), name: nameOf(champ(h)), againstName: nameOf(champ(other)) });
     await tr.start();
     if (tr.status === 'error') throw new Error(`entreno de la casa ${h}: ${tr.error}`);
     result.trainings[h] = tr.id;
@@ -191,23 +196,23 @@ export async function runGeneration(body = {}, hooks = {}) {
     }
     const pre = await runPretournamentAsync({ children: kids, opponent: rival, games: childrenCfg.pretournament.games ?? 4, seed: seed + 1000 * (h === 'A' ? 1 : 2), soldiers: childrenCfg.pretournament.soldiers ?? 'random' });
     if (hooks.finishJob) hooks.finishJob(jobId, { parentId: mother.id, ranking: pre.ranking });
-    emit(h, 'children', { jobId, parentId: mother.id, ranking: pre.ranking });
+    emit(h, 'children', { jobId, parentId: mother.id, ranking: pre.ranking, motherName: mother.name || null });
     result.children[h] = jobId;
     const best = pre.ranking[0];
     let promoted = false;
     if (best) {
-      const duel = await runDuel({ a: best.id, b: mother.id, learning: duelCfg.learning, speed: duelCfg.speed, soldiers: duelCfg.soldiers, seed: seed + 2000 * (h === 'A' ? 1 : 2), throne: false });
+      const duel = await runDuel({ a: best.id, b: mother.id, learning: duelCfg.learning, speed: duelCfg.speed, soldiers: duelCfg.soldiers, seed: seed + 2000 * (h === 'A' ? 1 : 2), throne: false, league: false }); // la liga la cuenta aquí
       t = readThroneFull(); recordDuelInLeague(t, duel);
       if (duel.winner === best.id && !duel.tie) { t.dynasties[h].champion = best.id; promoted = true; }
       writeThrone(t);
-      emit(h, 'promote', { duelId: duel.id, child: best.id, mother: mother.id, promoted });
+      emit(h, 'promote', { duelId: duel.id, child: best.id, mother: mother.id, promoted, childName: nameOf(best.id) || best.name || null, motherName: mother.name || null });
     }
     result.promoted[h] = promoted;
     progress();
   }
   // 3. duelo entre casas
   const a = champ('A'), b = champ('B');
-  const duel = await runDuel({ a, b, learning: duelCfg.learning, speed: duelCfg.speed, soldiers: duelCfg.soldiers, seed: seed + 3000, throne: false });
+  const duel = await runDuel({ a, b, learning: duelCfg.learning, speed: duelCfg.speed, soldiers: duelCfg.soldiers, seed: seed + 3000, throne: false, league: false });
   t = readThroneFull(); recordDuelInLeague(t, duel);
   result.duelId = duel.id; result.winner = duel.winner; result.tie = duel.tie;
   for (const h of ['A', 'B']) {
@@ -218,7 +223,7 @@ export async function runGeneration(body = {}, hooks = {}) {
     result[h] = { champion: d.champion, generation: d.generation, promoted: result.promoted[h] };
   }
   writeThrone(t);
-  emit('A', 'duel', { duelId: duel.id, a, b, winner: duel.winner, tie: duel.tie });
+  emit('A', 'duel', { duelId: duel.id, a, b, winner: duel.winner, tie: duel.tie, aName: nameOf(a), bName: nameOf(b), winnerName: nameOf(duel.winner) });
   progress(); progress();
   emit(duel.winner === t.dynasties.A.champion ? 'A' : duel.winner === t.dynasties.B.champion ? 'B' : 'A', 'generation', { A: result.A, B: result.B, duelId: duel.id, tie: duel.tie });
   return result;

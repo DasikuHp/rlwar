@@ -22,7 +22,7 @@ const MIME = {
 };
 const CORS = {
   'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+  'Access-Control-Allow-Methods': 'GET,POST,PUT,DELETE,OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type',
 };
 
@@ -30,11 +30,27 @@ const json = (res, code, obj) => {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', ...CORS });
   res.end(JSON.stringify(obj));
 };
+// pasado el tope deja de guardar y lee hasta el final sin guardar, para poder responder 413 (M10); más de 4× el tope, corta
+const BODY_LIMIT = 1e5;
+const OVER = Symbol('cuerpo demasiado grande');
 const readBody = (req) => new Promise((resolve) => {
-  let d = '';
-  req.on('data', (c) => { d += c; if (d.length > 1e5) req.destroy(); });
-  req.on('end', () => { try { resolve(d ? JSON.parse(d) : {}); } catch { resolve({}); } });
+  let d = '', bytes = 0, over = false, done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    if (over) return resolve(OVER);
+    try { resolve(d ? JSON.parse(d) : {}); } catch { resolve({}); }
+  };
+  req.on('data', (c) => {
+    bytes += c.length;
+    if (over) { if (bytes > 4 * BODY_LIMIT) req.destroy(); return; }
+    d += c;
+    if (d.length > BODY_LIMIT) { over = true; d = ''; }
+  });
+  req.on('end', finish);
+  req.on('close', finish);
 });
+const tooBig = (res) => json(res, 413, { error: `El cuerpo supera ${BODY_LIMIT} bytes.` });
 
 const roomList = () => [...rooms.values()].map((r) => ({
   code: r.code, name: r.name, phase: r.phase,
@@ -55,6 +71,7 @@ async function api(req, res, parts, url) {
     if (method === 'GET') return json(res, 200, { rooms: roomList() });
     if (method === 'POST') {
       const b = await readBody(req);
+      if (b === OVER) return tooBig(res);
       const room = createRoom(b.name, { soldiersPerPlayer: b.soldiers, seed: b.seed, speed: b.speed });
       room.onGameOver = onExhibitionOver; // exhibición: cuenta, se guarda y, con learn:true, enseña (spec/04 §10.3)
       return json(res, 201, { code: room.code, name: room.name, soldiers: room.soldiersPerPlayer, seed: room.seed });
@@ -85,6 +102,7 @@ async function api(req, res, parts, url) {
 
   if (method !== 'POST') return json(res, 405, { error: 'Método no permitido' });
   const body = await readBody(req);
+  if (body === OVER) return tooBig(res);
   const pid = body.playerId;
 
   switch (sub) {

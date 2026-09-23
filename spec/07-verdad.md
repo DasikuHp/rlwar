@@ -243,7 +243,9 @@ todas sus decisiones, `use` solo en las de disparo) hasta pasar de 500 de dispar
   trono` · `reto anulado`. Fin de reinado: `pierde el trono` · `deja el trono: la borraron` · `deja el trono: ya no
   existe`. Dinastía: `<casa>: <x> entrena contra <y>` · `<casa>: <madre> tiene hijos` · `<casa>: <hija> sucede a
   <madre>` (solo si hubo relevo) o `<casa>: <madre> sigue de campeona, <hija> no la supera` · `Duelo de campeonas: gana
-  <x>` / `empate` · `<casa>: se borró a su campeona <x>`.
+  <x>` / `empate` · `<casa>: se borró a su campeona <x>` · fin de una generación (evento `generation`, añadido tras los
+  mutantes de la parte 3): `<casa> gana la generación y ya lleva <n>` (n = generaciones de esa casa) o `Generación sin
+  ganadora: las casas empatan`.
 - `GET /api/lab/games/:id/turns/:n/brain?player=<playerId>` → `{decision, activations, attention, approx}`:
   la `decision` es la del evento `decision` con `turn === n` del jugador; sin `?player=`, la de disparo de ese turno (la
   de quien disparó; la de moverse del tirador anterior ya lleva el turno siguiente, M3), y si no hay, la primera; las activaciones se recalculan

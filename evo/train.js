@@ -1,7 +1,7 @@
 // Aprendizaje (spec/04 §3–§6, §9.4): gradiente de política (REINFORCE + baseline + BPTT), Adam/SGD,
 // evolución (ES antitética), aprendizaje desde partidas y el entrenador (turbo con hilos, x1/x10 en vivo).
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, renameSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, isAbsolute } from 'node:path';
 import { Worker } from 'node:worker_threads';
 import { fileURLToPath } from 'node:url';
 import { makeRng, gaussFrom } from '../shared/rng.js';
@@ -9,7 +9,7 @@ import { compile } from '../shared/nn.js';
 import { normalize, validate, BLOCKS } from '../shared/genome.js';
 import { softmaxT } from '../shared/policy.js';
 import { assignRewards, returns } from '../shared/reward.js';
-import { loadNet, saveNet, netsDir, saveGameKept, loadGame, appendLog, readFeedback, writeFeedback, appendApplied, appendCurve } from './store.js';
+import { loadNet, saveNet, netsDir, evoDir, saveGameKept, loadGame, appendLog, readFeedback, writeFeedback, appendApplied, appendCurve, nextRecordSeq } from './store.js';
 import { emotionOf, memoryOf, updateMemory, addEpisode, rewardEvents, emotionEvents } from './truth.js';
 import { readThroneFull, pickOpponent } from './league.js';
 import { adaptImagination } from './mutate.js';
@@ -460,8 +460,11 @@ class Pool {
 }
 
 // ---------- entrenador ----------
-let trainerSeq = 1;
+let trainerSeq = null; // se inicia detrás de los entrenos guardados: tras reiniciar no se repiten (M9)
+// {netId: genoma} de las redes de una partida, tal como jugaron (M2); si comparten id, la que aprende
+const genomesOf = (spec) => { const out = {}; for (const s of [spec.left, spec.right].sort((a, b) => (a && a.learn ? 1 : 0) - (b && b.learn ? 1 : 0))) if (s && s.type === 'net' && s.genome && s.genome.id) out[s.genome.id] = s.genome; return out; };
 export function createTrainer(opts = {}) {
+  if (trainerSeq === null) trainerSeq = nextRecordSeq('trainings', 't');
   const listeners = {};
   const on = (ev, fn) => { (listeners[ev] ||= []).push(fn); };
   const emit = (ev, data) => { for (const fn of listeners[ev] || []) { try { fn(data); } catch { /* ignorar */ } } };
@@ -508,7 +511,11 @@ export function createTrainer(opts = {}) {
     const snapshotSelf = () => ({ type: 'net', genome: { ...g, weights: net.serialize() } });
     rivals.self = snapshotSelf();
     // sala de la fama = hitos propios + ex-reinas del trono (copias congeladas)
-    for (const h of throne.hallOfFame) { try { const snap = normalize(JSON.parse(readFileSync(h.snapshot, 'utf8'))); if (snap.id !== g.id) rivals.hall.push({ type: 'net', genome: snap, kind: 'hallOfFame' }); } catch { /* copia ilegible */ } }
+    // (las rutas relativas son de la carpeta de datos; las absolutas, de antes de B3)
+    for (const h of throne.hallOfFame) {
+      try { const snap = normalize(JSON.parse(readFileSync(isAbsolute(h.snapshot) ? h.snapshot : join(evoDir(), h.snapshot), 'utf8'))); if (snap.id !== g.id) rivals.hall.push({ type: 'net', genome: snap, kind: 'hallOfFame' }); }
+      catch { appendLog({ type: 'warning', netId: g.id, snapshot: h.snapshot, message: `No encuentro la copia del salón de la fama de ${h.netId} (${h.snapshot}): no jugará contra ella.` }); }
+    }
     const hallEntries = rivals.hall.map((spec) => ({ netId: spec.genome.id, kind: spec.kind || 'milestone', spec }));
     const pickRival = (k) => {
       const mix = { ...cfg.opponents, antagonistId: rivals.antagonist ? (antagonistId || 'antagonist') : null };
@@ -539,7 +546,7 @@ export function createTrainer(opts = {}) {
       const start = events.find((e) => e.type === 'game.start');
       const nets = start && start.data && Array.isArray(start.data.players) ? start.data.players.map((p) => p.netId).filter(Boolean) : [g.id];
       const winner = game.win ? g.id : (start && start.data.players.find((p) => p.playerId !== game.playerId) || {}).netId || null;
-      saveGameKept({ gameId, kind: 'training', trainingId: t.id, seed: game.seed, soldiers: game.soldiers, left: start ? (start.data.players.find((p) => p.team === 'left') || {}).netId || null : null, right: start ? (start.data.players.find((p) => p.team === 'right') || {}).netId || null : null, nets: [...new Set(nets)], winner, kills: { [g.id]: game.kills }, rival: game.rivalKind, ts: Date.now() }, events, { [game.playerId]: game.trajectory });
+      saveGameKept({ gameId, kind: 'training', trainingId: t.id, seed: game.seed, soldiers: game.soldiers, left: start ? (start.data.players.find((p) => p.team === 'left') || {}).netId || null : null, right: start ? (start.data.players.find((p) => p.team === 'right') || {}).netId || null : null, nets: [...new Set(nets)], winner, kills: { [g.id]: game.kills }, rival: game.rivalKind, ts: Date.now() }, events, { [game.playerId]: game.trajectory }, { genomes: game.genomes });
       t.sampleGames.push(gameId);
     };
     // bofetadas y caricias que llegaron mientras entrenaba: las aplica el siguiente sueño (spec/04 §10.4)
@@ -594,7 +601,7 @@ export function createTrainer(opts = {}) {
       const rewards = assignRewards({ reward: g.reward, teamSpirit: g.traits.teamSpirit, events: res.events, trajectory: traj, playerId: res.playerId, stats: g.reward.stats || (g.reward.stats = {}), extraTerms: gameId ? takeFeedback(g.id, gameId, g.reward.slapCaress ?? 1) : null });
       absorbGame(g, { playerId: res.playerId, events: res.events, rewards });
       const eff = rewards.entries.length ? rewards.entries.reduce((s, e) => s + e.effective, 0) / rewards.entries.length : 0;
-      const item = { events: res.events, trajectory: traj, playerId: res.playerId, rewards, sample: opts.sample ?? k % 20 === 0, k, seed: opts.seed ?? cfg.seed + k, soldiers: opts.soldiers ?? res.soldiers, rivalKind: res.rivalKind, rivalId: res.rivalId || null, win: res.win, kills: res.kills, deaths: res.deaths };
+      const item = { events: res.events, trajectory: traj, playerId: res.playerId, genomes: res.genomes || null, rewards, sample: opts.sample ?? k % 20 === 0, k, seed: opts.seed ?? cfg.seed + k, soldiers: opts.soldiers ?? res.soldiers, rivalKind: res.rivalKind, rivalId: res.rivalId || null, win: res.win, kills: res.kills, deaths: res.deaths };
       if (opts.intoBatch !== false) batch.push(item);
       t.games++;
       g.stats.games++; g.stats.wins += res.win; g.stats.kills += res.kills; g.stats.deaths += res.deaths;
@@ -646,7 +653,7 @@ export function createTrainer(opts = {}) {
       const me = { type: 'net', genome: { ...g, weights: net.serialize() }, learn: true };
       const spec = { seed: base + nG, left: e % 2 ? rival.spec : me, right: e % 2 ? me : rival.spec, soldiers: sold, rivalKind: rival.kind };
       const res = cfg.speed !== 'turbo' ? await playLive(spec) : await playAsync(spec);
-      const game = record(t.games, { ...res, rivalKind: rival.kind }, { intoBatch: false, kind: 'showcase', sample: true, seed: spec.seed, soldiers: sold });
+      const game = record(t.games, { ...res, rivalKind: rival.kind, genomes: genomesOf(spec) }, { intoBatch: false, kind: 'showcase', sample: true, seed: spec.seed, soldiers: sold });
       const x = prepareExperience({ genome: g, games: [game], optim, cfg: lc });
       saveSample(game, x.emotions);
       const refs = game.events && game.events[0] ? [{ game: game.events[0].game }] : [];
@@ -672,13 +679,13 @@ export function createTrainer(opts = {}) {
           if (!reason && t._stop) reason = 'stopped';
           continue;
         }
-        if (cfg.speed !== 'turbo') { const spec = playSpec(k); const res = await playLive(spec); record(k, { ...res, rivalKind: spec.rivalKind }); k++; cycleGames++; }
-        else if (!pool) { await new Promise((r) => setImmediate(r)); const spec = playSpec(k); const res = playOne(spec); record(k, { ...res, rivalKind: spec.rivalKind }); k++; cycleGames++; } // cede el bucle de eventos: el servidor sigue respondiendo
+        if (cfg.speed !== 'turbo') { const spec = playSpec(k); const res = await playLive(spec); record(k, { ...res, rivalKind: spec.rivalKind, genomes: genomesOf(spec) }); k++; cycleGames++; }
+        else if (!pool) { await new Promise((r) => setImmediate(r)); const spec = playSpec(k); const res = playOne(spec); record(k, { ...res, rivalKind: spec.rivalKind, genomes: genomesOf(spec) }); k++; cycleGames++; } // cede el bucle de eventos: el servidor sigue respondiendo
         else {
           const n = Math.min(cfg.workers, batchSize - batch.length || batchSize, method === 'both' ? Math.max(1, bothCfg.gradientGamesPerCycle - cycleGames) : Infinity);
           const specs = Array.from({ length: n }, (_, i) => playSpec(k + i));
           const results = await Promise.all(specs.map((spec) => pool.run({ type: 'play', seed: spec.seed, left: spec.left, right: spec.right, soldiers: spec.soldiers })));
-          results.forEach((res, i) => { if (!reason && !t._stop) { record(k + i, { ...res, rivalKind: specs[i].rivalKind }); reason = doneBy(); } });
+          results.forEach((res, i) => { if (!reason && !t._stop) { record(k + i, { ...res, rivalKind: specs[i].rivalKind, genomes: genomesOf(specs[i]) }); reason = doneBy(); } });
           k += n; cycleGames += n;
           if (batch.length >= batchSize) sleep();
           if (reason) break;

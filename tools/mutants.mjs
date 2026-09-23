@@ -222,6 +222,20 @@ export async function runMutants({ root = DEFAULT_ROOT, file, tests, max = 0, se
   say(`🧬 ${file}: ${all.length} mutantes posibles, se prueban ${chosen.length}${lines ? ` (líneas ${lines})` : ''} contra ${tests.join(', ')}${server ? ` con servidor en el puerto ${port}` : ''}`);
   say(`${'#'.padStart(4)}  ${'línea'.padStart(5)}  cambio${' '.repeat(38)}  resultado`);
   try {
+    // línea base (spec/00 §4): sin mutar, los tests tienen que pasar; si no, un fallo ajeno contaría como cazador
+    {
+      const srv = server ? await startServer(work, port) : null;
+      try {
+        if (srv && !srv.ok) throw new Error('los tests fallan sin mutante: el servidor de la copia sin mutar no arranca');
+        for (const t of tests) {
+          const r = spawnSync(process.execPath, [join(work, t), ...(srv ? [srv.base] : [])], { cwd: work, encoding: 'utf8', timeout: timeoutMs, env: { ...process.env, GW_FAST: '1' } });
+          if (r.status !== 0 || r.error || r.signal) {
+            const tail = String(r.stdout || '').trim().split('\n').slice(-6).join('\n');
+            throw new Error(`los tests fallan sin mutante: ${t} (${r.error || r.signal ? 'tiempo' : `sale ${r.status}`})${tail ? '\n' + tail : ''}`);
+          }
+        }
+      } finally { if (srv) await srv.stop(); }
+    }
     for (let i = 0; i < chosen.length; i++) {
       const m = chosen[i];
       writeFileSync(target, applyMutant(src, m));
@@ -260,11 +274,14 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     console.log('uso: node tools/mutants.mjs <fichero.js> --tests test/a.spec.mjs[,test/b.spec.mjs] [--max N] [--seed S] [--timeout ms] [--root dir] [--json out.json] [--keep] [--lines a-b,c] [--server [--port N]]');
     process.exit(2);
   }
-  const r = await runMutants({
-    root: opt('root', DEFAULT_ROOT), file, tests, max: Number(opt('max', 0)) || 0, seed: Number(opt('seed', 1)) || 1,
-    timeoutMs: Number(opt('timeout', 60000)) || 60000, keep: args.includes('--keep'),
-    lines: opt('lines', null), server: args.includes('--server'), port: Number(opt('port', 8850)) || 8850,
-  });
+  let r;
+  try {
+    r = await runMutants({
+      root: opt('root', DEFAULT_ROOT), file, tests, max: Number(opt('max', 0)) || 0, seed: Number(opt('seed', 1)) || 1,
+      timeoutMs: Number(opt('timeout', 60000)) || 60000, keep: args.includes('--keep'),
+      lines: opt('lines', null), server: args.includes('--server'), port: Number(opt('port', 8850)) || 8850,
+    });
+  } catch (e) { console.log(`✘ ${e.message}`); process.exit(1); }
   const out = opt('json', null);
   if (out) writeFileSync(out, JSON.stringify(r, null, 2));
   process.exit(0);

@@ -28,7 +28,7 @@ function coarsePoints(points) {
 
 // duración de la animación de un disparo de `points` puntos a la velocidad de la sala (spec/04 §9.5)
 export function animMsOf(points, speed = 1) {
-  return Math.min(9000, Math.max(700, (points * C.NETWORK_STEP / (C.SHOT_SPEED * speed)) * 1000)) / (speed === 10 ? 10 : 1);
+  return Math.min(9000, Math.max(700, points * C.NETWORK_STEP / C.SHOT_SPEED * 1000)) / speed;
 }
 
 let seq = 1;
@@ -69,6 +69,7 @@ export class Room {
     this.pending = {};      // por jugador: {agent, choice} del turno en curso (para chooseMove)
     this.animEnd = 0;       // cuándo termina la animación del último disparo (ms)
     this.events = [];       // F4: registro de eventos de la partida (spec/04 §9.1, spec/07 §1)
+    this.voiceEvents = 0;   // cuántos son de la voz (no cuentan para el tope, R5)
     this.gameId = null;
     this.shotLog = [];      // F3: disparos con familia/params/minDist/stayed (máx. 40), spec/03 §9.3
     this.decisions = [];    // F3: últimas 50 decisiones de las redes (sin pantalla)
@@ -109,13 +110,16 @@ export class Room {
   // F4: evento del registro; devuelve su id
   emit(type, actor, data = {}) {
     // tope duro (spec/07 §1, §12.1): al superarlo, un único `error` y las decisiones dejan de ir completas
-    if (this.events.length >= C.LIMITS.eventsPerGame && !this.eventsCapped) {
+    // la voz (say y frase no verificable) solo existe con pantalla: no cuenta, así la gemela sin pantalla llega igual (R5)
+    const voice = type === 'say' || (type === 'error' && data && data.message === 'frase no verificable');
+    if (!voice && this.events.length - this.voiceEvents >= C.LIMITS.eventsPerGame && !this.eventsCapped) {
       this.eventsCapped = true;
       const eid = this.events.length + 1;
       this.events.push({ id: eid, t: Date.now(), game: this.gameId, turn: this.shots, type: 'error', actor: { playerId: null, soldierId: null, netId: null }, data: { message: `tope de eventos (${C.LIMITS.eventsPerGame})`, fallback: 'decisiones sin registro completo' } });
     }
     const id = this.events.length + 1;
     this.events.push({ id, t: Date.now(), game: this.gameId, turn: this.shots, type, actor, data });
+    if (voice) this.voiceEvents++;
     return id;
   }
   actorOf(soldier) {
@@ -209,6 +213,8 @@ export class Room {
     this.decisions = [];
     this.lastDecision = null;
     this.events = [];
+    this.voiceEvents = 0;
+    this.eventsCapped = false;
     this.gameId = `g-${this.seed}-${this.code}`;
     for (const p of this.players) {
       if (p.isBot) this.agents[p.id] = this.makeAgent(p);

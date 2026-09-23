@@ -51,7 +51,7 @@ function summarize(room, row) {
   return { winner, kills, events: room.events, trajectories, playerIds, gameId: room.gameId, result: room.result };
 }
 
-export function makePlay({ speed = 'turbo', duelId = null, saveGames = true, genomes = {}, shouldStop = null, throne = false } = {}) {
+export function makePlay({ speed = 'turbo', duelId = null, saveGames = true, genomes = {}, shouldStop = null, throne = false, onLive = null } = {}) {
   const genomeOf = (id) => genomes[id] || loadNet(id);
   return async (row) => {
     const left = netSpec(genomeOf(row.left)), right = netSpec(genomeOf(row.right));
@@ -64,13 +64,14 @@ export function makePlay({ speed = 'turbo', duelId = null, saveGames = true, gen
       room.addAgent('net', { level: 3, team: 'left', genome: left.genome, learn: false });
       room.addAgent('net', { level: 3, team: 'right', genome: right.genome, learn: false });
       row.roomCode = room.code;
+      if (onLive) onLive(room.code); // se puede espectar mientras se juega (M8)
       room.start();
       while (room.phase === 'playing' && !(shouldStop && shouldStop())) await new Promise((r) => setTimeout(r, 200));
       if (room.phase === 'playing') room.gameOver(true);
       out = { ...summarize(room, row), roomCode: room.code };
     }
     if (saveGames) {
-      saveGameKept({ gameId: out.gameId, kind: 'duel', duelId, throne: !!throne, seed: row.seed, soldiers: row.soldiers, left: row.left, right: row.right, nets: [row.left, row.right], winner: out.winner, kills: out.kills, ts: Date.now() }, out.events, out.trajectories);
+      saveGameKept({ gameId: out.gameId, kind: 'duel', duelId, throne: !!throne, seed: row.seed, soldiers: row.soldiers, left: row.left, right: row.right, nets: [row.left, row.right], winner: out.winner, kills: out.kills, ts: Date.now() }, out.events, out.trajectories, { genomes: { [row.left]: left.genome, [row.right]: right.genome } });
       if (throne) saveGameNets(out.gameId, { [row.left]: left.genome, [row.right]: right.genome });
     }
     return out;
@@ -114,13 +115,13 @@ export async function runDuel(opts = {}) {
 }
 async function playDuel(opts) {
   const { id, a, b, learning = 'mix', speed = 'turbo', soldiers = 'random', seed = 0, throne = false, queen = null, onGame = null, shouldStop = null, saveGames = true } = opts;
-  const rec = { id, a, b, status: 'running', learning, speed, throne, soldiers, seed, games: [], wins: { [a]: 0, [b]: 0 }, killDiff: 0, winner: null, tie: false, ms: 0, roomCodes: [], startedAt: Date.now() };
+  const rec = { id, a, b, status: 'running', learning, speed, throne, soldiers, seed, games: [], wins: { [a]: 0, [b]: 0 }, killDiff: 0, winner: null, tie: false, ms: 0, roomCodes: [], liveRoom: null, startedAt: Date.now() };
   if (opts.onStart) opts.onStart(rec);
   const stop = () => !!(shouldStop && shouldStop());
   const learners = {};
   const learnEnabled = a !== b;
   const learnerOf = (netId) => learners[netId] || (learners[netId] = (opts.learner || defaultLearner)(netId));
-  const play = opts.play || makePlay({ speed, duelId: id, saveGames, genomes: {}, shouldStop, throne });
+  const play = opts.play || makePlay({ speed, duelId: id, saveGames, genomes: {}, shouldStop, throne, onLive: (code) => { rec.liveRoom = code; } });
   const plan = duelPlan({ a, b, seed, soldiers });
   const played = [];
   const t0 = Date.now();
@@ -129,6 +130,7 @@ async function playDuel(opts) {
     if (stop()) break;
     if (speed === 'turbo') await new Promise((r) => setImmediate(r));
     const out = await play(row);
+    rec.liveRoom = null;
     const game = { k: row.k, seed: row.seed, soldiers: row.soldiers, left: row.left, right: row.right, winner: out.winner, kills: out.kills, gameId: out.gameId || null, roomCode: out.roomCode || row.roomCode || null };
     rec.games.push(game);
     if (game.roomCode) rec.roomCodes.push(game.roomCode);

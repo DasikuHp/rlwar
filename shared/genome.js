@@ -50,7 +50,7 @@ export const DEFAULT_LEARNING = {
   gradient: { lr: 0.003, gamma: 0.95, entropy: 0.01, clipNorm: 5, batchGames: 4, bpttSteps: 8, baseline: 'value', optimizer: 'adam', adjustLearn: true },
   evolution: { population: 16, sigma: 0.02, lr: 0.01, gamesPerCandidate: 2, antithetic: true, rankNormalize: true },
   both: { gradientGamesPerCycle: 16, evolutionStepsPerCycle: 1 },
-  sleep: { lessonThreshold: 0.05 },
+  sleep: { lessonThreshold: 0.015 }, // M13: un sueño típico cambia un 1–2 % (con 5 % la bombilla casi nunca se encendía)
 };
 export const LEARNING_RANGES = {
   'gradient.lr': [1e-5, 0.1], 'gradient.gamma': [0, 1], 'gradient.entropy': [0, 0.5], 'gradient.clipNorm': [0.1, 100],
@@ -280,7 +280,10 @@ function analyze(g, errors) {
     for (const nx of outs.get(id)) { indeg.set(nx, indeg.get(nx) - 1); if (indeg.get(nx) === 0) queue.push(nx); }
   }
   if (order.length < g.blocks.length) {
-    const inCycle = g.blocks.filter((b) => !order.includes(b.id)).map((b) => b.id);
+    // lo que Kahn no pudo ordenar es el bucle y lo que cuelga de él; pelando desde atrás queda solo el bucle (B1)
+    const rest = new Set(g.blocks.filter((b) => !order.includes(b.id)).map((b) => b.id));
+    for (let changed = true; changed;) { changed = false; for (const id of [...rest]) if (!outs.get(id).some((nx) => rest.has(nx))) { rest.delete(id); changed = true; } }
+    const inCycle = g.blocks.filter((b) => rest.has(b.id)).map((b) => b.id);
     E('cycle', `Hay un bucle de cables entre ${inCycle.join(', ')}: dentro de un turno la señal solo puede ir hacia delante (los únicos "bucles" son la memoria entre turnos).`, { blockId: inCycle[0], example: 'Quita uno de los cables del bucle o pon una Memoria (Eco/GRU/LSTM) para recordar entre turnos.' });
     return null;
   }
@@ -451,6 +454,7 @@ export function validate(genomeOrText, { forPlay = false } = {}) {
   const hands = {};
   for (const b of g.blocks) if (isHead(b.type)) { if (hands[b.type]) errors.push({ code: 'duplicate-hand', blockId: b.id, message: `Solo puede haber un bloque ${BLOCKS[b.type].name} por red ("${hands[b.type]}" y "${b.id}").`, example: 'Quita uno de los dos o júntalos con Instinto antes.' }); else hands[b.type] = b.id; }
   if (forPlay && !hands['hand.choose']) errors.push({ code: 'missing-choose', message: 'La red no tiene el bloque Elegir: sin él no puede disparar.', example: 'Candidatos → Instinto → Elegir.' });
+  else if (!hands['hand.choose']) warnings.push({ code: 'missing-choose', message: 'Esta red no puede jugar: le falta el bloque Elegir (se puede guardar y seguir editándola).', example: 'Candidatos → Instinto → Elegir.' });
   const nParams = paramCountFrom(g, analysis);
   if (nParams > LIMITS.params) errors.push({ code: 'limit', message: `La red tiene ${nParams} parámetros; el máximo es ${LIMITS.params}.`, example: 'Baja las neuronas de las capas grandes (512 × 512 ya son 262 144 pesos).' });
   // avisos: bloques sin camino ojo → mano/pie

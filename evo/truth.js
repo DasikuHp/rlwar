@@ -103,6 +103,11 @@ export function phrase(kind, netId, composed, t = Date.now()) {
 }
 
 // ---------- confianza (§4, §12.3) ----------
+// certeza de una decisión (M1): lo decidida que estaba la red, p(favorita) − p(segunda), sea cual sea la que salió del sorteo
+export function certaintyOf(candidates) {
+  const p = (candidates || []).map((c) => c && c.p).filter((x) => typeof x === 'number').sort((a, b) => b - a);
+  return p.length > 1 ? p[0] - p[1] : p.length ? 1 : 0;
+}
 export function confidenceOf({ margin = 0, games = 0, recentShots = [] } = {}) {
   const certainty = clamp(Number(margin) || 0, 0, 1);
   const recent = (recentShots || []).slice(-20);
@@ -230,10 +235,25 @@ function pearson(xs, ys) {
   for (let i = 0; i < n; i++) { const dx = xs[i] - mx, dy = ys[i] - my; sxy += dx * dy; sxx += dx * dx; syy += dy * dy; }
   return sxx > 0 && syy > 0 ? sxy / Math.sqrt(sxx * syy) : 0;
 }
+// activaciones de las muestras que se usan (use !== false), recorriendo cada episodio (ep) en orden desde el estado cero:
+// así la memoria tiene el estado que tuvo en la partida (M6); sin ep, cada muestra empieza de cero
+export function activationsOf(net, samples) {
+  const out = [];
+  let st = null, cur;
+  for (const s of samples || []) {
+    if (!s || !s.obs) continue;
+    if (s.ep === undefined || s.ep !== cur) { st = net.zeroState(); cur = s.ep; }
+    const o = net.forward(s.obs, st);
+    st = o.state;
+    if (s.use !== false) out.push(o.activations);
+  }
+  return out;
+}
 export function nameNeurons(genome, samples, { m = Infinity, min = 50, threshold = 0.3 } = {}) {
   const g = normalize(genome);
   const net = compile(g);
-  const use = (samples || []).filter((s) => s && s.obs).slice(0, Number.isFinite(m) ? m : undefined);
+  const all = (samples || []).filter((s) => s && s.obs);
+  const use = all.filter((s) => s.use !== false).slice(0, Number.isFinite(m) ? m : undefined);
   const byId = new Map(g.blocks.map((b) => [b.id, b]));
   const custom = (g.names && g.names.neurons) || {};
   const out = {};
@@ -250,7 +270,7 @@ export function nameNeurons(genome, samples, { m = Infinity, min = 50, threshold
     const layout = eyeLayout(e);
     for (const l of layout) (stream === 'ctx' ? ctxFeatures : rowFeatures).push({ eye: e.id, stream, index: l.index, name: `${l.name}` });
   }
-  const acts = use.map((s) => { let st = net.zeroState(); const o = net.forward(s.obs, st); return o.activations; });
+  const acts = activationsOf(net, all).slice(0, use.length);
   for (const b of targets) {
     const units = b.params.units;
     const stream = net.streams[b.id];
@@ -288,18 +308,36 @@ export function nameNeurons(genome, samples, { m = Infinity, min = 50, threshold
 
 // ---------- diario (§10, §12.8): plantillas fijas verificables ----------
 const fmt = (v) => (Number.isInteger(v) ? String(v) : String(Math.round(v * 1000) / 1000));
+// frases de dinastía en español, con los nombres de la entrada (M5); "sucede a" solo si hubo relevo
+function dynastyPhrase(e, S) {
+  const house = S(e.houseName || `Casa ${e.house}`);
+  switch (e.event) {
+    case 'train': return compose('{house}: {name} entrena contra {rival}', { house, name: S(e.name || e.netId), rival: S(e.againstName || e.against) });
+    case 'children': return compose('{house}: {mother} tiene hijos', { house, mother: S(e.motherName || e.parentId) });
+    case 'promote': return e.promoted
+      ? compose('{house}: {child} sucede a {mother}', { house, child: S(e.childName || e.child), mother: S(e.motherName || e.mother) })
+      : compose('{house}: {mother} sigue de campeona, {child} no la supera', { house, mother: S(e.motherName || e.mother), child: S(e.childName || e.child) });
+    case 'duel': return e.tie || !e.winner ? compose('Duelo de campeonas: {result}', { result: S('empate') }) : compose('Duelo de campeonas: gana {winner}', { winner: S(e.winnerName || e.winner) });
+    case 'champion.deleted': return compose('{house}: se borró a su campeona {name}', { house, name: S(e.name || e.netId) });
+    // fin de la generación: la casa ganadora y cuántas lleva (e[casa].generation); con empate, ninguna
+    case 'generation': return e.tie || !e[e.house]
+      ? compose('Generación sin ganadora: {result}', { result: S('las casas empatan') })
+      : compose('{house} gana la generación y ya lleva {n}', { house, n: S(e[e.house].generation) });
+    default: return compose('{house}: {event}', { house, event: S(e.event) });
+  }
+}
 export function diaryPhrase(entry) {
   const ref = { log: entry.id };
   const S = (value) => ({ value, ref });
   let c;
-  switch (entry.type) {
+  switch (entry.type) { // con los nombres guardados en la entrada (M5); las antiguas, con los ids
     case 'lesson': c = compose('Lo que más cambió fue {name} {blockId} ({pct} %)', { name: S(entry.name || 'bloque'), blockId: S(entry.blockId), pct: S(Math.round((entry.relChange || 0) * 1000) / 10) }); break;
     case 'milestone': c = compose('Hito: tasa de victorias {value} en las últimas {n}', { value: S(fmt(entry.value)), n: S(entry.n ?? 20) }); break;
-    case 'challenge': c = compose('Reto de {challenger} a {queen}: {result}', { challenger: S(entry.challenger), queen: S(entry.queen), result: S(entry.result === 'challenger' ? 'ganó la retadora' : entry.result === 'tie' ? 'empate, la reina conserva el trono' : 'la reina defendió el trono') }); break;
+    case 'challenge': c = compose('Reto de {challenger} a {queen}: {result}', { challenger: S(entry.challengerName || entry.challenger), queen: S(entry.queenName || entry.queen), result: S(entry.result === 'challenger' ? 'ganó la retadora' : entry.result === 'tie' ? 'empate, la reina conserva el trono' : entry.result === 'void' ? 'reto anulado' : 'la reina defendió el trono') }); break;
     case 'exam': c = compose('Boletín: puntería {aim}, cobertura {cover}, supervivencia {survival}, adaptación {adaptation}', { aim: S(fmt(entry.aim)), cover: S(fmt(entry.cover)), survival: S(fmt(entry.survival)), adaptation: S(fmt(entry.adaptation)) }); break;
-    case 'reign.start': c = compose('{queen} se sienta en el trono', { queen: S(entry.queen || entry.netId) }); break;
-    case 'reign.end': c = compose('{netId} pierde el trono', { netId: S(entry.netId) }); break;
-    case 'dynasty': c = compose('Casa {house}: {event}', { house: S(entry.house), event: S(entry.event) }); break;
+    case 'reign.start': c = compose('{queen} se sienta en el trono', { queen: S(entry.name || entry.queen || entry.netId) }); break;
+    case 'reign.end': c = compose(entry.reason === 'deleted' ? '{name} deja el trono: la borraron' : entry.reason === 'missing' ? '{name} deja el trono: ya no existe' : '{name} pierde el trono', { name: S(entry.name || entry.netId) }); break;
+    case 'dynasty': c = dynastyPhrase(entry, S); break;
     case 'update': c = compose('Sueño de {games} partidas: pérdida {loss}', { games: S(entry.games), loss: S(fmt(entry.loss || 0)) }); break;
     case 'slap': case 'caress': c = compose('{kind} del usuario en la partida {game}', { kind: S(entry.type === 'slap' ? 'Bofetada' : 'Caricia'), game: S(entry.game) }); break;
     default: return null;

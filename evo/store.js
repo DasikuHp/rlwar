@@ -1,6 +1,8 @@
 // Almacén de redes en disco (spec/03 §9.4): evo/nets/<id>.json (o GW_EVO_DIR/nets). Escritura atómica.
-import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, renameSync, unlinkSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync, renameSync, unlinkSync, statSync, appendFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import { gzipSync, gunzipSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { validate, normalize, countParams } from '../shared/genome.js';
 
@@ -86,58 +88,140 @@ export function gamesDir() {
   return base;
 }
 const GAME_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-export function saveGame(meta, events, trajectories = null) {
+// los vectores de observación son Float64Array: en JSON van como listas normales
+const plain = (k, v) => (v && ArrayBuffer.isView(v) ? Array.from(v) : v);
+// `genomes` = {netId: genoma tal como jugó}: se guarda una copia por huella y la meta la cita en `snaps` (M2)
+export function saveGame(meta, events, trajectories = null, { genomes = null } = {}) {
   if (!meta || !GAME_ID_RE.test(String(meta.gameId))) return { ok: false, error: 'gameId inválido' };
-  const file = join(gamesDir(), `${meta.gameId}.json`);
+  if (genomes) meta = { ...meta, snaps: Object.fromEntries(Object.entries(genomes).filter(([, g]) => g).map(([id, g]) => [id, saveSnapshot(g)])) };
+  // comprimida (M15): <id>.json.gz = gzip del JSON {meta, events, trajectories?}
+  const file = join(gamesDir(), `${meta.gameId}.json.gz`);
   const tmp = file + '.tmp';
-  // los vectores de observación son Float64Array: en JSON van como listas normales
-  writeFileSync(tmp, JSON.stringify(trajectories ? { meta, events, trajectories } : { meta, events }, (k, v) => (v && ArrayBuffer.isView(v) ? Array.from(v) : v)));
+  writeFileSync(tmp, gzipSync(JSON.stringify(trajectories ? { meta, events, trajectories } : { meta, events }, plain)));
   renameSync(tmp, file);
-  // su meta al lado, para listar sin abrir la partida (spec/08 §9.1)
+  // su meta al lado (spec/08 §9.1) y en el índice (M15)
   const mfile = join(gamesDir(), `${meta.gameId}.meta.json`), mtmp = mfile + '.tmp';
   writeFileSync(mtmp, JSON.stringify(meta)); renameSync(mtmp, mfile);
+  indexAppend({ a: meta });
   return { ok: true, id: meta.gameId, file };
 }
 // guarda y aplica la retención de 200 partidas a cada red de la partida (spec/07 §12.1, spec/08 §9.2);
 // la usan quienes guardan partidas nuevas: entrenos, duelos y exhibiciones
-export function saveGameKept(meta, events, trajectories = null) {
-  const r = saveGame(meta, events, trajectories);
+export function saveGameKept(meta, events, trajectories = null, opts = {}) {
+  const r = saveGame(meta, events, trajectories, opts);
   if (r.ok) for (const netId of new Set(Array.isArray(meta.nets) ? meta.nets : [])) pruneGames(netId, 200);
   return r;
 }
 // lista de partidas guardadas (meta) ordenadas por ts ascendente; filtro opcional por red
+// índice de metas (M15): games/index.jsonl, una línea {a: meta} al guardar y {d: gameId} al borrar; si falta, se
+// reconstruye con las metas de al lado; se compacta cuando tiene más del doble de líneas que partidas vivas (+200)
+const indexFile = () => join(gamesDir(), 'index.jsonl');
+function indexAppend(line) { if (existsSync(indexFile())) appendFileSync(indexFile(), JSON.stringify(line) + '\n'); }
+function indexWrite(metas) { const f = indexFile(), tmp = f + '.tmp'; writeFileSync(tmp, metas.map((m) => JSON.stringify({ a: m }) + '\n').join('')); renameSync(tmp, f); }
+function indexRead() {
+  if (!existsSync(indexFile())) return null;
+  const live = new Map();
+  let lines = 0;
+  for (const l of readFileSync(indexFile(), 'utf8').split('\n')) {
+    if (!l.trim()) continue;
+    lines++;
+    try { const e = JSON.parse(l); if (e.a && e.a.gameId) live.set(e.a.gameId, e.a); else if (e.d) live.delete(e.d); } catch { /* línea rota */ }
+  }
+  if (lines > 2 * live.size + 200) indexWrite([...live.values()]);
+  return [...live.values()];
+}
 export function listGames({ netId = null } = {}) {
+  let all = indexRead();
+  if (!all) { all = scanMetas(); indexWrite(all); }
+  const out = netId ? all.filter((m) => Array.isArray(m.nets) && m.nets.includes(netId)) : all.slice();
+  return out.sort((a, b) => (a.ts || 0) - (b.ts || 0) || String(a.gameId).localeCompare(String(b.gameId)));
+}
+const readGameFile = (file) => JSON.parse(file.endsWith('.gz') ? gunzipSync(readFileSync(file)).toString('utf8') : readFileSync(file, 'utf8'));
+// sin índice: las metas de al lado; si no hay (partidas antiguas), la del fichero entero (.json o .json.gz)
+function scanMetas() {
   const out = [];
   const dir = gamesDir();
-  const names = readdirSync(dir), metas = new Set(names.filter((f) => f.endsWith('.meta.json')));
+  const names = readdirSync(dir), metas = new Set(names.filter((f) => f.endsWith('.meta.json'))), seen = new Set();
   for (const fname of names) {
-    if (!fname.endsWith('.json') || fname.endsWith('.nets.json') || fname.endsWith('.meta.json')) continue;
-    const id = fname.slice(0, -5);
+    const gz = fname.endsWith('.json.gz');
+    if (!(gz || fname.endsWith('.json')) || fname.endsWith('.nets.json') || fname.endsWith('.meta.json')) continue;
+    const id = fname.slice(0, gz ? -8 : -5);
+    if (seen.has(id)) continue;
     try {
-      // la meta de al lado si existe; si no (partidas antiguas), la del fichero entero
-      const meta = metas.has(`${id}.meta.json`) ? JSON.parse(readFileSync(join(dir, `${id}.meta.json`), 'utf8')) : (JSON.parse(readFileSync(join(dir, fname), 'utf8')) || {}).meta;
+      const meta = metas.has(`${id}.meta.json`) ? JSON.parse(readFileSync(join(dir, `${id}.meta.json`), 'utf8')) : (readGameFile(join(dir, fname)) || {}).meta;
       if (!meta) continue;
-      if (netId && !(Array.isArray(meta.nets) && meta.nets.includes(netId))) continue;
+      seen.add(id);
       out.push(meta);
     } catch { /* fichero roto */ }
   }
-  return out.sort((a, b) => (a.ts || 0) - (b.ts || 0) || String(a.gameId).localeCompare(String(b.gameId)));
+  return out;
 }
 // retención (spec/07 §1, §12.1): deja las `keep` más recientes de la red; los duelos de trono no se borran
 export function pruneGames(netId, keep = 200) {
   const mine = listGames({ netId }).filter((m) => !m.throne);
   const removed = [];
   for (const m of mine.slice(0, Math.max(0, mine.length - keep))) {
-    try { unlinkSync(join(gamesDir(), `${m.gameId}.json`)); removed.push(m.gameId); } catch { /* ya no está */ }
-    for (const side of [`${m.gameId}.nets.json`, `${m.gameId}.meta.json`]) { const f = join(gamesDir(), side); if (existsSync(f)) { try { unlinkSync(f); } catch { /* ignorar */ } } }
+    for (const side of [`${m.gameId}.json.gz`, `${m.gameId}.json`, `${m.gameId}.nets.json`, `${m.gameId}.meta.json`]) { const f = join(gamesDir(), side); if (existsSync(f)) { try { unlinkSync(f); } catch { /* ignorar */ } } }
+    indexAppend({ d: m.gameId });
+    removed.push(m.gameId);
   }
+  if (removed.length) gcSnapshots();
   return removed;
 }
 export function loadGame(id) {
   if (!GAME_ID_RE.test(String(id))) return null;
-  const file = join(gamesDir(), `${id}.json`);
+  for (const file of [join(gamesDir(), `${id}.json.gz`), join(gamesDir(), `${id}.json`)]) {
+    if (existsSync(file)) { try { return readGameFile(file); } catch { return null; } }
+  }
+  return null;
+}
+// copias de las redes tal como jugaron (M2): snapshots/<huella>.json.gz, una por genoma distinto
+const snapshotsDir = () => { const d = join(evoDir(), 'snapshots'); if (!existsSync(d)) mkdirSync(d, { recursive: true }); return d; };
+const SHA_RE = /^[0-9a-f]{20}$/;
+export function saveSnapshot(genome) {
+  const json = JSON.stringify(genome, plain);
+  const sha = createHash('sha256').update(json).digest('hex').slice(0, 20);
+  const file = join(snapshotsDir(), `${sha}.json.gz`);
+  if (!existsSync(file)) { const tmp = file + '.tmp'; writeFileSync(tmp, gzipSync(json)); renameSync(tmp, file); }
+  return sha;
+}
+export function loadSnapshot(sha) {
+  if (!SHA_RE.test(String(sha))) return null;
+  const file = join(snapshotsDir(), `${sha}.json.gz`);
   if (!existsSync(file)) return null;
-  try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; }
+  try { return JSON.parse(gunzipSync(readFileSync(file)).toString('utf8')); } catch { return null; }
+}
+// borra las copias que ya no cita ninguna partida guardada
+function gcSnapshots() {
+  const used = new Set();
+  for (const m of listGames()) for (const sha of Object.values(m.snaps || {})) used.add(sha);
+  for (const f of readdirSync(snapshotsDir())) {
+    if (f.endsWith('.json.gz') && !used.has(f.slice(0, -8))) { try { unlinkSync(join(snapshotsDir(), f)); } catch { /* ignorar */ } }
+  }
+}
+// registros de duelos, entrenos y trabajos terminados (M9): records/<tipo>/<id>.json
+const recordsDir = (kind) => { const d = join(evoDir(), 'records', kind); if (!existsSync(d)) mkdirSync(d, { recursive: true }); return d; };
+export function saveRecord(kind, rec) {
+  if (!rec || !GAME_ID_RE.test(String(rec.id))) return false;
+  const f = join(recordsDir(kind), `${rec.id}.json`), tmp = f + '.tmp';
+  writeFileSync(tmp, JSON.stringify(rec)); renameSync(tmp, f);
+  return true;
+}
+export function loadRecord(kind, id) {
+  if (!GAME_ID_RE.test(String(id))) return null;
+  const f = join(recordsDir(kind), `${id}.json`);
+  try { return existsSync(f) ? JSON.parse(readFileSync(f, 'utf8')) : null; } catch { return null; }
+}
+export function listRecords(kind) {
+  const out = [];
+  for (const f of readdirSync(recordsDir(kind))) { if (!f.endsWith('.json')) continue; try { out.push(JSON.parse(readFileSync(join(recordsDir(kind), f), 'utf8'))); } catch { /* roto */ } }
+  return out;
+}
+// primer número libre para ids como t7 o j12, detrás de los registros guardados (tras reiniciar no se repiten)
+export function nextRecordSeq(kind, prefix) {
+  let max = 0;
+  for (const f of readdirSync(recordsDir(kind))) { const m = new RegExp('^' + prefix + '(\\d+)\\.json$').exec(f); if (m) max = Math.max(max, Number(m[1])); }
+  return max + 1;
 }
 // registro (spec/07 §1, §12.1, §12.8): una línea por evento con id secuencial; rota a log.1.jsonl al superar maxBytes
 const logFile = () => join(evoDir(), 'log.jsonl');

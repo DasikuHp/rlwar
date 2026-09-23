@@ -3,7 +3,7 @@
 import { compile } from '../shared/nn.js';
 import { decideShot, decideMove } from '../shared/policy.js';
 import { loadNet } from '../evo/store.js';
-import { confidenceOf, memoryOf } from '../evo/truth.js';
+import { certaintyOf, confidenceOf, memoryOf } from '../evo/truth.js';
 
 export const meta = {
   id: 'net', name: 'Red', icon: '🧠',
@@ -50,7 +50,8 @@ export function create({ netId = null, genome = null, learn = false, attribution
       try {
         const r = decideShot({ net, genome: g, state, soldierId: soldier.id, memory: this.memoryFor(soldier.id), team: this.teamFor(soldier, soldiers), rng, attribution });
         memories[soldier.id] = r.memory;
-        r.decision.confidence = confidenceOf({ margin: r.decision.margin, games: g.stats ? g.stats.games : 0, recentShots: memoryOf(g).recentShots });
+        // certeza = lo decidida que estaba (favorita frente a segunda), no el margin del elegido, que es negativo si exploró (M1)
+        r.decision.confidence = confidenceOf({ margin: certaintyOf(r.decision.candidates), games: g.stats ? g.stats.games : 0, recentShots: memoryOf(g).recentShots });
         (this.trajectories[soldier.id] ||= []).push({ turn: (state && state.stats && state.stats.shots) || 0, phase: 'shoot', obs: r.obs, decision: r.decision });
         return { ...r.choice, reason: '', decision: r.decision };
       } catch (e) { return fallback('shoot', soldier.id, e.message); }

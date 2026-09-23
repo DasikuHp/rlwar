@@ -178,3 +178,76 @@ Aprobados por el usuario ("arréglalo tú"). Completan §2–§7 sin cambiar lo 
 ### 9.3 `POST /api/rooms {speed}`
 - `speed` ∈ {1, 10} (otro valor → 1). Con `speed: 10` la sala solo admite agentes: `join` responde
   `{error: 'Sala x10: solo agentes'}` (§9.5 de spec/04). `config.speed` lo expone.
+
+## 10. Terreno de círculos que se rompe y tiro que atraviesa (ronda 17, 2026-09-23)
+Decisión del usuario, fiel al Graphwar original (`referencia/graphwar/`: `GraphServer.generateCircles`,
+`Obstacle.explodePoint`, `Function` que registra todos los soldados que toca): "círculos que se rompen, sin renovación
+de mapa" y "como el original: atraviesa". Escala del original: el plano de 50 u mide 770 px (1 px ≈ 0,065 u).
+
+### 10.1 Obstáculos y bocados
+- Un obstáculo es un círculo `{kind: 'circle', x, y, r}` o, como hasta ahora, un rectángulo `{x, y, w, h}` (sin `kind`
+  o con `kind: 'rect'`). Los rectángulos siguen valiendo en todas partes (escenas de tests, "¿qué pasaría si…?",
+  agentes por la API); los mapas nuevos solo generan círculos.
+- La sala guarda `bites: [{x, y, r}]`: los bocados que las explosiones le han arrancado al terreno en esta partida.
+  Un punto es **sólido** si está dentro de algún obstáculo y fuera de todos los bocados.
+- Una sola pregunta de colisión, `isSolid(p, terrain, margin)` en `shared/geometry.js` (`terrain = {obstacles,
+  bites}`): con margen `m`, el obstáculo se agranda `m` y cada bocado se encoge `m` (círculo: `d ≤ r + m`; rectángulo:
+  el de siempre agrandado `m`; bocado: `d < r − m`). La usan el trazado (con `OBSTACLE_MARGIN`), el movimiento y el
+  deslizamiento (con `BODY`), la línea de visión (sin margen), la percepción y la colocación de soldados.
+- Explosión: todo tiro acaba en un punto (el del choque, el del borde o el último válido) y ahí **arranca un bocado**
+  de radio `BITE_RADIUS = 0,78 u` (12 px del original). No mata a nadie por estar cerca: las bajas son las del
+  recorrido (§10.3). Solo se guarda el bocado si toca algún obstáculo. Los bocados son parte del estado: `snapshot`,
+  moviola, partidas guardadas, "¿qué pasaría si…?" y percepción los ven.
+- El evento `game.start` lleva los obstáculos del mapa (`map.obstacles`); con los `bite` de cada `shot`, cualquiera
+  (la moviola, un agente externo) rehace el terreno de cualquier turno.
+
+### 10.2 Mapas (`server/mapgen.js`)
+- Número de círculos: `round(gauss(15, 7))` limitado a 8–22; radio: `gauss(2,6, 1,6)` u limitado a 1–4 u; centros
+  al azar en todo el plano. Todo con el `rng` de la sala (misma semilla, mismo mapa).
+- Los tres biomas siguen (la memoria de la red los recuerda) y cambian cómo se reparten los círculos: `ruinas` (35 %)
+  = la regla del original; `fortaleza` (35 %) = 2 o 3 círculos grandes (r 3,5–4 u) apilados cerca del centro (x −4..4)
+  más los de la regla hasta completar; `llanura` (30 %) = 8–10 círculos de r 1–2,5 u.
+- Soldados: cada bando en su mitad (x −23..−6 y 6..23), fuera de todo círculo con 1 u de margen, a 3 u o más entre
+  sí (como ahora). Si en 400 intentos no hay sitio, el hueco libre más cercano a (±20, 0).
+
+### 10.3 El tiro atraviesa
+- `simulateShot` registra **todos** los soldados vivos (menos el que dispara) a `HIT_RADIUS` o menos del recorrido,
+  cada uno una vez y en orden, y **no se para**: acaba en obstáculo, borde, valor inválido, pendiente vertical o
+  longitud máxima.
+- Resultado: `{type, end, hits: [{soldierId, team, x, y}], soldierId, x, y}`; `end` ∈ {obstacle, wall, invalid,
+  steep, maxlen} es por qué se paró; `hits` en orden de recorrido; `soldierId` = el primer alcanzado (o null); `type`
+  = `kill` si alcanzó a algún enemigo, si no `suicide` si alcanzó a algún aliado, si no `end` (así quien solo mira
+  `type` sigue viendo lo mismo en los casos de un solo impacto).
+- En la sala (`fire()`, único punto de validación): mueren todos los alcanzados. Por cada enemigo, un `kill` del
+  tirador y un `death` de la víctima; por cada aliado, un `friendlyFire` y su `death`. El tirador nunca muere por su
+  propio tiro. `shotLog` y el evento `shot` guardan `result: {type, soldierId, hits: [ids en orden], kills, friendly,
+  end}` (`kills` = enemigos alcanzados, `friendly` = aliados) y el evento `shot` lleva además `bite` (el bocado que
+  arrancó, o null): así la moviola rehace el terreno turno a turno. Los eventos `kill` y `friendlyFire` salen en el orden
+  del recorrido. Roces: enemigos vivos no alcanzados a 1 u o menos del recorrido.
+- Recompensa (spec/04 §2): `kill` suma su peso **por cada** enemigo alcanzado (`result.kills`) y `friendlyFire` por cada
+  aliado (`result.friendly`), los dos en la decisión del tiro; sin esos campos (partidas antiguas), uno según `type`.
+
+### 10.4 Sin renovación de mapa
+- Se quita la renovación por estancamiento: la partida acaba cuando un bando se queda sin soldados o al llegar a
+  `MAX_SHOTS` (empate por límite, `byLimit`). `stats.remaps` y `result.remaps` se quedan a 0 (la forma de la API no
+  cambia) y el ojo Reloj mantiene su tamaño: su entrada de renovaciones vale 0, y la de disparos seguidos sin bajas
+  (`shotsNoKill / STALL_SHOTS`), que ya no vuelve a 0 con un mapa nuevo, se queda como mucho en 1.
+
+### 10.5 Percepción (mismo tamaño de entrada; spec/03)
+- 🧱 Obstáculos: por hueco, un círculo da `(cx/25, cy/15, 2r/10, 2r/15, 1)` (su caja), igual que un rectángulo; el
+  orden sigue siendo por cercanía. 📡 Radar, 🗺 Mapa, destinos de movimiento y línea de visión usan `isSolid`, así ven
+  los bocados.
+- 🔮 Simulador: con un solo impacto dice exactamente lo mismo que antes (así Vidente y los tests de percepción siguen
+  valiendo): `kill` = alcanza a algún enemigo, `suicide` = alcanza a algún aliado, `obstacle`/`wall`/"otro" solo si no
+  alcanza a nadie (miran `end`), fin y puntos = hasta el **primer** impacto (dónde golpea primero), y la última entrada
+  = mata al enemigo más cercano. Ajuste nuevo del ojo, `counts` ("Contar bajas", sí/no, apagado por defecto, nivel
+  Artesano): añade 2 entradas, enemigos alcanzados / 4 y aliados alcanzados / 4 (máximo 1), para que la red sepa
+  a cuántos mata un tiro que atraviesa. `eyeDim` = 10 (+2 con `counts`).
+- Las redes guardadas siguen siendo válidas (mismas entradas), pero vieron otro terreno: conviene reentrenarlas.
+
+### 10.6 Tests
+`test/terreno.spec.mjs`, congelado antes del código: solidez de círculo y bocado (con y sin margen), un bocado abre un
+paso cerrado, mapas con semilla deterministas y dentro de los límites de §10.2, soldados fuera de los círculos, un tiro
+atraviesa a dos enemigos y a un aliado (tres muertes, el tirador vivo, eventos en orden), recompensa por cada baja, sin
+renovación tras muchos fallos, la moviola y "¿qué pasaría si…?" con círculos y bocados, y la percepción con el mismo
+tamaño.

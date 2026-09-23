@@ -124,6 +124,7 @@ try {
   results.push(await run('receta de entreno: lógica pura', [join(ROOT, 'test', 'receta.spec.mjs')]));
   results.push(await run('receta de entreno en el entrenador', [join(ROOT, 'test', 'receta-entreno.spec.mjs')]));
   results.push(await run('receta de entreno por la API y versiones', [join(ROOT, 'test', 'receta-api.spec.mjs')]));
+  results.push(await run('terreno de círculos que se rompe y tiro que atraviesa (P1)', [join(ROOT, 'test', 'terreno.spec.mjs')]));
 } finally {
   server.kill();
 }

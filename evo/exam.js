@@ -4,7 +4,16 @@ import { playGame } from '../server/headless.js';
 import { normalize, validate } from '../shared/genome.js';
 
 export const EXAM_SEEDS = { aim: 9001, cover: 9002, survival: 9003, adaptation: 9004 };
-const DUMMY = { chooseShot: () => ({ mode: 'function', expr: '1000', reason: '' }), chooseMove: () => 'stay' };
+// blanco inofensivo (spec/07 §13.1): su disparo explota en el primer punto y nunca alcanza a nadie.
+// (`y = 1000` no valía: en modo función la constante no cuenta y era la horizontal que pasa por él)
+const DUMMY = { chooseShot: () => ({ mode: 'function', expr: 'sqrt(-1)', reason: '' }), chooseMove: () => 'stay' };
+// adaptación = tasa media × (1 − (máx − mín)) sobre las tasas por tamaño: perder todo da 0 (spec/07 §13.1)
+export function adaptationScore(rates) {
+  const r = Object.values(rates);
+  if (!r.length) return 0;
+  const mean = r.reduce((s, v) => s + v, 0) / r.length;
+  return mean * (1 - (Math.max(...r) - Math.min(...r)));
+}
 
 const isGenome = (s) => s && typeof s === 'object' && Array.isArray(s.blocks);
 function seatSubject(room, subject, team) {
@@ -71,24 +80,26 @@ export async function runBulletin(subject, { onScene = null } = {}) {
     if (onScene) onScene('survival', i, 10);
     await yieldNow();
   }
-  // adaptación: 12 partidas vs Greedy L3 con 1..4 soldados (3 por tamaño)
+  // adaptación: 16 partidas vs Greedy L3, 4 por tamaño (1..4 soldados), dos a cada lado (spec/07 §13.1)
   const byN = { 1: [], 2: [], 3: [], 4: [] };
-  for (let i = 0; i < 12; i++) {
+  details.adaptationGames = [];
+  for (let i = 0; i < 16; i++) {
     const seed = EXAM_SEEDS.adaptation + i;
-    const n = 1 + (i % 4);
+    const n = 1 + Math.floor(i / 4);
     const me = subjectSpec(subj), rival = { type: 'greedy', level: 3, temperature: 0 };
     const left = i % 2 === 0 ? me : rival, right = i % 2 === 0 ? rival : me;
     const r = playGame({ seed, left, right, soldiers: n });
     const team = i % 2 === 0 ? 'left' : 'right';
-    byN[n].push(r.result && r.result.winner === team ? 1 : 0);
-    if (onScene) onScene('adaptation', i, 12);
+    const win = r.result && r.result.winner === team ? 1 : 0;
+    byN[n].push(win);
+    details.adaptationGames.push({ seed, soldiers: n, side: team, win });
+    if (onScene) onScene('adaptation', i, 16);
     await yieldNow();
   }
   for (const n of [1, 2, 3, 4]) details.adaptation[n] = byN[n].length ? byN[n].reduce((s, v) => s + v, 0) / byN[n].length : 0;
-  const rates = Object.values(details.adaptation);
   const aim = details.aim.filter((x) => x.kill).length / 40;
   const cover = details.cover.filter((x) => x.improved).length / 30;
   const survival = details.survival.reduce((s, x) => s + x.alive, 0) / details.survival.reduce((s, x) => s + x.total, 0);
-  const adaptation = 1 - (Math.max(...rates) - Math.min(...rates));
+  const adaptation = adaptationScore(details.adaptation);
   return { aim, cover, survival, adaptation, details, seeds: { ...EXAM_SEEDS } };
 }

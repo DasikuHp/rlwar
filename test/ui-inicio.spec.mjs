@@ -37,7 +37,7 @@ check('filas: etiquetas con su significado (reina, campeona de la casa, entrenan
 });
 
 check('filas: tasa de victorias solo si ha jugado; los números salen tal cual de la API', () => {
-  const [a, b] = H.netRows([net('a', { stats: { games: 8, wins: 6, kills: 10, deaths: 4, reigns: 1 }, updatedAt: 2 }), net('b')]);
+  const [a, b] = H.netRows([net('a', { stats: { games: 8, wins: 6, kills: 10, deaths: 4, reigns: 1 }, updatedAt: 2000 }), net('b')]);
   assert.equal(a.winRate, 0.75); assert.equal(a.games, 8); assert.equal(a.wins, 6); assert.equal(a.kills, 10); assert.equal(a.deaths, 4);
   assert.equal(b.winRate, null, 'sin partidas no hay tasa (no es 0 %)');
   assert.equal(a.paramCount, 100); assert.equal(a.generation, 0); assert.equal(a.name, 'A');

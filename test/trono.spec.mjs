@@ -167,8 +167,10 @@ await check('trono: sin reina sienta a la retadora; reto ganado → reign.end/st
   assert.equal(t.reigns[0].to, 2000); assert.equal(t.reigns[0].lost, 1); assert.deepEqual(t.reigns[1], { netId: c, from: 2000, to: null, defenses: 0, won: 0, lost: 0 });
   assert.equal(t.hallOfFame.length, 1);
   const h = t.hallOfFame[0];
-  assert.equal(h.netId, q); assert.equal(h.reignIdx, 0); assert.ok(existsSync(h.snapshot), `copia ${h.snapshot}`);
-  const snap = JSON.parse(readFileSync(h.snapshot, 'utf8'));
+  // la ruta de la copia es relativa a la carpeta de datos (B3, spec/06 §2; cambio autorizado 2026-09-23)
+  const snapFile = join(process.env.GW_EVO_DIR, h.snapshot);
+  assert.equal(h.netId, q); assert.equal(h.reignIdx, 0); assert.ok(existsSync(snapFile), `copia ${h.snapshot}`);
+  const snap = JSON.parse(readFileSync(snapFile, 'utf8'));
   assert.ok(validate(snap).ok && snap.id === q); assert.equal(h.sha, TH.structureSha(snap)); assert.ok(typeof h.reignGames === 'number');
   assert.ok(events.some((e) => e.type === 'reign.end' && e.netId === q) && events.filter((e) => e.type === 'reign.start').length === 2);
   assert.equal(t.challenges.length, 3); assert.equal(t.challenges[2].result, 'challenger');

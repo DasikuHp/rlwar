@@ -96,6 +96,7 @@ try {
   results.push(await run('parte 3: verdad y registro (M1, M3, M4, M5, M6, M8)', [join(ROOT, 'test', 'arreglos-verdad.spec.mjs'), BASE]));
   results.push(await run('parte 3: almacenamiento (M2, M9, M15, B3)', [join(ROOT, 'test', 'arreglos-almacen.spec.mjs'), BASE]));
   results.push(await run('parte 3: liga y validación (M11, M13, B1)', [join(ROOT, 'test', 'arreglos-liga.spec.mjs'), BASE]));
+  results.push(await run('parte 3: moviola de una partida antigua (sin copia de la red)', [join(ROOT, 'test', 'moviola-antigua.spec.mjs')]));
 } finally {
   server.kill();
 }

@@ -70,10 +70,12 @@ await check('entreno de 20 partidas: 1 partida de muestra guardada con trajector
   assert.ok(log.entries.every((e) => Number.isInteger(e.id)));
 });
 
-await check('moviola: GET /games/:id/turns/:n/brain recalcula la decisión del turno (approx:true); 404 si no hay decisión', async () => {
+// desde M2 la partida de muestra guarda la red tal como jugó: la moviola es exacta (approx:false); el caso approx:true
+// (partida antigua sin copia) lo comprueba test/moviola-antigua.spec.mjs (cambio autorizado 2026-09-23)
+await check('moviola: GET /games/:id/turns/:n/brain recalcula la decisión del turno (approx:false con la copia de la red, M2); 404 si no hay decisión', async () => {
   const r = await api(`/api/lab/games/${sampleGame}/turns/${decisionEv.turn}/brain?player=${playerId}`);
   assert.equal(r.status, 200, r.text);
-  assert.equal(r.body.approx, true);
+  assert.equal(r.body.approx, false);
   assert.equal(r.body.decision.eventId ?? r.body.decision.id, decisionEv.id);
   assert.ok(r.body.activations && Object.keys(r.body.activations).length >= 1 && 'attention' in r.body);
   assert.equal((await api(`/api/lab/games/${sampleGame}/turns/999/brain?player=${playerId}`)).status, 404);

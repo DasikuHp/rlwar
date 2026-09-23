@@ -177,7 +177,9 @@ if (BASE) {
     const d = await api('/api/lab/duels', 'POST', { a: id, b: rival, learning: 'mix', speed: 'turbo', soldiers: 2, seed: 9 });
     const rec = await until(async () => { const r = (await api(`/api/lab/duels/${d.body.id}`)).body; return r && r.status !== 'running' ? r : null; }, 180000, 'duelo');
     await brainsMatch(rec.games[rec.games.length - 1].gameId, id);
-    const tr = await api('/api/lab/trainings', 'POST', { netId: id, speed: 'turbo', duration: { games: 21 }, soldiers: 1, seed: 10 });
+    // contra sí misma: con la mezcla por defecto la rival puede salir de la sala de la fama que dejen otras suites en el
+    // mismo servidor, y matar a la red antes de que dispare (cambio autorizado 2026-09-23)
+    const tr = await api('/api/lab/trainings', 'POST', { netId: id, opponents: { antagonist: 0, hallOfFame: 0, self: 1 }, speed: 'turbo', duration: { games: 21 }, soldiers: 1, seed: 10 });
     const t = await until(async () => { const r = (await api(`/api/lab/trainings/${tr.body.id}`)).body; return r && !['queued', 'running', 'paused'].includes(r.status) ? r : null; }, 180000, 'entreno');
     const sample = (await api(`/api/lab/games?trainingId=${t.id}&limit=5`)).body.games[0];
     assert.ok(sample, 'premisa: el entreno guarda partidas de muestra');

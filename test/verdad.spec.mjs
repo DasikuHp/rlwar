@@ -216,12 +216,13 @@ await check('sala: tope de 5 000 eventos → error una vez y decisiones truncada
   room.addAgent('sniper', { level: 3, team: 'left' }); room.addAgent('sniper', { level: 3, team: 'right' });
   room.start();
   const n0 = room.events.length;
-  for (let i = n0; i < 5000; i++) room.emit('say', { playerId: null, soldierId: null, netId: null }, { text: 'relleno' });
+  // relleno con eventos que no son de voz: say y 'frase no verificable' no cuentan para el tope (R5, spec/07 §12.1; cambio autorizado 2026-09-23)
+  for (let i = n0; i < 5000; i++) room.emit('relleno', { playerId: null, soldierId: null, netId: null }, { text: 'relleno' });
   assert.equal(room.events.length, 5000);
-  const id = room.emit('say', { playerId: null, soldierId: null, netId: null }, { text: 'uno más' });
+  const id = room.emit('relleno', { playerId: null, soldierId: null, netId: null }, { text: 'uno más' });
   assert.ok(room.events.some((e) => e.type === 'error' && /tope/.test(e.data.message)), 'error de tope');
   const errors = room.events.filter((e) => e.type === 'error').length;
-  room.emit('say', { playerId: null, soldierId: null, netId: null }, { text: 'y otro' });
+  room.emit('relleno', { playerId: null, soldierId: null, netId: null }, { text: 'y otro' });
   assert.equal(room.events.filter((e) => e.type === 'error').length, errors, 'el error se emite una sola vez');
   const s = room.soldiers[0];
   room.pushDecision({ phase: 'shoot', soldierId: s.id, chosen: 1, candidates: [{ i: 0 }, { i: 1 }], margin: 0.2 });

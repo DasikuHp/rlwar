@@ -1,6 +1,7 @@
 // Cliente web: red (REST + SSE), UI y conexión con el render.
 import { initRender, startShot, R } from './render.js';
 import { overlay, topCandidates, attributionRows, attributionPhrase, confidenceView } from './live.js';
+import { hub } from './ui/sse.js';
 
 const $ = (id) => document.getElementById(id);
 let session = null;                                  // {code, playerId, name, team}
@@ -26,28 +27,29 @@ function toast(text, ms = 2500) {
 
 const escapeHtml = (s) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
+// una sola conexión por sala para toda la página (spec/08 §11)
 function connect(roomCode) {
-  if (evtSource) evtSource.close();
-  evtSource = new EventSource(`/api/rooms/${roomCode}/events`);
-  evtSource.addEventListener('hello', (e) => onState(JSON.parse(e.data)));
-  evtSource.addEventListener('state', (e) => onState(JSON.parse(e.data)));
-  evtSource.addEventListener('shot', (e) => startShot(JSON.parse(e.data).shot));
-  evtSource.addEventListener('decision', (e) => onDecision(JSON.parse(e.data).decision));
-  evtSource.addEventListener('move', () => { if (R.think && R.think.kind === 'move') R.think = null; });
-  evtSource.addEventListener('chat', (e) => {
-    const d = JSON.parse(e.data);
-    if (R.state) R.state.chat = d.chat;
-    renderChat(d.chat);
-    setBubbles(d.chat);
-  });
-  evtSource.addEventListener('gameover', (e) => {
-    const { winner, result } = JSON.parse(e.data);
-    const txt = winner
-      ? `🏆 ¡Victoria del equipo ${winner === 'left' ? 'IZQUIERDO' : 'DERECHO'}!`
-      : '🤝 Empate técnico';
-    const extra = result && result.byLimit ? ` (límite de disparos: ${result.shots})` : '';
-    toast(txt + extra, 6000);
-  });
+  if (evtSource) evtSource.forEach((off) => off());
+  const url = `/api/rooms/${roomCode}/events`;
+  evtSource = [
+    hub.on(url, 'hello', onState),
+    hub.on(url, 'state', onState),
+    hub.on(url, 'shot', (d) => startShot(d.shot)),
+    hub.on(url, 'decision', (d) => onDecision(d.decision)),
+    hub.on(url, 'move', () => { if (R.think && R.think.kind === 'move') R.think = null; }),
+    hub.on(url, 'chat', (d) => {
+      if (R.state) R.state.chat = d.chat;
+      renderChat(d.chat);
+      setBubbles(d.chat);
+    }),
+    hub.on(url, 'gameover', ({ winner, result }) => {
+      const txt = winner
+        ? `🏆 ¡Victoria del equipo ${winner === 'left' ? 'IZQUIERDO' : 'DERECHO'}!`
+        : '🤝 Empate técnico';
+      const extra = result && result.byLimit ? ` (límite de disparos: ${result.shots})` : '';
+      toast(txt + extra, 6000);
+    }),
+  ];
 }
 
 function onState(st) {

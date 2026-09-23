@@ -4,6 +4,8 @@
 import * as H from './home.js';
 import { emblemSVG } from './emblem.js';
 import { api } from './api.js';
+import { hub } from '../ui/sse.js';
+const LAB_EVENTS = '/api/lab/events'; // una conexión para todas las vistas (spec/08 §11)
 import { tutorialSteps } from './whatif.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -93,20 +95,20 @@ export function mountHome(root) {
     async start() {
       render();
       await load();
-      if (es || typeof EventSource === 'undefined') return;
-      es = new EventSource('/api/lab/events');
-      es.addEventListener('hello', (ev) => { const d = JSON.parse(ev.data); S.live = { trainings: d.trainings || [], jobs: d.jobs || [], duels: d.duels || [] }; render(); });
-      es.addEventListener('training', (ev) => { upsert(S.live.trainings, JSON.parse(ev.data)); refresh(); });
-      es.addEventListener('job', (ev) => { upsert(S.live.jobs, JSON.parse(ev.data)); refresh(); });
-      es.addEventListener('duel', async (ev) => {
-        const d = JSON.parse(ev.data);
-        const rec = d.result || (d.id ? (await api(`/api/lab/duels/${encodeURIComponent(d.id)}`)).body : null); // cada partida: el registro entero
-        if (rec && rec.id) upsert(S.live.duels, rec);
-        refresh();
-      });
-      for (const k of ['throne', 'dynasty', 'exam', 'milestone']) es.addEventListener(k, refresh);
+      if (es) return;
+      es = [
+        hub.on(LAB_EVENTS, 'hello', (d) => { S.live = { trainings: d.trainings || [], jobs: d.jobs || [], duels: d.duels || [] }; render(); }),
+        hub.on(LAB_EVENTS, 'training', (d) => { upsert(S.live.trainings, d); refresh(); }),
+        hub.on(LAB_EVENTS, 'job', (d) => { upsert(S.live.jobs, d); refresh(); }),
+        hub.on(LAB_EVENTS, 'duel', async (d) => {
+          const rec = d.result || (d.id ? (await api(`/api/lab/duels/${encodeURIComponent(d.id)}`)).body : null); // cada partida: el registro entero
+          if (rec && rec.id) upsert(S.live.duels, rec);
+          refresh();
+        }),
+        ...['throne', 'dynasty', 'exam', 'milestone'].map((k) => hub.on(LAB_EVENTS, k, refresh)),
+      ];
     },
-    stop() { if (es) { es.close(); es = null; } clearTimeout(timer); },
+    stop() { if (es) { es.forEach((off) => off()); es = null; } clearTimeout(timer); },
     reload: load,
   };
 }

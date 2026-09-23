@@ -5,6 +5,8 @@ import * as E from './evolution.js';
 import * as M from './model.js';
 import { emblemSVG } from './emblem.js';
 import { api, reasonOf } from './api.js';
+import { hub } from '../ui/sse.js';
+const LAB_EVENTS = '/api/lab/events'; // una conexión para todas las vistas (spec/08 §11)
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const pct = (v) => (Number.isFinite(v) ? `${(Math.round(v * 1000) / 10).toLocaleString('es-ES')} %` : '—');
@@ -175,18 +177,15 @@ export function mountEvolution(root, { catalog, toast }) {
   return {
     async start() {
       await loadAll();
-      if (es || typeof EventSource === 'undefined') return;
-      es = new EventSource('/api/lab/events');
-      es.addEventListener('job', (ev) => {
-        const j = JSON.parse(ev.data);
+      if (es) return;
+      es = [hub.on(LAB_EVENTS, 'job', (j) => {
         if (j.kind !== 'children') return;
         const i = S.jobs.findIndex((x) => x.id === j.id);
         if (i >= 0) S.jobs[i] = { ...S.jobs[i], ...j }; else S.jobs.unshift(j);
         if (j.id === S.sel) S.job = S.jobs.find((x) => x.id === S.sel);
         if (j.status !== 'running') refresh(); else renderRight();
-      });
-      es.addEventListener('children', refresh);
+      }), hub.on(LAB_EVENTS, 'children', refresh)];
     },
-    stop() { if (es) { es.close(); es = null; } clearTimeout(timer); },
+    stop() { if (es) { es.forEach((off) => off()); es = null; } clearTimeout(timer); },
   };
 }

@@ -479,7 +479,7 @@ export function createTrainer(opts = {}) {
     learn: opts.learn || {},
   };
   const tr = {
-    id: `t${trainerSeq++}`, netId: cfg.netId, config: cfg, status: 'queued', games: 0, updates: 0, steps: 0, curve: [], rooms: [], sampleGames: [], startedAt: null, lastLesson: null, error: null,
+    id: `t${trainerSeq++}`, netId: cfg.netId, config: cfg, status: 'queued', games: 0, updates: 0, steps: 0, curve: [], rooms: [], sampleGames: [], startedAt: null, endedAt: null, lastLesson: null, error: null,
     _stop: false, _paused: false, on,
     stop() { this._stop = true; this._paused = false; if (['queued', 'running', 'paused'].includes(this.status)) { this.status = 'stopped'; emit('training', this.info()); } },
     pause() { if (this.status === 'running') { this._paused = true; this.status = 'paused'; emit('training', this.info()); } },
@@ -489,7 +489,7 @@ export function createTrainer(opts = {}) {
   };
   async function run(t) {
     t.startedAt = Date.now();
-    const fail = (message) => { t.status = 'error'; t.error = message; emit('error', { id: t.id, message }); emit('training', t.info()); emit('done', { id: t.id, reason: 'error', message }); };
+    const fail = (message) => { t.status = 'error'; t.error = message; t.endedAt = Date.now(); emit('error', { id: t.id, message }); emit('training', t.info()); emit('done', { id: t.id, reason: 'error', message }); };
     const g = cfg.genome ? normalize(cfg.genome) : loadNet(cfg.netId);
     if (!g) return fail(`red no encontrada: ${cfg.netId}`);
     if (!validate(g, { forPlay: true }).ok) return fail('la red no puede jugar (falta Elegir)');
@@ -703,6 +703,7 @@ export function createTrainer(opts = {}) {
       return fail(e.message);
     }
     if (pool) pool.close();
+    t.endedAt = Date.now(); // la duración deja de contar (spec/04 §9.8)
     t.status = reason === 'stopped' ? 'stopped' : 'done';
     emit('training', t.info());
     emit('done', { id: t.id, reason });

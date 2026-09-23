@@ -15,3 +15,9 @@ experimentos/
 evo/nets/
 evo/games/
 evo/log.jsonl
+evo/log.*.jsonl
+evo/snapshots/
+evo/records/
+evo/throne.json
+evo/worlds/
+evo/archivo-*/

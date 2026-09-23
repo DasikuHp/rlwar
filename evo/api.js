@@ -48,8 +48,8 @@ function startChildrenJob({ genome, n, mutation, games, opponent, soldiers, seed
       }
       const res = await runPretournamentAsync({ children, opponent, games, seed, soldiers, onGame: (done, total) => { job.progress = { done, total }; pushEvent('job', jobView(job)); } });
       job.status = 'done';
-      endJob(job);
       job.result = { parentId: genome.id, opponentId: opponent.id, soldiers: res.soldiers, seed, ranking: res.ranking };
+      endJob(job); // con su resultado (spec/08 §10.7)
       pushEvent('job', jobView(job));
       pushEvent('children', { jobId: job.id, parentId: genome.id, ranking: res.ranking });
     } catch (e) {
@@ -79,7 +79,7 @@ function busyText(netId, what, who = null) {
 }
 function trainingView(t, full = false) {
   const v = { id: t.id, netId: t.netId, status: t.status, games: t.games, updates: t.updates, steps: t.steps || 0, startedAt: t.startedAt, error: t.error };
-  if (full) Object.assign(v, { elapsedMs: t.startedAt ? Date.now() - t.startedAt : 0, curve: t.curve.slice(-500), sampleGames: t.sampleGames || [], rooms: t.rooms, lastLesson: t.lastLesson, config: { ...t.config, genome: undefined } });
+  if (full) Object.assign(v, { elapsedMs: t.startedAt ? (t.endedAt || Date.now()) - t.startedAt : 0, curve: t.curve.slice(-500), sampleGames: t.sampleGames || [], rooms: t.rooms, lastLesson: t.lastLesson, config: { ...t.config, genome: undefined } });
   return v;
 }
 // al terminar (bien, parado o con error) el entreno queda en disco con su vista completa (M9)
@@ -288,16 +288,18 @@ const json = (res, code, obj, headers = {}) => {
   res.end(JSON.stringify(obj));
 };
 // pasado el tope deja de guardar y lee hasta el final sin guardar, para poder responder 413 (M10); más de 4× el tope, corta
+// el tope es de bytes y el texto se decodifica entero al final: una letra partida entre dos trozos llega intacta (§10.6)
 const readText = (req, limit) => new Promise((resolve) => {
-  let d = '', bytes = 0, over = false;
+  const parts = []; let bytes = 0, over = false;
+  const done = () => resolve({ text: over ? '' : Buffer.concat(parts).toString('utf8'), over });
   req.on('data', (c) => {
     bytes += c.length;
     if (over) { if (bytes > 4 * limit) req.destroy(); return; }
-    d += c;
-    if (d.length > limit) { over = true; d = ''; }
+    if (bytes > limit) { over = true; parts.length = 0; return; }
+    parts.push(c);
   });
-  req.on('end', () => resolve({ text: d, over }));
-  req.on('close', () => resolve({ text: d, over }));
+  req.on('end', done);
+  req.on('close', done);
 });
 const ID_RE = /^[a-z0-9-]{3,32}$/;
 // soldados de un entreno: "random" o de 1 a 4 (B2); sin valor, "random"

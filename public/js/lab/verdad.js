@@ -6,6 +6,8 @@ import * as V from './truthview.js';
 import * as L from '../live.js';
 import { emblemSVG } from './emblem.js';
 import { api, reasonOf } from './api.js';
+import { hub } from '../ui/sse.js';
+const LAB_EVENTS = '/api/lab/events'; // una conexión para todas las vistas (spec/08 §11)
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const f2 = (v) => (typeof v === 'number' && Number.isFinite(v) ? (Math.round(v * 100) / 100).toFixed(2) : '—');
@@ -235,16 +237,14 @@ export function mountTruth(root, { catalog, toast }) {
   return {
     async start() {
       await refreshAll();
-      if (es || typeof EventSource === 'undefined') return;
-      es = new EventSource('/api/lab/events');
-      es.addEventListener('job', async (ev) => {
-        const j = JSON.parse(ev.data);
+      if (es) return;
+      es = [hub.on(LAB_EVENTS, 'job', async (j) => {
         if (j.kind !== 'exam' || !S.examJob || j.id !== S.examJob.id) return;
         S.examJob = j;
         if (j.status === 'done' && S.tab === 'boletin') await loadTab();
         if (S.tab === 'boletin') render();
-      });
+      })];
     },
-    stop() { if (es) { es.close(); es = null; } },
+    stop() { if (es) { es.forEach((off) => off()); es = null; } },
   };
 }

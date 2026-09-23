@@ -4,6 +4,8 @@
 import * as Y from './dynasty.js';
 import { emblemSVG } from './emblem.js';
 import { api, reasonOf } from './api.js';
+import { hub } from '../ui/sse.js';
+const LAB_EVENTS = '/api/lab/events'; // una conexión para todas las vistas (spec/08 §11)
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const STATUS = { running: 'en marcha', done: 'terminada', error: 'con error' };
@@ -122,11 +124,9 @@ export function mountDynasties(root, { toast }) {
   return {
     async start() {
       await loadAll();
-      if (es || typeof EventSource === 'undefined') return;
-      es = new EventSource('/api/lab/events');
-      es.addEventListener('job', (ev) => { const j = JSON.parse(ev.data); if (j.kind === 'generation') refresh(); });
-      for (const k of ['dynasty', 'throne']) es.addEventListener(k, refresh);
+      if (es) return;
+      es = [hub.on(LAB_EVENTS, 'job', (j) => { if (j.kind === 'generation') refresh(); }), ...['dynasty', 'throne'].map((k) => hub.on(LAB_EVENTS, k, refresh))];
     },
-    stop() { if (es) { es.close(); es = null; } clearTimeout(timer); },
+    stop() { if (es) { es.forEach((off) => off()); es = null; } clearTimeout(timer); },
   };
 }

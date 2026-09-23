@@ -4,6 +4,8 @@
 import * as T from './training.js';
 import * as M from './model.js';
 import { api, reasonOf } from './api.js';
+import { hub } from '../ui/sse.js';
+const LAB_EVENTS = '/api/lab/events'; // una conexión para todas las vistas (spec/08 §11)
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const f2 = (v) => (Number.isFinite(v) ? (Math.round(v * 100) / 100).toFixed(2) : '—');
@@ -220,17 +222,14 @@ export function mountTraining(root, { toast }) {
   return {
     async start() {
       await loadAll();
-      if (es || typeof EventSource === 'undefined') return;
-      es = new EventSource('/api/lab/events');
-      es.addEventListener('curve', (ev) => {
-        const d = JSON.parse(ev.data);
+      if (es) return;
+      es = [hub.on(LAB_EVENTS, 'curve', (d) => {
         if (!S.detail || d.trainingId !== S.detail.id) return;
         S.detail.curve = [...(S.detail.curve || []), d.point].slice(-500);
         S.detail.games = Math.max(S.detail.games || 0, d.point.game);
         renderDetail();
-      });
-      for (const k of ['training', 'sleep', 'lesson', 'milestone']) es.addEventListener(k, refresh);
+      }), ...['training', 'sleep', 'lesson', 'milestone'].map((k) => hub.on(LAB_EVENTS, k, refresh))];
     },
-    stop() { if (es) { es.close(); es = null; } clearTimeout(timer); },
+    stop() { if (es) { es.forEach((off) => off()); es = null; } clearTimeout(timer); },
   };
 }

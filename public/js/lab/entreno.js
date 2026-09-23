@@ -28,7 +28,7 @@ const FIELDS = {
 };
 
 export function mountTraining(root, { toast }) {
-  const S = { nets: [], trainings: [], sel: null, detail: null, form: null, table: false, hover: null };
+  const S = { nets: [], trainings: [], sel: null, detail: null, form: null, table: false, hover: null, learning: null };
   let es = null, timer = null;
   const level = () => { try { return JSON.parse(localStorage.getItem(LS)) || 'aprendiz'; } catch { return 'aprendiz'; } };
   const nameOf = (id) => { const n = S.nets.find((x) => x.id === id); return n ? n.name : id; };
@@ -47,6 +47,8 @@ export function mountTraining(root, { toast }) {
     S.detail = r.ok ? r.body : null;
   }
   const refresh = () => { clearTimeout(timer); timer = setTimeout(loadAll, 400); };
+  // aprendizaje de la red elegida: para decir cuántos hilos se usan de verdad (M12)
+  async function loadLearning(id) { S.learning = null; if (!id) return; const r = await api(`/api/lab/nets/${encodeURIComponent(id)}`); if (S.form.netId === id) S.learning = r.ok ? r.body.genome.learning : null; }
 
   // ---------- formulario ----------
   const show = (k) => M.atLevel(FIELDS[k].level, level());
@@ -69,6 +71,7 @@ export function mountTraining(root, { toast }) {
       <fieldset><legend>Velocidad</legend>
         <div class="seg" role="radiogroup" aria-label="Velocidad">${[['turbo', 'turbo', 'sin pantalla, en hilos; guarda 1 partida de cada 20'], ['x10', 'x10', 'sala visible a 10 veces la velocidad'], ['x1', 'x1', 'sala normal, con bocadillos']].map(([v, t, e]) => `<label><input type="radio" name="tr-speed" value="${v}" data-f="speed" ${f.speed === v ? 'checked' : ''}><b>${t}</b><small>${e}</small></label>`).join('')}</div>
         ${f.speed === 'turbo' && show('workers') ? `<div class="ctl"><label for="tr-w">${FIELDS.workers.name}</label><div class="ctl-in"><input id="tr-w" class="numin mono" type="number" min="1" max="32" step="1" value="${f.workers}" data-f="workers"></div><p class="explain">${esc(FIELDS.workers.explain)}</p></div>` : ''}
+        ${(() => { const n = T.threadNote(S.learning, f.workers, f.speed); return n ? `<p class="hint warn-text" role="note">${esc(n.text)}</p>` : ''; })()}
       </fieldset>
       <fieldset><legend>Cuánto</legend>
         <div class="seg" role="radiogroup" aria-label="Duración">${[['games', 'partidas'], ['minutes', 'minutos'], ['plateau', 'hasta que deje de mejorar']].map(([v, t]) => `<label><input type="radio" name="tr-dur" value="${v}" data-f="durationKind" ${f.durationKind === v ? 'checked' : ''}><b>${t}</b></label>`).join('')}</div>
@@ -157,7 +160,8 @@ export function mountTraining(root, { toast }) {
     if (el.dataset.mix) { S.form.mix[el.dataset.mix] = Number(el.value); render(); return; }
     if (!el.dataset.f) return;
     S.form[el.dataset.f] = el.type === 'checkbox' ? el.checked : el.value;
-    if (['speed', 'durationKind', 'netId'].includes(el.dataset.f)) render();
+    if (el.dataset.f === 'netId') { loadLearning(el.value).then(render); return; }
+    if (['speed', 'durationKind', 'workers'].includes(el.dataset.f)) render();
   });
   root.addEventListener('submit', async (ev) => {
     if (ev.target.id !== 'trForm') return;

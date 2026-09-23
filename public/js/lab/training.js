@@ -48,6 +48,20 @@ export function trainingBody(f) {
   return { body, errors };
 }
 
+// cuántos hilos se usan de verdad (M12, spec/04 §9.7): con gradiente (o "ambos") las partidas de un lote se juegan con
+// los mismos pesos, así que corren a la vez como mucho `batchGames`; con evolución, todos. null si no hay nada que avisar
+export function threadNote(learning, workers, speed) {
+  if (speed !== 'turbo') return null;
+  const l = learning || {};
+  const method = l.method || 'gradient';
+  if (method === 'evolution') return null;
+  const batch = Math.max(1, Number(l.gradient && l.gradient.batchGames) || 4);
+  const asked = Number(workers);
+  if (!(asked > batch)) return null;
+  const lead = method === 'both' ? `En la parte de gradiente se usan como mucho ${batch} de los ${asked} hilos (en la de evolución, todos)` : `Con aprendizaje por gradiente se usan como mucho ${batch} de los ${asked} hilos`;
+  return { used: batch, asked, text: `${lead}: las ${batch} partidas de cada lote se juegan con los mismos pesos antes de soñar. Para usar más, sube "Partidas por lote" en el editor (Aprendizaje, nivel Científico; sueña menos veces) o entrena por evolución.` };
+}
+
 // media de los últimos n valores (al principio, de los que haya)
 export function movingAverage(values, n) {
   const out = [];

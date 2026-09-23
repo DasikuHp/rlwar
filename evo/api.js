@@ -3,7 +3,8 @@
 import { BLOCKS, LIMITS, validate, normalize, countParams, DEFAULT_TRAITS, TRAIT_RANGES, DEFAULT_REWARD, REWARD_TERMS, DEFAULT_LEARNING, LEARNING_RANGES, DEFAULT_IMAGINATION, CHARACTERS } from '../shared/genome.js';
 import { eyeLayout } from '../shared/percept.js';
 import { TEMPLATES } from '../shared/templates.js';
-import { listNets, loadNet, saveNet, deleteNet, entryOf, saveRecord, loadRecord, listRecords, nextRecordSeq, loadSnapshot } from './store.js';
+import { listNets, loadNet, saveNet, deleteNet, entryOf, saveRecord, loadRecord, listRecords, nextRecordSeq, loadSnapshot, saveVersion, loadVersion, listVersions } from './store.js';
+import { validateRecipe } from './recipe.js';
 import { createTrainer, makeLearner, feedbackTarget, feedbackFromGame, settleFeedback } from './train.js';
 import { heldBy, holdNet, releaseNet } from './busy.js';
 import { runDuel, newDuelId, LEARNING_MODES, SPEEDS } from './duel.js';
@@ -80,7 +81,9 @@ function busyText(netId, what, who = null) {
 }
 function trainingView(t, full = false) {
   const v = { id: t.id, netId: t.netId, status: t.status, games: t.games, updates: t.updates, steps: t.steps || 0, startedAt: t.startedAt, error: t.error };
-  if (full) Object.assign(v, { elapsedMs: t.startedAt ? (t.endedAt || Date.now()) - t.startedAt : 0, curve: t.curve.slice(-500), sampleGames: t.sampleGames || [], rooms: t.rooms, lastLesson: t.lastLesson, config: { ...t.config, genome: undefined } });
+  if (full) Object.assign(v, { elapsedMs: t.startedAt ? (t.endedAt || Date.now()) - t.startedAt : 0, curve: t.curve.slice(-500), sampleGames: t.sampleGames || [], rooms: t.rooms, lastLesson: t.lastLesson, config: { ...t.config, genome: undefined },
+    // receta (spec/04 §11.9)
+    recipe: t.recipe || {}, phase: t.phase || null, lesson: t.lesson || null, applied: t.applied || null, exam: t.exam || null, versionBefore: t.versionBefore ?? null, keptBest: t.keptBest || null, curriculum: t.curriculum || null });
   return v;
 }
 // al terminar (bien, parado o con error) el entreno queda en disco con su vista completa (M9)
@@ -277,6 +280,8 @@ function startTraining(body) {
   t.on('sleep', (d) => pushEvent('sleep', { trainingId: t.id, netId: t.netId, games: d.games, update: d.update }));
   t.on('lesson', (d) => pushEvent('lesson', { trainingId: t.id, netId: t.netId, lesson: d.lesson }));
   t.on('milestone', (d) => pushEvent('milestone', { trainingId: t.id, ...d }));
+  t.on('curriculum', (d) => pushEvent('curriculum', { ...d, trainingId: t.id }));
+  t.on('exam', (d) => pushEvent('exam', { ...d, trainingId: t.id }));
   t.on('error', (d) => pushEvent('error', { trainingId: t.id, message: d.message }));
   keepTraining(t);
   trainings.set(t.id, t);
@@ -545,6 +550,11 @@ export async function labApi(req, res, parts, url) {
       if (!t.dynasties.A || !t.dynasties.B) return bad(400, 'Primero funda las dos casas (POST /api/lab/dynasties)');
       if (b.value && b.value.training && !soldiersOk(b.value.training.soldiers)) return bad(400, SOLDIERS_ERROR);
       for (const h of ['A', 'B']) if (!t.dynasties[h].champion) return bad(400, `La casa ${t.dynasties[h].name} no tiene campeona: vuelve a fundarla con POST /api/lab/dynasties?house=${h}`);
+      if (b.value && b.value.training) for (const h of ['A', 'B']) {
+        const champ = loadNet(t.dynasties[h].champion);
+        const rv = champ ? validateRecipe({ duration: { games: 20 }, ...b.value.training }, champ) : { ok: true };
+        if (!rv.ok) return json(res, 400, { error: `Entreno cruzado de ${t.dynasties[h].name}: ${rv.errors[0].message}`, errors: rv.errors });
+      }
       if (activeTraining(t.dynasties.A.champion) || activeTraining(t.dynasties.B.champion)) return bad(409, 'Una campeona está entrenando');
       { const hb = heldText(t.dynasties.A.champion, 'para criar una generación') || heldText(t.dynasties.B.champion, 'para criar una generación'); if (hb) return bad(409, hb); }
       const job = startGenerationJob(b.value || {});
@@ -591,6 +601,7 @@ export async function labApi(req, res, parts, url) {
       if (activeTraining(v.netId)) return bad(409, `La red ${v.netId} ya está entrenando`);
       { const hb = heldText(v.netId, 'para entrenarla'); if (hb) return bad(409, hb); }
       if (v.exploiter) { const th = readThroneFull(); if (!th.queen) return bad(400, 'No hay reina: la retadora explotadora necesita una reina a la que explotar'); if (th.queen === v.netId) return bad(400, 'La reina no puede explotarse a sí misma'); }
+      { const rv = validateRecipe({ ...v, duration: d }, loadNet(v.netId)); if (!rv.ok) return json(res, 400, { error: rv.errors[0].message, errors: rv.errors }); }
       const t = startTraining({ ...v, duration: d });
       return json(res, 202, { id: t.id, status: t.status });
     }
@@ -701,6 +712,27 @@ export async function labApi(req, res, parts, url) {
       { const hb = heldText(id, 'para pedir hijos', genome.name); if (hb) return bad(409, hb); }
       const job = startChildrenJob({ genome, n, mutation: mutationConfig(v.mutation), games, opponent, soldiers, seed });
       return json(res, 202, { jobId: job.id, status: job.status });
+    }
+    // versiones (spec/04 §11.7)
+    if (seg[2] === 'versions') {
+      if (seg.length === 3 && method === 'GET') return json(res, 200, { versions: listVersions(id) });
+      const ver = seg.length >= 4 && /^\d+$/.test(seg[3]) ? loadVersion(id, Number(seg[3])) : null;
+      if (!ver) return bad(404, `La red ${genome.name} no tiene la versión ${seg[3]}`);
+      if (seg.length === 4 && method === 'GET') return json(res, 200, ver);
+      if (seg.length === 5 && seg[4] === 'diff' && method === 'GET') { try { return json(res, 200, diffGenomes(genome, normalize(ver.genome))); } catch (e) { return bad(400, e.message); } }
+      if (seg.length === 5 && seg[4] === 'restore' && method === 'POST') {
+        const tr = activeTraining(id);
+        if (tr) return bad(409, `${genome.name} está entrenando (${tr.id}): para el entreno antes de volver a una versión.`);
+        { const hb = heldText(id, 'para volver a una versión', genome.name); if (hb) return bad(409, hb); }
+        const saved = saveVersion(genome, { reason: `antes de volver a la versión ${ver.n}` });
+        const old = normalize(ver.genome);
+        // vuelve su cuerpo; lo vivido (id, nombre, estadísticas, memoria, linaje) se queda
+        const next = { ...genome, blocks: old.blocks, wires: old.wires, weights: old.weights, learning: old.learning, reward: old.reward, traits: old.traits, frozen: old.frozen, imagination: old.imagination, names: old.names };
+        const r = saveNet(next);
+        if (!r.ok) return json(res, 400, { error: 'La versión no es válida hoy', errors: r.errors });
+        return json(res, 200, { ok: true, restored: ver.n, savedAs: saved });
+      }
+      return bad(404, 'Ruta desconocida');
     }
     if (seg.length === 4 && seg[2] === 'diff' && method === 'GET') {
       const other = ID_RE.test(seg[3]) ? loadNet(seg[3]) : null;

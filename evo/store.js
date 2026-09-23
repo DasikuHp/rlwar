@@ -199,6 +199,36 @@ function gcSnapshots() {
     if (f.endsWith('.json.gz') && !used.has(f.slice(0, -8))) { try { unlinkSync(join(snapshotsDir(), f)); } catch { /* ignorar */ } }
   }
 }
+// versiones de una red (spec/04 §11.7): evo/nets/<id>/versions/<n>.json = {n, ts, reason, trainingId, genome}; las 50 últimas
+const VERSIONS_KEEP = 50;
+const versionsDir = (netId) => join(netsDir(), netId, 'versions');
+const versionFiles = (netId) => {
+  const dir = versionsDir(netId);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir).map((f) => /^(\d+)\.json$/.exec(f)).filter(Boolean).map((m) => Number(m[1])).sort((a, b) => a - b);
+};
+export function saveVersion(genome, { reason = '', trainingId = null } = {}) {
+  if (!genome || !ID_RE.test(String(genome.id))) return null;
+  const dir = versionsDir(genome.id);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const ns = versionFiles(genome.id);
+  const n = (ns.length ? ns[ns.length - 1] : 0) + 1;
+  const file = join(dir, `${n}.json`), tmp = file + '.tmp';
+  writeFileSync(tmp, JSON.stringify({ n, ts: Date.now(), reason, trainingId, genome }, plain)); renameSync(tmp, file);
+  for (const old of ns.slice(0, Math.max(0, ns.length + 1 - VERSIONS_KEEP))) { try { unlinkSync(join(dir, `${old}.json`)); } catch { /* ya no está */ } }
+  return n;
+}
+export function loadVersion(netId, n) {
+  if (!ID_RE.test(String(netId)) || !Number.isInteger(Number(n))) return null;
+  const file = join(versionsDir(netId), `${Number(n)}.json`);
+  try { return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null; } catch { return null; }
+}
+export function listVersions(netId) {
+  if (!ID_RE.test(String(netId))) return [];
+  return versionFiles(netId).reverse().map((n) => loadVersion(netId, n)).filter(Boolean)
+    .map((v) => ({ n: v.n, ts: v.ts, reason: v.reason, trainingId: v.trainingId ?? null, paramCount: (() => { try { return countParams(normalize(v.genome)); } catch { return null; } })() }));
+}
+
 // registros de duelos, entrenos y trabajos terminados (M9): records/<tipo>/<id>.json
 const recordsDir = (kind) => { const d = join(evoDir(), 'records', kind); if (!existsSync(d)) mkdirSync(d, { recursive: true }); return d; };
 export function saveRecord(kind, rec) {

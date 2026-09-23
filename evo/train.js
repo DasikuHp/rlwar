@@ -9,10 +9,12 @@ import { compile } from '../shared/nn.js';
 import { normalize, validate, BLOCKS } from '../shared/genome.js';
 import { softmaxT } from '../shared/policy.js';
 import { assignRewards, returns } from '../shared/reward.js';
-import { loadNet, saveNet, netsDir, evoDir, saveGameKept, loadGame, appendLog, readFeedback, writeFeedback, appendApplied, appendCurve, nextRecordSeq } from './store.js';
+import { loadNet, saveNet, netsDir, evoDir, saveGameKept, loadGame, appendLog, readFeedback, writeFeedback, appendApplied, appendCurve, nextRecordSeq, saveVersion } from './store.js';
 import { emotionOf, memoryOf, updateMemory, addEpisode, rewardEvents, emotionEvents } from './truth.js';
 import { readThroneFull, pickOpponent } from './league.js';
 import { adaptImagination } from './mutate.js';
+import { validateRecipe, scheduleValue, progressOf, mergeReward, rewardChanges, createCurriculum, createBestTracker } from './recipe.js';
+import { runBulletin } from './exam.js';
 import { playGame } from '../server/headless.js';
 import { heldBy } from './busy.js';
 import { createRoom } from '../server/rooms.js';
@@ -476,10 +478,11 @@ export function createTrainer(opts = {}) {
     exploiter: !!opts.exploiter,
     speed: opts.speed || 'turbo', workers: Math.max(1, Math.min(32, opts.workers || 1)),
     duration: opts.duration || { games: 100 }, soldiers: opts.soldiers ?? 'random', seed: Number.isInteger(opts.seed) ? opts.seed : Math.floor(Math.random() * 2 ** 30),
-    learn: opts.learn || {},
+    recipe: { learning: opts.learning, schedule: opts.schedule, reward: opts.reward, frozen: opts.frozen, curriculum: opts.curriculum, exam: opts.exam, keepBest: opts.keepBest },
   };
   const tr = {
     id: `t${trainerSeq++}`, netId: cfg.netId, config: cfg, status: 'queued', games: 0, updates: 0, steps: 0, curve: [], rooms: [], sampleGames: [], startedAt: null, endedAt: null, lastLesson: null, error: null,
+    phase: 'queued', recipe: {}, lesson: null, applied: null, exam: null, versionBefore: null, keptBest: null, curriculum: null,
     _stop: false, _paused: false, on,
     stop() { this._stop = true; this._paused = false; if (['queued', 'running', 'paused'].includes(this.status)) { this.status = 'stopped'; emit('training', this.info()); } },
     pause() { if (this.status === 'running') { this._paused = true; this.status = 'paused'; emit('training', this.info()); } },
@@ -489,15 +492,20 @@ export function createTrainer(opts = {}) {
   };
   async function run(t) {
     t.startedAt = Date.now();
-    const fail = (message) => { t.status = 'error'; t.error = message; t.endedAt = Date.now(); emit('error', { id: t.id, message }); emit('training', t.info()); emit('done', { id: t.id, reason: 'error', message }); };
+    const fail = (message) => { t.status = 'error'; t.phase = 'error'; t.error = message; t.endedAt = Date.now(); emit('error', { id: t.id, message }); emit('training', t.info()); emit('done', { id: t.id, reason: 'error', message }); };
     const g = cfg.genome ? normalize(cfg.genome) : loadNet(cfg.netId);
     if (!g) return fail(`red no encontrada: ${cfg.netId}`);
     if (!validate(g, { forPlay: true }).ok) return fail('la red no puede jugar (falta Elegir)');
+    // receta (spec/04 §11): todo se valida antes de jugar; la red en disco (`g`) nunca recibe la receta
+    const V = validateRecipe({ ...cfg.recipe, duration: cfg.duration, exploiter: cfg.exploiter }, g);
+    if (!V.ok) return fail(V.errors[0].message);
+    const R = V.recipe;
+    t.recipe = R.given;
     const net = compile(g);
     const dir = join(netsDir(), g.id);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     let optim = loadOptim(net, dir);
-    const lc = { ...g.learning.gradient, ...cfg.learn };
+    const lc = { ...R.learning.gradient };
     const batchSize = Math.max(1, lc.batchGames);
     const pool = cfg.speed === 'turbo' && cfg.workers > 1 ? new Pool(cfg.workers) : null;
     t.status = 'running'; emit('training', t.info());
@@ -517,14 +525,66 @@ export function createTrainer(opts = {}) {
       catch { appendLog({ type: 'warning', netId: g.id, snapshot: h.snapshot, message: `No encuentro la copia del salón de la fama de ${h.netId} (${h.snapshot}): no jugará contra ella.` }); }
     }
     const hallEntries = rivals.hall.map((spec) => ({ netId: spec.genome.id, kind: spec.kind || 'milestone', spec }));
-    const pickRival = (k) => {
-      const mix = { ...cfg.opponents, antagonistId: rivals.antagonist ? (antagonistId || 'antagonist') : null };
+    // la copia de sí misma juega con la temperatura del lote (es ella misma en ese lote); las demás rivales, con la suya
+    const selfAt = (T) => (T === undefined || T === rivals.self.genome.traits.temperature ? rivals.self : { ...rivals.self, genome: { ...rivals.self.genome, traits: { ...rivals.self.genome.traits, temperature: T } } });
+    const pickRival = (k, li = null, T = undefined) => {
+      const l = lessonAt(li);
+      const mix = { ...cfg.opponents, ...(l && l.opponents ? l.opponents : {}), antagonistId: rivals.antagonist ? (antagonistId || 'antagonist') : null };
       const pick = pickOpponent(g.id, mix, makeRng(cfg.seed + 1000003 * k), { throne, hall: hallEntries });
-      if (pick.kind === 'antagonist') return rivals.antagonist ? { kind: 'antagonist', spec: rivals.antagonist } : { kind: 'self', spec: rivals.self };
+      if (pick.kind === 'antagonist') return rivals.antagonist ? { kind: 'antagonist', spec: rivals.antagonist } : { kind: 'self', spec: selfAt(T) };
       if (pick.kind === 'hallOfFame' || pick.kind === 'ghost') return { kind: pick.kind, spec: pick.spec };
-      return { kind: 'self', spec: rivals.self };
+      return { kind: 'self', spec: selfAt(T) };
     };
-    const soldiersFor = (k) => (cfg.soldiers === 'random' ? 1 + makeRng(cfg.seed + 31 * k + 1).int(4) : cfg.soldiers);
+    const cur = R.curriculum ? createCurriculum(R.curriculum) : null;
+    const lessonAt = (i) => (cur && i !== null && i !== undefined ? R.curriculum[i] : null);
+    const soldiersFor = (k, li = null) => {
+      const l = lessonAt(li);
+      const s = l && l.soldiers !== undefined ? l.soldiers : cfg.soldiers;
+      return s === 'random' ? 1 + makeRng(cfg.seed + 31 * k + 1).int(4) : s;
+    };
+    // la recompensa de una partida: la de la red, o la de práctica (receta y lección) con sus estadísticas aparte
+    const rewardCache = new Map();
+    const rewardFor = (li = null) => {
+      const lr = lessonAt(li) ? lessonAt(li).reward : null;
+      if (!rewardChanges(g.reward, R.reward, lr)) return g.reward;
+      const key = JSON.stringify([R.reward, lr]);
+      if (!rewardCache.has(key)) rewardCache.set(key, mergeReward(g.reward, R.reward, lr).reward);
+      return rewardCache.get(key);
+    };
+    // la red tal como juega y aprende en este entreno
+    const view = (T, li = null) => ({ ...g, learning: R.learning, traits: { ...g.traits, temperature: T }, reward: rewardFor(li), frozen: R.frozenAll });
+    const progress = () => progressOf(cfg.duration, { games: t.games, elapsedMs: Date.now() - t.startedAt }) ?? 0;
+    const at = (key, base, p) => (R.schedule[key] ? scheduleValue(R.schedule[key], p) : base);
+    let batchApplied = null, batchOpen = false; // lo que vale para el lote en curso: se fija al empezar el lote
+    const openBatch = () => {
+      if (batchOpen) return;
+      const p = progress();
+      batchApplied = { lr: at('lr', lc.lr, p), entropy: at('entropy', lc.entropy, p), temperature: at('temperature', g.traits.temperature, p) };
+      batchOpen = true;
+    };
+    // las bofetadas y caricias de durante el entreno respetan también los congelados de la receta
+    const withTrainingFrozen = (fn) => { const keep = g.frozen; g.frozen = R.frozenAll; try { fn(); } finally { g.frozen = keep; } };
+    const best = createBestTracker(20);
+    let bestFlat = null;
+    const lessonEvent = (reason, index, games, measure = null) => {
+      const l = R.curriculum[index];
+      t.lesson = reason === 'start' ? { index, name: l.name } : t.lesson;
+      const d = { id: t.id, trainingId: t.id, netId: g.id, lesson: index, name: l.name, reason, games, ...(measure !== null ? { measure } : {}) };
+      appendLog({ type: 'curriculum', ...d, id: undefined });
+      emit('curriculum', d);
+    };
+    const scores4 = (b) => ({ aim: b.aim, cover: b.cover, survival: b.survival, adaptation: b.adaptation });
+    const examNow = async (when) => {
+      const subject = { ...g, weights: net.serialize() }; // la red tal como es, con su temperatura
+      const res = await runBulletin(subject);
+      t.exam = { ...(t.exam || {}), [when]: scores4(res) };
+      if (when === 'after') {
+        const file = join(dir, 'bulletin.json'), tmp = file + '.tmp';
+        writeFileSync(tmp, JSON.stringify({ netId: g.id, ts: Date.now(), ...scores4(res), details: res.details, seeds: res.seeds })); renameSync(tmp, file);
+      }
+      appendLog({ type: 'exam', netId: g.id, trainingId: t.id, when, ...scores4(res), seeds: res.seeds });
+      emit('exam', { id: t.id, trainingId: t.id, netId: g.id, when, ...scores4(res) });
+    };
     const wins = [];
     let bestWinRate = -1, milestoneN = 0, batch = [];
     let flushedGame = 0; // último punto de la curva ya escrito en disco (spec/08 §9.1)
@@ -550,11 +610,15 @@ export function createTrainer(opts = {}) {
       t.sampleGames.push(gameId);
     };
     // bofetadas y caricias que llegaron mientras entrenaba: las aplica el siguiente sueño (spec/04 §10.4)
-    const applyQueued = () => applyQueuedFeedback({ net, genome: g, trainingId: t.id });
+    const applyQueued = () => withTrainingFrozen(() => applyQueuedFeedback({ net, genome: g, trainingId: t.id }));
     const sleep = () => {
       applyQueued();
-      if (!batch.length) return;
-      const r = learnFromGames({ net, genome: g, games: batch, optim, cfg: lc });
+      if (!batch.length) { batchOpen = false; return; }
+      const A = batchApplied || { lr: lc.lr, entropy: lc.entropy, temperature: g.traits.temperature };
+      const r = learnFromGames({ net, genome: view(A.temperature, cur ? cur.index() : null), games: batch, optim, cfg: { ...lc, lr: A.lr, entropy: A.entropy } });
+      r.update.applied = { ...A };
+      t.applied = { ...A };
+      batchOpen = false;
       t.updates++;
       // partidas de muestra (spec/04 §6, spec/07 §12.1): recompensa y emoción dentro del registro de la partida
       const byGame = new Map();
@@ -564,7 +628,7 @@ export function createTrainer(opts = {}) {
         saveSample(game, r.emotions.filter((em) => em.game === gi && ids.has(em.decisionEventId))); // solo las de esta partida (spec/04 §10.1)
       }
       const refs = batch.map((game) => ({ game: game.events && game.events[0] ? game.events[0].game : null })).filter((x) => x.game);
-      appendLog({ type: 'update', netId: g.id, trainingId: t.id, games: batch.length, loss: r.update.loss, entropy: r.update.entropy, gradNorm: r.update.gradNorm, top: r.update.top, refs });
+      appendLog({ type: 'update', netId: g.id, trainingId: t.id, games: batch.length, loss: r.update.loss, entropy: r.update.entropy, gradNorm: r.update.gradNorm, top: r.update.top, applied: r.update.applied, refs });
       if (r.lesson) appendLog({ type: 'lesson', netId: g.id, trainingId: t.id, blockId: r.lesson.blockId, name: r.lesson.name, relChange: r.lesson.relChange, bulb: r.lesson.bulb, refs });
       applyImagination(g, r.imagination);
       const last = t.curve[t.curve.length - 1];
@@ -577,11 +641,14 @@ export function createTrainer(opts = {}) {
       rivals.self = snapshotSelf();
     };
     const playSpec = (k) => {
-      const rival = pickRival(k);
-      const me = { type: 'net', genome: { ...g, weights: net.serialize() }, learn: true };
+      openBatch();
+      const li = cur ? cur.index() : null;
+      const rival = pickRival(k, li, batchApplied.temperature);
+      const me = { type: 'net', genome: { ...view(batchApplied.temperature, li), weights: net.serialize() }, learn: true };
       const left = k % 2 ? rival.spec : me, right = k % 2 ? me : rival.spec;
-      return { seed: cfg.seed + k, left, right, soldiers: soldiersFor(k), rivalKind: rival.kind };
+      return { seed: cfg.seed + k, left, right, soldiers: soldiersFor(k, li), rivalKind: rival.kind, lesson: li };
     };
+    const extraOf = (spec) => ({ rivalKind: spec.rivalKind, genomes: genomesOf(spec), soldiers: spec.soldiers, lesson: spec.lesson });
     const playLive = async (spec) => {
       const room = createRoom(`entreno ${g.name}`, { soldiersPerPlayer: spec.soldiers, seed: spec.seed, speed: cfg.speed === 'x10' ? 10 : 1 });
       const seat = (s, team) => room.addAgent(s.type, { level: s.level ?? 3, team, genome: s.genome ?? null, learn: !!s.learn });
@@ -598,7 +665,8 @@ export function createTrainer(opts = {}) {
     const record = (k, res, opts = {}) => {
       const traj = res.trajectories[res.playerId];
       const gameId = res.events && res.events[0] ? res.events[0].game : null;
-      const rewards = assignRewards({ reward: g.reward, teamSpirit: g.traits.teamSpirit, events: res.events, trajectory: traj, playerId: res.playerId, stats: g.reward.stats || (g.reward.stats = {}), extraTerms: gameId ? takeFeedback(g.id, gameId, g.reward.slapCaress ?? 1) : null });
+      const rw = rewardFor(res.lesson ?? null);
+      const rewards = assignRewards({ reward: rw, teamSpirit: g.traits.teamSpirit, events: res.events, trajectory: traj, playerId: res.playerId, stats: rw.stats || (rw.stats = {}), extraTerms: gameId ? takeFeedback(g.id, gameId, rw.slapCaress ?? 1) : null });
       absorbGame(g, { playerId: res.playerId, events: res.events, rewards });
       const eff = rewards.entries.length ? rewards.entries.reduce((s, e) => s + e.effective, 0) / rewards.entries.length : 0;
       const item = { events: res.events, trajectory: traj, playerId: res.playerId, genomes: res.genomes || null, rewards, sample: opts.sample ?? k % 20 === 0, k, seed: opts.seed ?? cfg.seed + k, soldiers: opts.soldiers ?? res.soldiers, rivalKind: res.rivalKind, rivalId: res.rivalId || null, win: res.win, kills: res.kills, deaths: res.deaths };
@@ -620,6 +688,13 @@ export function createTrainer(opts = {}) {
           appendLog({ type: 'milestone', netId: g.id, trainingId: t.id, kind: 'winrate', value: rate, n: 20, snapshot: milestoneN });
         }
       }
+      if (R.keepBest && best.record(res.win, t.games - 1)) bestFlat = Float64Array.from(net.getFlat());
+      // currículo: cuenta para la lección en la que se jugó (con hilos, una partida ya lanzada al cambiar no cuenta)
+      if (cur && res.lesson === cur.index()) {
+        const adv = cur.record({ game: t.games - 1, win: res.win, reward: eff });
+        if (adv) { lessonEvent('met', adv.from, adv.games, adv.measure); lessonEvent('start', adv.to, t.games); }
+        t.curriculum = cur.summary();
+      }
       return item;
     };
     const doneBy = () => {
@@ -636,28 +711,34 @@ export function createTrainer(opts = {}) {
       return null;
     };
     // ---- cómo aprende (spec/04 §10.2): gradiente, evolución o ambos ----
-    const method = g.learning.method || 'gradient';
-    const evoCfg = g.learning.evolution, bothCfg = g.learning.both;
+    const method = R.learning.method || 'gradient';
+    const evoCfg = R.learning.evolution, bothCfg = R.learning.both;
     const playAsync = pool ? (spec) => pool.run({ type: 'play', seed: spec.seed, left: spec.left, right: spec.right, soldiers: spec.soldiers }) : playHeadless;
     let cycleGames = 0, cycleSteps = 0;
     const runEvolutionStep = async () => {
       const e = t.steps;
-      const rival = pickRival(e);
+      const li = cur ? cur.index() : null;
+      const p = progress();
+      const A = { sigma: at('sigma', evoCfg.sigma, p), temperature: at('temperature', g.traits.temperature, p) };
+      const vg = view(A.temperature, li);
+      const rival = pickRival(e, li, A.temperature);
       const nG = Math.max(1, evoCfg.gamesPerCandidate || 1);
       const base = cfg.seed + 100003 * (e + 1);
-      const sold = soldiersFor(e);
+      const sold = soldiersFor(e, li);
       applyQueued();
-      const out = await evolutionRound({ net, genome: g, rival: rival.spec, soldiers: sold, seeds: Array.from({ length: nG }, (_, j) => base + j), cfg: { ...evoCfg, frozen: g.frozen }, rng: makeRng(cfg.seed + 7 * (e + 1)), play: playAsync });
+      const out = await evolutionRound({ net, genome: vg, rival: rival.spec, soldiers: sold, seeds: Array.from({ length: nG }, (_, j) => base + j), cfg: { ...evoCfg, sigma: A.sigma, frozen: R.frozenAll }, rng: makeRng(cfg.seed + 7 * (e + 1)), play: playAsync });
+      out.update.applied = { ...A };
+      t.applied = { ...A };
       t.games += out.update.games; t.steps++; t.updates++;
       // la red real contra el mismo rival: cuenta en la curva y se guarda (a x1/x10, en una sala viva)
-      const me = { type: 'net', genome: { ...g, weights: net.serialize() }, learn: true };
-      const spec = { seed: base + nG, left: e % 2 ? rival.spec : me, right: e % 2 ? me : rival.spec, soldiers: sold, rivalKind: rival.kind };
+      const me = { type: 'net', genome: { ...vg, weights: net.serialize() }, learn: true };
+      const spec = { seed: base + nG, left: e % 2 ? rival.spec : me, right: e % 2 ? me : rival.spec, soldiers: sold, rivalKind: rival.kind, lesson: li };
       const res = cfg.speed !== 'turbo' ? await playLive(spec) : await playAsync(spec);
-      const game = record(t.games, { ...res, rivalKind: rival.kind, genomes: genomesOf(spec) }, { intoBatch: false, kind: 'showcase', sample: true, seed: spec.seed, soldiers: sold });
-      const x = prepareExperience({ genome: g, games: [game], optim, cfg: lc });
+      const game = record(t.games, { ...res, ...extraOf(spec) }, { intoBatch: false, kind: 'showcase', sample: true, seed: spec.seed, soldiers: sold });
+      const x = prepareExperience({ genome: vg, games: [game], optim, cfg: lc });
       saveSample(game, x.emotions);
       const refs = game.events && game.events[0] ? [{ game: game.events[0].game }] : [];
-      appendLog({ type: 'update', kind: 'evolution', netId: g.id, trainingId: t.id, step: e, games: out.update.games, meanFitness: out.update.meanFitness, bestFitness: out.update.bestFitness, top: out.update.top, refs });
+      appendLog({ type: 'update', kind: 'evolution', netId: g.id, trainingId: t.id, step: e, games: out.update.games, meanFitness: out.update.meanFitness, bestFitness: out.update.bestFitness, top: out.update.top, applied: out.update.applied, refs });
       if (out.lesson) appendLog({ type: 'lesson', netId: g.id, trainingId: t.id, blockId: out.lesson.blockId, name: out.lesson.name, relChange: out.lesson.relChange, bulb: out.lesson.bulb, refs });
       t.lastLesson = out.lesson;
       emit('sleep', { id: t.id, netId: g.id, games: out.update.games, update: { ...out.update, step: e } });
@@ -668,6 +749,10 @@ export function createTrainer(opts = {}) {
     const evolutionTurn = () => method === 'evolution' || (method === 'both' && cycleGames >= Math.max(0, bothCfg.gradientGamesPerCycle));
     let reason = null, k = 0;
     try {
+      t.versionBefore = saveVersion(g, { reason: `antes del entreno ${t.id}`, trainingId: t.id });
+      if (cur) { lessonEvent('start', 0, 0); t.curriculum = cur.summary(); }
+      if (R.exam) { t.phase = 'exam-before'; emit('training', t.info()); await examNow('before'); }
+      t.phase = 'training';
       while (!reason) {
         while (t._paused && !t._stop) await new Promise((r) => setTimeout(r, 50));
         if (t._stop) { reason = 'stopped'; break; }
@@ -679,13 +764,13 @@ export function createTrainer(opts = {}) {
           if (!reason && t._stop) reason = 'stopped';
           continue;
         }
-        if (cfg.speed !== 'turbo') { const spec = playSpec(k); const res = await playLive(spec); record(k, { ...res, rivalKind: spec.rivalKind, genomes: genomesOf(spec) }); k++; cycleGames++; }
-        else if (!pool) { await new Promise((r) => setImmediate(r)); const spec = playSpec(k); const res = playOne(spec); record(k, { ...res, rivalKind: spec.rivalKind, genomes: genomesOf(spec) }); k++; cycleGames++; } // cede el bucle de eventos: el servidor sigue respondiendo
+        if (cfg.speed !== 'turbo') { const spec = playSpec(k); const res = await playLive(spec); record(k, { ...res, ...extraOf(spec) }); k++; cycleGames++; }
+        else if (!pool) { await new Promise((r) => setImmediate(r)); const spec = playSpec(k); const res = playOne(spec); record(k, { ...res, ...extraOf(spec) }); k++; cycleGames++; } // cede el bucle de eventos: el servidor sigue respondiendo
         else {
           const n = Math.min(cfg.workers, batchSize - batch.length || batchSize, method === 'both' ? Math.max(1, bothCfg.gradientGamesPerCycle - cycleGames) : Infinity);
           const specs = Array.from({ length: n }, (_, i) => playSpec(k + i));
           const results = await Promise.all(specs.map((spec) => pool.run({ type: 'play', seed: spec.seed, left: spec.left, right: spec.right, soldiers: spec.soldiers })));
-          results.forEach((res, i) => { if (!reason && !t._stop) { record(k + i, { ...res, rivalKind: specs[i].rivalKind, genomes: genomesOf(specs[i]) }); reason = doneBy(); } });
+          results.forEach((res, i) => { if (!reason && !t._stop) { record(k + i, { ...res, ...extraOf(specs[i]) }); reason = doneBy(); } });
           k += n; cycleGames += n;
           if (batch.length >= batchSize) sleep();
           if (reason) break;
@@ -697,7 +782,18 @@ export function createTrainer(opts = {}) {
       }
       if (t._stop && reason !== 'stopped') reason = 'stopped';
       sleep();
+      if (R.keepBest) {
+        const b = best.result();
+        if (!b) t.keptBest = { restored: false, reason: 'menos de 20 partidas' };
+        else {
+          const restored = b.final < b.best;
+          if (restored) net.setFlat(bestFlat);
+          t.keptBest = { best: b.best, final: b.final, atGame: b.atGame, restored };
+          appendLog({ type: 'keepBest', netId: g.id, trainingId: t.id, ...t.keptBest });
+        }
+      }
       saveAll();
+      if (R.exam && !t._stop) { t.phase = 'exam-after'; emit('training', t.info()); await examNow('after'); }
     } catch (e) {
       if (pool) pool.close();
       return fail(e.message);
@@ -705,6 +801,7 @@ export function createTrainer(opts = {}) {
     if (pool) pool.close();
     t.endedAt = Date.now(); // la duración deja de contar (spec/04 §9.8)
     t.status = reason === 'stopped' ? 'stopped' : 'done';
+    t.phase = t.status;
     emit('training', t.info());
     emit('done', { id: t.id, reason });
     return t;

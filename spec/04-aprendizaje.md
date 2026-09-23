@@ -405,7 +405,9 @@ de §9.4 (sustituye al `learn` interno, que solo pisaba el gradiente).
   `duration.minutes`, el tiempo transcurrido entre el total. Con `plateau` no se sabe cuánto dura: un programa con
   meseta es un **400** ("los programas necesitan saber cuánto dura el entreno: usa partidas o minutos").
 - Cuándo se aplica: la temperatura se fija al empezar cada lote de gradiente y vale para todas sus partidas y para su
-  sueño (así cada lote aprende de las probabilidades con las que de verdad jugó); `lr` y `entropy`, en ese mismo
+  sueño (así cada lote aprende de las probabilidades con las que de verdad jugó); la copia de sí misma contra la que
+  juega (`self`) también la usa, porque es ella misma en ese lote (como en el autojuego de AlphaZero); la reina, la
+  sala de la fama y las demás rivales juegan con la suya. `lr` y `entropy`, en ese mismo
   sueño, con el mismo `p`. En evolución, `sigma` y la temperatura se fijan al empezar cada paso (copias y partida de
   la red real). El evento `sleep` y la línea `update` del registro llevan `applied: {lr, entropy, temperature}` (o
   `{sigma, temperature}` en evolución).
@@ -445,7 +447,8 @@ de §9.4 (sustituye al `learn` interno, que solo pisaba el gradiente).
   primera partida y al final, después del último sueño y de "quedarse con la mejor". La vista lleva `exam: {before,
   after}` (`{aim, cover, survival, adaptation}`); eventos `exam {netId, trainingId, when: before | after, …}`, líneas
   `exam` en el registro con `trainingId`, y el de después pasa a ser el boletín de la red. Mientras examina, `phase`
-  es `exam-before` o `exam-after` (entrenando, `training`).
+  es `exam-before` o `exam-after` (entrenando, `training`; al acabar, `done`, `stopped` o `error`). Si se para el
+  entreno, no hay examen de después (`exam.after` falta): parar es parar.
 
 ### 11.7 Versión antes del entreno (siempre)
 - Antes de la primera partida se guarda una **versión** de la red tal como estaba: `evo/nets/<id>/versions/<n>.json`
@@ -455,8 +458,9 @@ de §9.4 (sustituye al `learn` interno, que solo pisaba el gradiente).
 - API: `GET /api/lab/nets/:id/versions` → `{versions: [{n, ts, reason, trainingId, paramCount}]}` (la más nueva
   primero) · `GET …/versions/:n` → `{n, ts, reason, trainingId, genome}` · `GET …/versions/:n/diff` → la diferencia
   de esa versión a la red de ahora (misma forma que spec/05 §5) · `POST …/versions/:n/restore` → la red vuelve a esa
-  versión: pesos, bloques, cables, aprendizaje, recompensa, rasgos, congelados e Imaginación; conserva su id, su
-  nombre, sus estadísticas, su memoria y su linaje (lo vivido no se borra). Antes de volver, la red de ahora se guarda
+  versión: pesos, bloques, cables, aprendizaje, recompensa, rasgos, congelados, Imaginación y los nombres de sus
+  neuronas (van con su cuerpo); conserva su id, su nombre, sus estadísticas, su memoria y su linaje (lo vivido no se
+  borra). El estado de Adam no se versiona: si la estructura cambió, se reinicia solo al cargarse. Antes de volver, la red de ahora se guarda
   como otra versión (se puede deshacer). 404 si no existe; 409 si la red está ocupada (entrena, duelo, exhibición).
 
 ### 11.8 Quedarse con la mejor (`keepBest: true`)

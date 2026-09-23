@@ -59,6 +59,7 @@
   "test/trono.spec.mjs": "bca854dab290fe68fc684273cc49fc4c78162ff168e5551d4cf8ad1235944844",
   "test/troops.spec.mjs": "f7f1f04c0b3a0d3d3743f687ce1619a22fa6646c248b7fb979490e2656526cc1",
   "test/ui-arranque.spec.mjs": "4bfe3a89b9676515c609aa96554d845c14a3dab0716be2840c09cfbb286e9573",
+  "test/ui-arreglos-p0-b.spec.mjs": "080a9ea78832baf1cb27692c61df40c926759e92727e72aa4e049e63a99b5294",
   "test/ui-arreglos-p0.spec.mjs": "46aa0969c46376390633d67cee7fae18dd72e42a2bd7e968a8a7fe39e4023abe",
   "test/ui-cirugia.spec.mjs": "481addfc477dc8ae4d7a4c20994f72ce00661f0b1872694305c38dada10fddba",
   "test/ui-dinastias.spec.mjs": "abccbbd192eeebb2b13decb64851b03057d795e8b4954987be53f79068ceab1f",

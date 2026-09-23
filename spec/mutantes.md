@@ -238,8 +238,8 @@ contra el spec nuevo del arreglo.
   - `meanEffective` (salida que nadie usa);
   - `A ?? 0` (la ventaja siempre está definida);
   - la etiqueta `valueSource`;
-  - **hueco previo real**: ningún spec fija la referencia `value` dentro de `learnFromGames` (líneas 174–175) ni
-    `stats || {}` (185). Pendiente de un spec extra.
+  - ~~hueco previo real~~ **cerrado** por el caso (4) de `arreglos-metodo-extra` (ver abajo): la referencia `value`
+    dentro de `learnFromGames` y las estadísticas de normalización del lote (hoy líneas 233–234 y 245).
 - **C3** (`evolutionRound`, `evolve`, paso del entrenador) contra `arreglos-metodo`: **57/209**. El test con
   oráculo exacto fija el orden, las semillas inyectadas, los lados, las parejas antitéticas, los congelados y la
   actualización. Sobreviven sobre todo:
@@ -247,11 +247,35 @@ contra el spec nuevo del arreglo.
     duelo), porque los tests solo exigen que sea determinista;
   - la magnitud de `perBlock`/`top` del paso;
   - `j % 2` → `% -2` (equivalente con `j ≥ 0`).
-  **Pendiente**: `arreglos-metodo-extra` con la semilla y el lado de la partida de la red real leídos de su meta, y
-  con `perBlock` recalculado desde los pesos.
-- `evo/duel.js` (paso tras el duelo) contra `arreglos-metodo`: **8/14**. Queda un superviviente que importa: si la
-  rival llevara `learn: true`, la fitness podría medirse sobre la rival. El código pone `false`, pero ningún test lo
-  vigila. Pendiente en el mismo spec extra.
+- `evo/duel.js` (paso tras el duelo) contra `arreglos-metodo`: **8/14**. Quedaba un superviviente que importa: si la
+  rival llevara `learn: true`, la fitness podría medirse sobre la rival. Lo vigila ahora `arreglos-metodo-extra`.
+- **`arreglos-metodo-extra`** (2026-09-23, congelado) cierra los huecos de C3 y C4. Fija con oráculo exacto:
+  - las semillas, el ruido y el lado de la partida de la red real en el paso del entrenador (leídos de la meta de la
+    partida guardada);
+  - `perBlock` y `top`, recalculados desde los pesos de antes y de después;
+  - que tras un duelo la fitness se mide sobre la red y no sobre la rival;
+  - `makeLearner.evolve` con `gamesPerCandidate = 1`, el mínimo que admite el genoma;
+  - en `learnFromGames`, la referencia `value` y las estadísticas de normalización que comparten las partidas de un
+    lote. Van catorce partidas porque `normalizeStats` no normaliza hasta `n > 20` y los términos son escasos
+    (en ese lote `die` llega a 25 y `lose` a 24; con cuatro partidas ningún término pasaba de 7).
+
+  Mutantes dirigidos (líneas de hoy de `evo/train.js`) contra `arreglos-metodo-extra`:
+  - 245, `stats: g.reward.stats || (g.reward.stats = {})`: **2/2**. Con `&&`, cada partida estrenaba estadísticas y
+    ninguna llegaba a normalizar.
+  - `blockChanges` (192–203, 220–222): todo cazado salvo `>` → `>=` en 201 y 221. **Equivalentes**: solo difieren con
+    un empate exacto en el máximo (nada cambió) o con un `relChange` exactamente igual al umbral de la lección.
+  - 233–234, `||` → `&&` en `value === null || value === undefined`: **equivalentes**. Con cabeza de valor todas las
+    decisiones llevan número; sin ella, el baseline pasa a `mean` y los valores no se usan.
+  - 409, los valores por defecto `seed = 0` y `soldiers = 1` de `evolve`: **equivalentes**, todos los llamadores los
+    pasan.
+  - 411 y 639, `Math.max(1, gamesPerCandidate || 1)`: `max(1 → 2)` cazado; el resto, **equivalentes**, porque el
+    genoma valida `gamesPerCandidate ∈ [1, 16]`.
+  - Paso del entrenador (636–650) contra `arreglos-metodo-extra` + `arreglos-metodo`: **30/38**. Sobreviven 639 ×5
+    (lo de arriba), 647 `% 2` → `% -2` ×2 (**equivalente**: en JS el signo del resto sigue al dividendo y `e ≥ 0`) y
+    649 `sample: true` → `false` (**equivalente**: con `intoBatch: false` nadie lee ese campo; `saveSample` se llama
+    aparte).
+  - La constante de semilla 100003 y el `7·(e+1)` de 643: cazados. `evo/duel.js` 159 (la rival con `learn: false`):
+    cazado.
 
 ### R3–R5 — trono, verdad, API
 Sin tirada de mutantes todavía. Varios specs de estos arreglos (`arreglos-exhibicion`, `arreglos-bofetada` y las

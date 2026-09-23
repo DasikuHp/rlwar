@@ -11,6 +11,7 @@
   "test/arreglos-bofetada.spec.mjs": "60ef1cb5db4507f80256aaf6e8909e6c49601b0c4f51335a6ca37b55bf6ea3a3",
   "test/arreglos-boletin.spec.mjs": "38493043b4f45433fc06edd14f42a7369541f36e6c6fbf094239c93132a0ecd7",
   "test/arreglos-exhibicion.spec.mjs": "a2584cdfa708880b5b69b2593b6ca7384220b5e3675dd70eaa3f82b3efc7daa3",
+  "test/arreglos-metodo-extra.spec.mjs": "698c936467c8b17bebd0ee6041eef3246c2d76bae630ad83267e0e94d20bef9d",
   "test/arreglos-metodo.spec.mjs": "c4f97cb1411c43e36d7d61ad2732c3609622088c6ed18da64108b99d2f937bc6",
   "test/arreglos-motor.spec.mjs": "43748ef56a06588598255abc267487641609e9b97ea8a4ca8e6214645e6d9dd9",
   "test/arreglos-ocupada-extra.spec.mjs": "0aee93488ed01b6b5c0e076b5d983aab81f25dbbf815973d87dff86d2fe5280b",

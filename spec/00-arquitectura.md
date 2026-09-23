@@ -92,6 +92,14 @@ Regla de dependencia: `shared/*` no importa nada de `server/`, `evo/` ni `agents
   supervivientes se copian a `spec/mutantes.md` con justificación escrita.
 - Tests propios: `test/tools.spec.mjs` (freeze detecta un byte cambiado; mutants caza un `+`→`-` en un
   módulo de juguete y reporta un superviviente en una línea no cubierta).
+- `--lines a-b[,c…]` (2026-09-23): solo los mutantes de esas líneas; el filtro va antes de `--max`.
+- `--server [--port N]` (2026-09-23), para los specs que necesitan servidor. En cada mutante levanta
+  `server/server.js` **de la copia**, ya con el fichero mutado, con `GW_FAST=1`, `PORT=N` (por defecto 8850) y un
+  `GW_EVO_DIR` nuevo y vacío. Espera a `/api/health` (20 s como mucho) y pasa `http://localhost:N` como primer
+  argumento a cada test. Lo apaga y espera a que salga antes del mutante siguiente, así el puerto queda libre.
+  Si el servidor mutado sale antes de responder, o no responde a tiempo, el mutante cuenta como **cazado** con el
+  detalle `el servidor no arranca`. En proceso: `runMutants({…, lines, server: true, port})`.
+  Tests: `test/tools-servidor.spec.mjs`.
 
 ## 5. Fases y qué congela cada una (para Opus)
 | Fase | Ficheros críticos | Congela para la interfaz |

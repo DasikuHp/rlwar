@@ -53,6 +53,7 @@ try {
   results.push(await run('cliente (DOM simulado)', [join(ROOT, 'test', 'client.spec.mjs')]));
   results.push(await run('selector de tropas (F0)', [join(ROOT, 'test', 'troops.spec.mjs')]));
   results.push(await run('herramientas: congelado y mutantes', [join(ROOT, 'test', 'tools.spec.mjs')]));
+  results.push(await run('herramientas: mutantes por líneas y con servidor', [join(ROOT, 'test', 'tools-servidor.spec.mjs')]));
   results.push(await run('motor (F1): movimiento, semilla, sin pantalla', [join(ROOT, 'test', 'motor.spec.mjs'), BASE]));
   results.push(await run('geometría (F1): propiedades del deslizamiento', [join(ROOT, 'test', 'geometry.spec.mjs')]));
   results.push(await run('rng (F1): secuencia fijada y distribución', [join(ROOT, 'test', 'rng.spec.mjs')]));

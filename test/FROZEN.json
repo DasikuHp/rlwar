@@ -36,6 +36,7 @@
   "test/rng.spec.mjs": "4fc0264c161a540151bacbc2a4a11c8e5f6dafead07bae50eb6d6105fda0bc74",
   "test/rooms.spec.mjs": "a45a56fe0074c3e4258972a27a213fdfdc96409776d7903997415d322bf9b5eb",
   "test/smoke.mjs": "708013b5e37bf82e4d13315978d0645238a15b3b229e2b9ab0335add182b6854",
+  "test/tools-servidor.spec.mjs": "fdb4a7aec741db4d2bba22779adaf5fe878735431db9e4aa8f90e5c82393b843",
   "test/tools.spec.mjs": "16ffcff2f467e99882d48a0969970bf3bca7faeaf95323cb7805a2bd52a53e68",
   "test/trono.spec.mjs": "c4d2f5e1d39089ba2e11f02347dd0c3b7069975a91cf5bb01c9bcd3ddbbec8ab",
   "test/troops.spec.mjs": "f7f1f04c0b3a0d3d3743f687ce1619a22fa6646c248b7fb979490e2656526cc1",

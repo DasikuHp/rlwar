@@ -106,6 +106,7 @@ try {
   results.push(await run('interfaz: inicio del laboratorio (lógica)', [join(ROOT, 'test', 'ui-inicio.spec.mjs')]));
   results.push(await run('interfaz: sala viva con redes (lógica)', [join(ROOT, 'test', 'ui-sala.spec.mjs')]));
   results.push(await run('interfaz: entreno (lógica)', [join(ROOT, 'test', 'ui-entreno.spec.mjs')]));
+  results.push(await run('interfaz: entreno, hilos que se usan de verdad (M12)', [join(ROOT, 'test', 'ui-entreno-hilos.spec.mjs')]));
   results.push(await run('interfaz: evolución, hijos y diferencias (lógica)', [join(ROOT, 'test', 'ui-evolucion.spec.mjs')]));
   results.push(await run('interfaz: trono y duelos (lógica)', [join(ROOT, 'test', 'ui-trono.spec.mjs')]));
   results.push(await run('interfaz: dinastías (lógica)', [join(ROOT, 'test', 'ui-dinastias.spec.mjs')]));

@@ -133,8 +133,15 @@ await check('makeLearner: aprende de partidas propias con lrScale y guarda red +
   const id = save('seer', 'learner-1');
   const L = makeLearner(store.loadNet(id));
   const { playGame } = await import('../server/headless.js');
-  const r = playGame({ seed: 5, left: { type: 'net', netId: id, learn: true }, right: { type: 'sniper' }, soldiers: 1 });
-  const p = r.room.players.find((x) => x.agentType === 'net');
+  // cambio autorizado (P1, 2026-09-24): con el mapa de círculos, en la semilla 5 el Sniper mata antes de que la red decida;
+  // se busca desde la 5 la primera partida en la que la red llega a decidir
+  let r = null, p = null;
+  for (let seed = 5; seed < 60 && !r; seed++) {
+    const g = playGame({ seed, left: { type: 'net', netId: id, learn: true }, right: { type: 'sniper' }, soldiers: 1 });
+    const q = g.room.players.find((x) => x.agentType === 'net');
+    if (Object.values(g.trajectories[q.id].soldiers).some((steps) => steps.length)) { r = g; p = q; }
+  }
+  assert.ok(r, 'premisa: alguna semilla de 5 a 59 deja decidir a la red');
   const before = Array.from(L.net.getFlat());
   const res = L.learn([{ events: r.events, trajectory: r.trajectories[p.id], playerId: p.id }], { lrScale: 0.5 });
   assert.ok(res && res.update && res.rewards.steps > 0);

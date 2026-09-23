@@ -33,7 +33,7 @@ await check('isSolid: círculo, rectángulo de siempre y bocado; el margen agran
   assert.equal(G.isSolid({ x: 1, y: 0 }, T), false, 'dentro del bocado');
   assert.equal(G.isSolid({ x: 1.9, y: 0 }, T), true, 'en el círculo, fuera del bocado');
   assert.equal(G.isSolid({ x: 2.1, y: 0 }, T, 0.2), true, 'el margen agranda el círculo');
-  assert.equal(G.isSolid({ x: 1.75, y: 0 }, T), true, 'a 0,75 del centro del bocado: fuera de él');
+  assert.equal(G.isSolid({ x: 1.8, y: 0 }, T), true, 'a 0,80 del centro del bocado (más que 0,78): fuera de él');
   assert.equal(G.isSolid({ x: 1.7, y: 0 }, T, 0.1), true, 'a 0,70 < 0,78: dentro del bocado, pero el margen lo encoge a 0,68');
   assert.equal(G.isSolid({ x: 0, y: 0 }, [circle(0, 0, 1)]), true, 'también con una lista de obstáculos');
   assert.equal(C.BITE_RADIUS, 0.78);
@@ -153,7 +153,9 @@ await check('una partida sin pantalla con semilla es la misma dos veces, con sus
   const a = playGame({ seed: 77, left: 'artillery', right: 'greedy', soldiers: 2 });
   const b = playGame({ seed: 77, left: 'artillery', right: 'greedy', soldiers: 2 });
   assert.deepEqual(a.room.bites, b.room.bites);
-  assert.deepEqual(a.room.events.map((e) => [e.type, e.data && e.data.result ? e.data.result.hits : null]), b.room.events.map((e) => [e.type, e.data && e.data.result ? e.data.result.hits : null]));
+  // los ids de soldado salen de un contador del proceso: los impactos se comparan por la posición del soldado en la sala
+  const trace = (room) => room.events.map((e) => [e.type, e.data && e.data.result && e.data.result.hits ? e.data.result.hits.map((id) => room.soldiers.findIndex((s) => s.id === id)) : null]);
+  assert.deepEqual(trace(a.room), trace(b.room));
   const fromShots = a.room.events.filter((e) => e.type === 'shot' && e.data.bite).map((e) => e.data.bite);
   assert.deepEqual(fromShots, a.room.bites, 'la moviola puede rehacer el terreno turno a turno');
   const start = a.room.events.find((e) => e.type === 'game.start');
@@ -192,7 +194,10 @@ await check('percepción: mismas longitudes con círculos y bocados; el hueco de
   assert.deepEqual(Array.from(o3.ctx.ob).slice(0, 5), [0, 0, 4 / 10, 4 / 15, 1]);
 });
 
-await check('Simulador: con un tiro que atraviesa, mata a alguno y da a un aliado; fin = primer impacto; "Contar bajas" añade las cuentas', () => {
+// cambio autorizado (punto 7, 2026-09-24): como decía el plan y como puntúa la IA del original (ComputerPlayer: ±2 000 000
+// por cada soldado alcanzado), "mata" y "fuego amigo" pasan a ser cuántos enemigos y cuántos aliados alcanza (0–4); con
+// un solo impacto valen 1, igual que antes, y el ojo sigue teniendo 10 entradas (sin la opción aparte "Contar bajas")
+await check('Simulador: con un tiro que atraviesa, cuenta a cuántos enemigos y aliados alcanza; fin = primer impacto; 10 entradas', () => {
   const me = { id: 'a', team: 'left', ownerId: 'pL', x: -10, y: 0, alive: true, turns: 0 };
   const ally = { id: 'b', team: 'left', ownerId: 'pL', x: -6, y: 0, alive: true, turns: 0 };
   const e1 = { id: 'e1', team: 'right', ownerId: 'pR', x: 0, y: 0, alive: true, turns: 0 }, e2 = { id: 'e2', team: 'right', ownerId: 'pR', x: 10, y: 0, alive: true, turns: 0 };
@@ -201,14 +206,15 @@ await check('Simulador: con un tiro que atraviesa, mata a alguno y da a un aliad
   const sim = P.simulateCandidate(cand, ctx, true);
   const v = P.simulatorFeatures(sim, ctx);
   assert.equal(v.length, 10);
-  assert.deepEqual(Array.from(v).slice(0, 5), [1, 1, 0, 0, 0], 'mata a alguno, da a un aliado; sin fin porque alcanzó a alguien');
-  assert.ok(Math.abs(v[6] * 25 - (-6)) < 0.2, `fin = el primer impacto (el aliado en x = −6): ${v[6] * 25}`);
-  const v2 = P.simulatorFeatures(sim, ctx, { counts: true });
-  assert.equal(v2.length, 12);
-  assert.deepEqual(Array.from(v2).slice(10), [2 / 4, 1 / 4]);
+  assert.deepEqual(Array.from(v).slice(0, 5), [2, 1, 0, 0, 0], 'alcanza a 2 enemigos y a 1 aliado; sin fin porque alcanzó a alguien');
+  assert.ok(Math.abs(v[6] * 25 - (-6 - C.HIT_RADIUS)) < 0.02, `fin = el primer impacto, donde el recorrido entra a HIT_RADIUS del aliado (x = −6 − ${C.HIT_RADIUS}): ${v[6] * 25}`);
+  const solo = { ...ctx, soldiers: [me, e1] };
+  assert.deepEqual(Array.from(P.simulatorFeatures(P.simulateCandidate(cand, solo, true), solo)).slice(0, 5), [1, 0, 0, 0, 0], 'con un solo impacto, lo de antes');
+  const row = [0, 2, 4, 6, 8].map((x, i) => ({ id: `r${i}`, team: 'right', ownerId: 'pR', x, y: 0, alive: true, turns: 0 }));
+  const five = { ...ctx, soldiers: [me, ...row] };
+  assert.equal(P.simulatorFeatures(P.simulateCandidate(cand, five, true), five)[0], 4, 'como mucho 4');
   const g = normalize(TEMPLATES.seer.genome);
   const simBlock = g.blocks.find((b) => b.type === 'eye.simulator');
-  assert.equal(eyeDimOf({ ...simBlock, params: { ...simBlock.params, counts: true } }, g), 12);
   assert.equal(eyeDimOf(simBlock, g), 10);
 });
 

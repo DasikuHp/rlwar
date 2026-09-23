@@ -26,6 +26,16 @@ const B = (id, type, params = {}) => ({ id, type, params });
 const W = (from, to) => ({ from, to });
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const save = (key, id, patch = {}) => { const r = store.saveNet({ ...clone(TEMPLATES[key].genome), ...patch, id, name: id }); assert.ok(r.ok, JSON.stringify(r)); return id; };
+// cambio autorizado (P1, 2026-09-24): con el mapa de círculos, en la semilla 5 el Sniper mata antes de que la red decida;
+// se busca desde la 5 la primera partida en la que la red llega a decidir
+const gameWhereNetDecides = (netId) => {
+  for (let seed = 5; seed < 60; seed++) {
+    const r = playGame({ seed, left: { type: 'net', netId, learn: true }, right: { type: 'sniper' }, soldiers: 1 });
+    const p = r.room.players.find((x) => x.agentType === 'net');
+    if (Object.values(r.trajectories[p.id].soldiers).some((steps) => steps.length)) return r;
+  }
+  throw new Error('premisa: ninguna semilla de 5 a 59 deja decidir a la red');
+};
 
 await check('computeAdvantages (media): el estado lleva n exacto y media móvil 0.05; la ventaja usa la media anterior', () => {
   const eps = [1, 2, 3].map((r) => ({ steps: [{ reward: r }] }));
@@ -61,7 +71,7 @@ await check('policyGradient: con puntuaciones iguales la entropía es ln N por p
 
 await check('learnFromGames: si optim viene sin mean (fichero antiguo), lo crea y lo actualiza', () => {
   save('seer', 'ex3-v'); const g0 = store.loadNet('ex3-v');
-  const r = playGame({ seed: 5, left: { type: 'net', netId: 'ex3-v', learn: true }, right: { type: 'sniper' }, soldiers: 1 });
+  const r = gameWhereNetDecides('ex3-v');
   const p = r.room.players.find((x) => x.agentType === 'net');
   const net = compile(g0); const optim = T.adamInit(net);
   delete optim.mean; // un optim.json antiguo no traía la referencia media

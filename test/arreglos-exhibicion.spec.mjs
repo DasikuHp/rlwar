@@ -38,8 +38,16 @@ const exhibition = async ({ left, right, soldiers = 1, seed = 5 }) => {
 const logOf = async () => (await api('/api/lab/log?limit=1000')).body.entries;
 
 await check('exhibición con learn:true (gradiente): suma solo stats.games, aprende (sueño en el log), guarda la partida y la recuerda', async () => {
-  const g0 = await mkNet('seer', 'Exh Aprende');
-  const ex = await exhibition({ left: { type: 'net', netId: g0.id, learn: true }, right: { type: 'sniper', level: 1 } });
+  // cambio autorizado (P1, 2026-09-24): con el mapa de círculos, en la semilla 5 el Sniper podía matar antes de que la red
+  // decidiera; se busca desde la 5 la primera exhibición en la que la red llega a decidir (una red nueva en cada intento)
+  let g0 = null, ex = null;
+  for (let seed = 5; seed < 25 && !ex; seed++) {
+    const g = await mkNet('seer', `Exh Aprende ${seed}`);
+    const e = await exhibition({ left: { type: 'net', netId: g.id, learn: true }, right: { type: 'sniper', level: 1 }, seed });
+    const saved = await until(async () => { const r = await api(`/api/lab/games/${e.gameId}`); return r.status === 200 ? r.body : null; }, 20000, 'partida guardada');
+    if (Object.values(saved.trajectories || {}).some((t) => Object.values(t.soldiers || {}).some((steps) => steps.length))) { g0 = g; ex = e; }
+  }
+  assert.ok(ex, 'premisa: en alguna semilla de 5 a 24 la red llega a decidir');
   const g1 = await until(async () => { const g = (await api(`/api/lab/nets/${g0.id}`)).body.genome; return g.stats.games === 1 ? g : null; }, 20000, 'stats.games = 1');
   assert.deepEqual({ wins: g1.stats.wins, kills: g1.stats.kills, deaths: g1.stats.deaths }, { wins: 0, kills: 0, deaths: 0 }, 'una exhibición no cuenta victorias ni bajas');
   assert.ok(flat(g1).some((v, i) => v !== flat(g0)[i]), 'con learn:true aprende de la partida');

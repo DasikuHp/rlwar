@@ -234,9 +234,13 @@ check('simulateCandidate/simulatorFeatures: igual que el solver en el mundo; kil
   const sim = P.simulateCandidate(c2, ctx, false);
   const ref = simulateShot({ mode: 'function', f: tryCompile(c2.expr).f, start: { x: me.x, y: me.y }, dir: 1, soldiers: st.soldiers, obstacles: st.obstacles, shooterId: 'me', ds: 0.05, maxSteps: 2500 });
   assert.equal(sim.type, ref.result.type); assert.equal(sim.type, 'kill'); assert.equal(sim.victimId, 'e2');
-  assert.ok(near(sim.endX, ref.result.x) && near(sim.endY, ref.result.y) && sim.points === ref.points.length);
+  // cambio autorizado (P1, spec/01 §10.5, 2026-09-24): el tiro atraviesa, así que el Simulador es el solver hasta el primer
+  // impacto (dónde acaba, cuántos puntos lleva y la distancia mínima), como antes cuando el tiro se paraba ahí
+  const cut = ref.result.firstHit;
+  assert.ok(cut, 'premisa: el tiro alcanza a alguien');
+  assert.ok(near(sim.endX, cut.x) && near(sim.endY, cut.y) && sim.points === cut.points);
   assert.ok(Array.isArray(sim.polyline) && sim.polyline.length <= 100 && sim.polyline.length >= 2);
-  let md = 30; for (const [px, py] of ref.points) for (const en of e) md = Math.min(md, Math.hypot(en.x - px, en.y - py));
+  let md = 30; for (const [px, py] of [...ref.points.slice(0, cut.points - 1), [cut.x, cut.y]]) for (const en of e) md = Math.min(md, Math.hypot(en.x - px, en.y - py));
   assert.ok(near(sim.minDist, md));
   vecNear(P.simulatorFeatures(sim, ctx), [1, 0, 0, 0, 0, Math.min(1, md / 10), sim.endX / 25, sim.endY / 15, Math.min(1, sim.points / 200), 0], 1e-9, 'kill e2 (no es el más cercano)');
   const s1 = (e[0].y - me.y) / (e[0].x - me.x);

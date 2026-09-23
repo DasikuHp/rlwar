@@ -93,24 +93,22 @@ check('fire: validaciones (turno, modo, expresión, ángulo, etapa) y registro d
   assert.ok(room.move(room.players[0].id, 'stay').error);
 });
 
-check('estancamiento y límite: 4 fallos → mapa renovado (muertos quietos, historial vacío); 40 disparos → empate técnico', () => {
+// cambio autorizado (P1, spec/01 §10.4, 2026-09-24): ya no hay renovación de mapa por estancamiento
+check('sin renovación y límite: 4 fallos → el mismo mapa (muertos quietos, historial intacto); 40 disparos → empate técnico', () => {
   const room = headless(4, 2, 'chaos', 'chaos');
   room.start();
   const dead = room.soldiers[0];
   dead.alive = false;
   const deadPos = { x: dead.x, y: dead.y };
-  const before = room.soldiers.filter((s) => s.alive).map((s) => [s.x, s.y]);
-  for (let i = 0; i < 3; i++) { assert.ok(miss(room).ok); assert.equal(room.remaps, 0); }
-  assert.equal(room.shotsNoKill, 3);
-  assert.ok(miss(room).ok);
-  assert.equal(room.remaps, 1, 'cuarto fallo seguido → mapa nuevo'); assert.equal(room.shotsNoKill, 0);
+  const map0 = JSON.stringify(room.obstacles);
+  for (let i = 0; i < 4; i++) { assert.ok(miss(room).ok); assert.equal(room.remaps, 0); }
+  assert.equal(room.shotsNoKill, 4, 'los fallos siguen contando');
+  assert.equal(JSON.stringify(room.obstacles), map0, 'el mapa no cambia (los bocados van aparte)');
   assert.deepEqual([dead.x, dead.y], [deadPos.x, deadPos.y], 'el muerto no se mueve');
-  const after = room.soldiers.filter((s) => s.alive).map((s) => [s.x, s.y]);
-  assert.notDeepEqual(after, before, 'los vivos se recolocan');
-  assert.equal(room.history.length, 0, 'la memoria de expresiones se vacía');
-  assert.ok(room.chat.some((c) => /mapa renovado \(1\)/.test(c.text)));
+  assert.equal(room.history.length, 4, 'la memoria de expresiones no se vacía');
+  assert.ok(!room.chat.some((c) => /renovado/.test(c.text)));
   while (room.phase === 'playing') assert.ok(miss(room).ok);
-  assert.equal(room.shots, 40); assert.equal(room.remaps, 9, 'remapas en 4, 8, … 36');
+  assert.equal(room.shots, 40); assert.equal(room.remaps, 0, 'nunca se renueva');
   assert.equal(room.result.byLimit, true); assert.equal(room.winner, 'right', 'con 1-1 en bajas (uno muerto a mano) decide… no: 0 kills; deciden supervivientes 1 vs 2');
   assert.equal(room.result.shots, 40); assert.equal(room.result.aliveLeft, 1); assert.equal(room.result.aliveRight, 2);
   assert.ok(room.chat.some((c) => /Límite de disparos/.test(c.text)));

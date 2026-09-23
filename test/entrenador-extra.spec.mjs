@@ -22,6 +22,16 @@ const T = await import('../evo/train.js');
 const store = await import('../evo/store.js');
 const { playGame } = await import('../server/headless.js');
 const paramRanges = (net) => { const out = {}; let off = 0; for (const p of net.paramList()) { (out[p.blockId] ||= []).push([off, off + p.array.length]); off += p.array.length; } return out; };
+// cambio autorizado (P1, 2026-09-24): con el mapa de círculos, en la semilla 5 el Sniper mata antes de que la red decida;
+// se busca desde la 5 la primera partida en la que la red llega a decidir
+const gameWhereNetDecides = (netId) => {
+  for (let seed = 5; seed < 60; seed++) {
+    const r = playGame({ seed, left: { type: 'net', netId, learn: true }, right: { type: 'sniper' }, soldiers: 1 });
+    const p = r.room.players.find((x) => x.agentType === 'net');
+    if (Object.values(r.trajectories[p.id].soldiers).some((steps) => steps.length)) return r;
+  }
+  throw new Error('premisa: ninguna semilla de 5 a 59 deja decidir a la red');
+};
 
 check('applyUpdate: congelar un bloque intermedio deja exactamente ese bloque quieto y mueve todos los demás −lr·g; clipNorm por defecto 5', () => {
   const g = normalize(TEMPLATES.sniper.genome);
@@ -78,7 +88,7 @@ check('evolutionStep: actualización exacta lr/(pop·σ)·Σ (F⁺−F⁻)·ε c
 check('learnFromGames con Corazonada: valueLoss finito y > 0 (los valores de la decisión entran en la referencia)', () => {
   const r0 = store.saveNet({ ...JSON.parse(JSON.stringify(TEMPLATES.seer.genome)), id: 'ex-v', name: 'ex-v' }); assert.ok(r0.ok);
   const g0 = store.loadNet('ex-v');
-  const r = playGame({ seed: 5, left: { type: 'net', netId: 'ex-v', learn: true }, right: { type: 'sniper' }, soldiers: 1 });
+  const r = gameWhereNetDecides('ex-v');
   const p = r.room.players.find((x) => x.agentType === 'net');
   const game = { events: r.events, trajectory: r.trajectories[p.id], playerId: p.id };
   const net = compile(g0);

@@ -25,20 +25,23 @@ const { createAgent } = await import('../agents/registry.js');
 
 // ---------- validez independiente (spec/01 §3), para no fiarse del código ----------
 const PLANE = C.PLANE, R = C.MOVE_RADIUS, BODY = C.BODY, SEP = C.MIN_SEPARATION;
-const insideExpanded = (P, o) => !(P.x < o.x - BODY || P.x > o.x + o.w + BODY || P.y < o.y - BODY || P.y > o.y + o.h + BODY);
-const segmentClear = (from, P, obstacles) => {
+// cambio autorizado (P1, 2026-09-24): el terreno también son círculos y bocados (spec/01 §10.1, reescrito aquí): círculo
+// d ≤ r + BODY, rectángulo agrandado BODY; sólido si está en algún obstáculo y fuera de los bocados encogidos (d < r − BODY)
+const insideExpanded = (P, o) => (o.kind === 'circle' ? dist(P, o) <= o.r + BODY : !(P.x < o.x - BODY || P.x > o.x + o.w + BODY || P.y < o.y - BODY || P.y > o.y + o.h + BODY));
+const solid = (P, obstacles, bites) => obstacles.some((o) => insideExpanded(P, o)) && !bites.some((b) => dist(P, b) < b.r - BODY);
+const segmentClear = (from, P, obstacles, bites = []) => {
   for (let k = 1; k <= 10; k++) {
     const t = k / 10, Q = { x: from.x + (P.x - from.x) * t, y: from.y + (P.y - from.y) * t };
-    if (obstacles.some((o) => insideExpanded(Q, o))) return false;
+    if (solid(Q, obstacles, bites)) return false;
   }
   return true;
 };
-const isValid = (P, from, soldiers, selfId, obstacles) =>
+const isValid = (P, from, soldiers, selfId, obstacles, bites = []) =>
   dist(P, from) <= R + 1e-9 &&
   P.x >= PLANE.xMin + BODY && P.x <= PLANE.xMax - BODY && P.y >= PLANE.yMin + BODY && P.y <= PLANE.yMax - BODY &&
-  obstacles.every((o) => !insideExpanded(P, o)) &&
+  !solid(P, obstacles, bites) &&
   soldiers.every((s) => s.id === selfId || !s.alive || dist(P, s) >= SEP) &&
-  segmentClear(from, P, obstacles);
+  segmentClear(from, P, obstacles, bites);
 // mejor distancia posible a T con una rejilla fina (fuerza bruta)
 const bruteBest = (T, from, soldiers, selfId, obstacles) => {
   let best = Infinity;
@@ -309,7 +312,7 @@ await check('fire con move en el cuerpo: aplica el movimiento (validado) y regis
   assert.deepEqual(room.lastMove.from, from);
   assert.ok(dist(room.lastMove.to, from) <= C.MOVE_RADIUS + 1e-9);
   assert.ok(near(soldier.x, room.lastMove.to.x) && near(soldier.y, room.lastMove.to.y));
-  assert.ok(isValid(room.lastMove.to, from, room.soldiers, soldier.id, room.obstacles));
+  assert.ok(isValid(room.lastMove.to, from, room.soldiers, soldier.id, room.obstacles, room.bites));
   assert.ok(room.turn && room.turn.playerId !== pid, 'turno del otro jugador');
   const r2 = room.fire(room.turn.playerId, { mode: 'function', expr: '0.1*x', move: 'stay' });
   assert.ok(r2.ok && room.lastMove.stayed === true && room.lastMove.requested === null);

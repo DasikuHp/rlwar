@@ -85,9 +85,15 @@ await check('R2: runDuel tiene ocupadas las dos redes todo el duelo ({kind: duel
   assert.equal(busy.heldBy('oc-c'), null);
 });
 
-// una partida guardada donde decide la red (para bofetadas en proceso)
+// una partida guardada donde decide la red (para bofetadas en proceso): la primera semilla desde `seed` en la que
+// la red llega a disparar (con algunas semillas muere antes de su primer turno)
 const savedGameOf = (genome, seed) => {
-  const r = playGame({ seed, left: { type: 'net', genome, learn: true }, right: { type: 'greedy', level: 1 }, soldiers: 1 });
+  let r = null;
+  for (let s = seed; s < seed + 50 && !r; s++) {
+    const t = playGame({ seed: s, left: { type: 'net', genome, learn: true }, right: { type: 'greedy', level: 1 }, soldiers: 1 });
+    if (t.events.some((e) => e.type === 'decision' && e.actor.netId === genome.id && e.data.phase === 'shoot')) r = t;
+  }
+  assert.ok(r, 'alguna semilla en la que la red dispara');
   const gameId = r.events[0].game;
   store.saveGame({ gameId, kind: 'exhibition', seed, nets: [genome.id], ts: Date.now() }, r.events, r.trajectories);
   return store.loadGame(gameId);
@@ -173,9 +179,10 @@ if (BASE) {
     const a = await mkNet('seer', 'Ocupada Duelo'), b = await mkNet('sniper', 'Rival Duelo'), c = await mkNet('seer', 'Tercera');
     const { game, dec } = await decisionOf(a, (await exhibition(a, { seed: 51 })).gameId);
     assert.ok(dec, 'hay una decisión de disparo');
-    const d = await api('/api/lab/duels', 'POST', { a, b, learning: 'mix', speed: 'turbo', soldiers: 4, seed: 7 });
+    // x10: en modo rápido dura ~25 s (turbo, ~2 s: acabaría antes de las peticiones)
+    const d = await api('/api/lab/duels', 'POST', { a, b, learning: 'mix', speed: 'x10', soldiers: 4, seed: 7 });
     assert.equal(d.status, 202, d.text);
-    await until(async () => { const r = (await api(`/api/lab/duels/${d.body.id}`)).body; return r && r.status === 'running' && r.games.length >= 1 ? r : null; }, 60000, 'duelo en marcha');
+    await until(async () => { const r = (await api(`/api/lab/duels/${d.body.id}`)).body; return r && r.status === 'running' ? r : null; }, 60000, 'duelo en marcha');
     const g = await genomeOf(a);
     const put = await api(`/api/lab/nets/${a}`, 'PUT', { ...g, name: 'Otro nombre' });
     assert.equal(put.status, 409, put.text); assert.match(put.body.error, /duelo/);
@@ -218,8 +225,9 @@ if (BASE) {
     const th = (await api('/api/lab/throne')).body;
     if (!th.queen) { const s = await api('/api/lab/throne/challenge', 'POST', { challenger: q }); assert.equal(s.status, 200, s.text); }
     const queen = (await api('/api/lab/throne')).body.queen;
-    const d = await api('/api/lab/duels', 'POST', { a: queen, b: x, learning: 'frozen', speed: 'turbo', soldiers: 4, seed: 9 });
+    const d = await api('/api/lab/duels', 'POST', { a: queen, b: x, learning: 'frozen', speed: 'x10', soldiers: 4, seed: 9 });
     assert.equal(d.status, 202, d.text);
+    await until(async () => { const r = (await api(`/api/lab/duels/${d.body.id}`)).body; return r && r.status === 'running' ? r : null; }, 60000, 'duelo de la reina en marcha');
     const ch = await api('/api/lab/throne/challenge', 'POST', { challenger: c });
     assert.equal(ch.status, 409, ch.text); assert.match(ch.body.error, /reina/);
     await until(async () => { const r = (await api(`/api/lab/duels/${d.body.id}`)).body; return r && r.status !== 'running' ? r : null; }, 180000, 'fin del duelo');

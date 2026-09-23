@@ -184,11 +184,12 @@ export async function runGeneration(body = {}, hooks = {}) {
     const other = h === 'A' ? 'B' : 'A';
     const mother = loadNet(champ(h)), rival = loadNet(champ(other));
     const jobId = hooks.registerJob ? hooks.registerJob('children', mother.id) : nextJobId();
-    const existing = new Set(listNets().map((x) => x.id));
+    const all = listNets();
+    const existing = new Set(all.map((x) => x.id)), names = new Set(all.map((x) => x.name));
     const kids = [];
     for (let k = 0; k < childrenCfg.n; k++) {
-      const { child } = mutate(mother, mutationConfig(childrenCfg.mutation), makeRng(seed + 100 * (h === 'A' ? 1 : 2) + k), { sibling: k, existingIds: existing });
-      existing.add(child.id);
+      const { child } = mutate(mother, mutationConfig(childrenCfg.mutation), makeRng(seed + 100 * (h === 'A' ? 1 : 2) + k), { sibling: k, existingIds: existing, existingNames: names });
+      existing.add(child.id); names.add(child.name);
       const r = saveNet(child);
       if (!r.ok) throw new Error(`hijo ${child.id} inválido`);
       registerBirth(loadNet(child.id));

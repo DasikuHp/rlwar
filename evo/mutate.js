@@ -393,7 +393,11 @@ export function mutate(parent, config, rng, opts = {}) {
     g = next; a = nextA;
   }
   const generation = (parent.lineage && parent.lineage.generation ? parent.lineage.generation : 0) + 1;
-  const name = childName(parent.name, generation, opts.sibling || 0);
+  // con existingNames, la primera letra libre desde la de sibling: nunca dos redes con el mismo nombre (spec/05 §10)
+  const taken = opts.existingNames ? new Set([...opts.existingNames].map((x) => String(x).toLocaleLowerCase('es'))) : null;
+  let s = opts.sibling || 0;
+  while (taken && taken.has(childName(parent.name, generation, s).toLocaleLowerCase('es'))) s++;
+  const name = childName(parent.name, generation, s);
   g.name = name;
   g.id = uniqueIdIn(slugify(name), opts.existingIds);
   g.lineage = { generation, parents: [parent.id], born: opts.now || new Date().toISOString(), mutations: ops };

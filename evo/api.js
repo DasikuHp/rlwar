@@ -36,11 +36,12 @@ function startChildrenJob({ genome, n, mutation, games, opponent, soldiers, seed
   (async () => {
     try {
       await new Promise((r) => setImmediate(r));
-      const existing = new Set(listNets().map((x) => x.id));
+      const all = listNets();
+      const existing = new Set(all.map((x) => x.id)), names = new Set(all.map((x) => x.name));
       const children = [];
       for (let k = 0; k < n; k++) {
-        const { child } = mutate(genome, mutation, makeRng(seed + k), { sibling: k, existingIds: existing });
-        existing.add(child.id);
+        const { child } = mutate(genome, mutation, makeRng(seed + k), { sibling: k, existingIds: existing, existingNames: names });
+        existing.add(child.id); names.add(child.name);
         const r = saveNet(child);
         if (!r.ok) throw new Error(`el hijo ${child.id} no se pudo guardar: ${JSON.stringify(r.errors && r.errors[0])}`);
         registerBirth(loadNet(child.id));

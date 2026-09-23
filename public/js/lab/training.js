@@ -1,7 +1,10 @@
 // Lógica pura del panel de entreno (parte 4; spec/04 §6 y §9.6). Sin DOM.
+import { DEFAULT_LEARNING } from '../../../shared/genome.js';
 
 const int = (v) => (v === '' || v === null || v === undefined ? NaN : Number(v));
 const isInt = (n) => Number.isInteger(n);
+// un opcional escrito (también 0); vacío = que el servidor ponga su valor por defecto (spec/08 §12)
+const given = (v) => v !== '' && v !== null && v !== undefined && Number.isFinite(Number(v));
 
 // formulario → cuerpo de POST /api/lab/trainings, con los mismos límites que el servidor (evo/api.js)
 export function trainingBody(f) {
@@ -17,7 +20,7 @@ export function trainingBody(f) {
   } else if (f.durationKind === 'plateau') {
     const w = int(f.window), g = Number(f.minGain);
     if (!(isInt(w) && w >= 1)) errors.push('La ventana de la meseta tiene que ser un entero de 1 o más partidas, p. ej. 50.');
-    duration = { plateau: { window: w, minGain: Number.isFinite(g) ? g : 0 } };
+    duration = { plateau: { window: w, ...(given(f.minGain) ? { minGain: g } : {}) } };
   } else {
     const n = int(f.games);
     if (!(isInt(n) && n >= 1)) errors.push('Las partidas tienen que ser un entero de 1 o más, p. ej. 200.');
@@ -37,7 +40,9 @@ export function trainingBody(f) {
     if (!(isInt(seed) && seed >= 0 && seed < 2 ** 31)) errors.push('La semilla tiene que ser un entero entre 0 y 2147483647 (o vacía para una al azar).');
   }
   if (errors.length) return { body: null, errors };
-  const opponents = { ...mix, hard: Number(f.hard) || 0, ghost: Number(f.ghost) || 0 };
+  const opponents = { ...mix };
+  if (given(f.hard)) opponents.hard = Number(f.hard);
+  if (given(f.ghost)) opponents.ghost = Number(f.ghost);
   if (f.antagonistId) opponents.antagonistId = f.antagonistId;
   const body = { netId: f.netId, opponents, speed };
   if (speed === 'turbo') body.workers = workers;
@@ -54,12 +59,30 @@ export function threadNote(learning, workers, speed) {
   if (speed !== 'turbo') return null;
   const l = learning || {};
   const method = l.method || 'gradient';
-  if (method === 'evolution') return null;
-  const batch = Math.max(1, Number(l.gradient && l.gradient.batchGames) || 4);
   const asked = Number(workers);
+  const pos = (v, def) => Math.max(1, Number(v) || def);
+  const batch = pos(l.gradient && l.gradient.batchGames, DEFAULT_LEARNING.gradient.batchGames);
+  const cycle = pos(l.both && l.both.gradientGamesPerCycle, DEFAULT_LEARNING.both.gradientGamesPerCycle);
+  const pop = Math.max(2, Number(l.evolution && l.evolution.population) || DEFAULT_LEARNING.evolution.population);
+  const perCopy = pos(l.evolution && l.evolution.gamesPerCandidate, DEFAULT_LEARNING.evolution.gamesPerCandidate);
+  const copies = 2 * Math.ceil(pop / 2); // parejas antitéticas
+  const evo = copies * perCopy;
+  const grad = method === 'both' ? Math.min(batch, cycle) : batch;
+  const evoAdvice = 'Para usar más, sube la población o las partidas por copia (Aprendizaje, nivel Científico).';
+  if (method === 'evolution') {
+    if (!(asked > evo)) return null;
+    return { used: evo, asked, text: `Con evolución se usan como mucho ${evo} de los ${asked} hilos: cada paso juega ${copies} copias × ${perCopy} partidas a la vez. ${evoAdvice}` };
+  }
+  if (method === 'both') {
+    if (!(asked > grad) && !(asked > evo)) return null;
+    const used = Math.min(asked, grad, evo);
+    const gradPart = asked > grad ? `En la parte de gradiente se usan como mucho ${grad} de los ${asked} hilos` : `En la parte de gradiente se usan los ${asked} hilos`;
+    const evoPart = asked > evo ? `${evo}` : 'todos';
+    const why = asked > grad ? (cycle < batch ? `: en cada ciclo solo se juegan ${cycle} partidas de gradiente, con los mismos pesos.` : `: las ${batch} partidas de cada lote se juegan con los mismos pesos antes de soñar.`) : '.';
+    return { used, asked, text: `${gradPart} (en la de evolución, ${evoPart})${why} Para usar más en la parte de gradiente, sube "Partidas por lote" y "Partidas de gradiente por ciclo"; en la de evolución, la población o las partidas por copia (Aprendizaje, nivel Científico).` };
+  }
   if (!(asked > batch)) return null;
-  const lead = method === 'both' ? `En la parte de gradiente se usan como mucho ${batch} de los ${asked} hilos (en la de evolución, todos)` : `Con aprendizaje por gradiente se usan como mucho ${batch} de los ${asked} hilos`;
-  return { used: batch, asked, text: `${lead}: las ${batch} partidas de cada lote se juegan con los mismos pesos antes de soñar. Para usar más, sube "Partidas por lote" en el editor (Aprendizaje, nivel Científico; sueña menos veces) o entrena por evolución.` };
+  return { used: batch, asked, text: `Con aprendizaje por gradiente se usan como mucho ${batch} de los ${asked} hilos: las ${batch} partidas de cada lote se juegan con los mismos pesos antes de soñar. Para usar más, sube "Partidas por lote" en el editor (Aprendizaje, nivel Científico; sueña menos veces) o entrena por evolución.` };
 }
 
 // media de los últimos n valores (al principio, de los que haya)

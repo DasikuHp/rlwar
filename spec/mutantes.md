@@ -534,3 +534,19 @@ como los demás tests "extra" que salen de los mutantes): el lote de 1 partida (
 el texto propio de "los dos" (`method === 'both'` → `!==`). Sobreviven `Math.max(1, …)` → `Math.max(0, …)` y
 `Math.max(-1, …)`, que son **equivalentes**: solo cambiarían algo con un lote de 0 o negativo, y el genoma válido lo
 limita a 1–64 (`shared/genome.js`); un 0 o un vacío ya cae en el 4 por defecto.
+
+## Auditoría P0 (2026-09-23): revisión de los "equivalentes" y mutantes del código nuevo
+Informe completo en `spec/auditoria-p0.md`. Los mutantes de la parte 4 se volvieron a tirar enteros y se revisaron uno
+a uno. No eran equivalentes, y ahora los cazan tests nuevos:
+| fichero:línea | contra | cazados |
+|---|---|---|
+| `model.js:95` (`setParam` perdía los demás ajustes) | `ui-editor` + `-extra` + `ui-huecos-p0` | 3/3 |
+| `whatif.js:25–50` (certeza con 2, "Ponla a jugar", `compare` nuevo) | `ui-arranque` + `ui-huecos-p0` + `ui-arreglos-p0` | 28/29 (el de la línea 30, `d && …` → `\|\|`, es equivalente: `chosenKey` solo se llama con las dos decisiones válidas) |
+| `training.js` entero (límites del formulario, `threadNote` nuevo) | `ui-entreno*` + `ui-huecos-p0` + `ui-arreglos-p0` | 173/221 |
+| `training.js:57–85` (`threadNote` nuevo) | `ui-entreno-hilos*` + `ui-arreglos-p0` + `-b` | 34/39 → con el caso "justo en el tope de la evolución", 37/39 |
+| `train.js:604` | `auditoria-p0` | 5/8 |
+
+Equivalentes que quedan en `threadNote`: `Math.max(1, …)` → 0/−1 y `Math.max(2, …)` → 0/−2 (el genoma no admite lotes,
+ciclos o poblaciones por debajo de esos mínimos; un valor vacío cae en el de `DEFAULT_LEARNING`). En `train.js:604`,
+`% 20` → `% -20` (en JS el signo lo pone el dividendo), `rivalId || null` (no lo lee nadie, P0-B8) y
+`genomes || null` (lo caza `arreglos-almacen`, M2).

@@ -24,10 +24,16 @@ function pick(d) {
   const ps = d.candidates.map((x) => x.p).sort((a, b) => b - a);
   return { i: c.i, family: c.family, expr: c.expr, p: c.p, certainty: ps.length > 1 ? ps[0] - ps[1] : 1 };
 }
+// el candidato elegido, reconocido por lo que es y no por su número (spec/08 §12): si la red editada cambia su
+// Imaginación, el #7 de antes y el de después pueden ser tiros distintos
+function chosenKey(d) {
+  const c = d && Array.isArray(d.candidates) ? d.candidates.find((x) => x.i === d.chosen) : null;
+  return c ? [c.mode, c.family, c.expr, c.angle ?? null].map(String).join('|') : null;
+}
 // la red guardada (before) frente a la que se está editando (after)
 export function compare(before, after) {
   const a = pick(before), b = pick(after);
-  return { same: !!(a && b && a.i === b.i), before: a, after: b };
+  return { same: !!(a && b && chosenKey(before) === chosenKey(after)), before: a, after: b };
 }
 
 // primeros pasos: cada uno está hecho si los datos lo dicen, no porque se haya pulsado

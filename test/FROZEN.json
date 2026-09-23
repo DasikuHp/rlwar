@@ -57,6 +57,7 @@
   "test/ui-dinastias.spec.mjs": "abccbbd192eeebb2b13decb64851b03057d795e8b4954987be53f79068ceab1f",
   "test/ui-editor-extra.spec.mjs": "6d38610340884c15d1c7e17d34cc76471e366e92aaa2b627714470bceb41906e",
   "test/ui-editor.spec.mjs": "cfd911ae0a1dfa6fe509a4937c271b5f8559479e9973f1416f0ff4271dff7d85",
+  "test/ui-entreno-hilos-b.spec.mjs": "4333df08504fe66b628e2f8288daede51fb9af167b217026fac4477824d0eed5",
   "test/ui-entreno-hilos.spec.mjs": "aafbe900773b8519e00de140e6a8f2ce04271420d201397b7585a7e3d774f5af",
   "test/ui-entreno.spec.mjs": "dfc66784021c01d3f6b0737542e2f32ddc202aef7ecb11fb15da3d803eb3e322",
   "test/ui-evolucion.spec.mjs": "2cd14c2885fdd16bce3747f286ded6e4f022b46ff6e22733aea1c407d7009d89",

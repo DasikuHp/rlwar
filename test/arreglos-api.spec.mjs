@@ -73,7 +73,7 @@ if (BASE) {
     for (const x of m) {
       assert.ok(x.name && x.explain && x.example && ['aprendiz', 'artesano', 'cientifico'].includes(x.level), x.key);
       const d = DEFAULT_MUTATION[x.key];
-      for (const p of x.params) { assert.equal(p.default, d[p.key], `${x.key}.${p.key}`); if (p.type === 'number') assert.ok(p.min <= p.default && p.default <= p.max); }
+      for (const p of x.params) { assert.deepEqual(p.default, d[p.key], `${x.key}.${p.key}`); if (p.type === 'number') assert.ok(p.min <= p.default && p.default <= p.max); }
       assert.deepEqual(x.params.map((p) => p.key).sort(), Object.keys(d).sort(), x.key);
     }
   });

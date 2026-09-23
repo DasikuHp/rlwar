@@ -7,7 +7,7 @@
   "test/api-verdad.spec.mjs": "ca1d8a176513740d87b7044f274d378726607f8beeb3cc874a61d7be94c10c60",
   "test/aprendizaje-extra.spec.mjs": "2a48c48c1d52088e53e56fa754b4a419ed655f25da2bb343ccc1a2cdb49a2da8",
   "test/aprendizaje.spec.mjs": "25c7544b912e59aa3b067246cdebae1856db2855372627934364035e35c185ea",
-  "test/arreglos-api.spec.mjs": "93b6bfeca95195dbba8de3c73d40d5cc791e3dee18dc2098205059d2f2950507",
+  "test/arreglos-api.spec.mjs": "5162302c929233f95607cb11a5bb4fd789160a476ba31f67825c28c0f42cc6c3",
   "test/arreglos-bofetada.spec.mjs": "60ef1cb5db4507f80256aaf6e8909e6c49601b0c4f51335a6ca37b55bf6ea3a3",
   "test/arreglos-boletin.spec.mjs": "38493043b4f45433fc06edd14f42a7369541f36e6c6fbf094239c93132a0ecd7",
   "test/arreglos-exhibicion.spec.mjs": "a2584cdfa708880b5b69b2593b6ca7384220b5e3675dd70eaa3f82b3efc7daa3",

@@ -3,7 +3,7 @@
 import { PLANE, HIT_RADIUS, MAX_SHOTS, STALL_SHOTS, BODY, MOVE_RADIUS, MOVE_DIRS } from './constants.js';
 import { tryCompile } from './parser.js';
 import { simulateShot } from './solver.js';
-import { slideMove, insideExpanded, los } from './geometry.js';
+import { slideMove, los, isSolid } from './geometry.js';
 import { normalize, eyeDim, BLOCKS } from './genome.js';
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -14,7 +14,9 @@ const DIAG = 58; // diagonal del plano (≈ 58.3), normalización de distancias
 export const toLocal = (p, team) => (team === 'right' ? { x: -p.x, y: p.y } : { x: p.x, y: p.y });
 export const toWorld = toLocal;
 export const worldToLocalSlope = (a, team) => (team === 'right' ? -a : a);
-const localRect = (o, team) => (team === 'right' ? { x: -(o.x + o.w), y: o.y, w: o.w, h: o.h } : { ...o });
+// obstáculo en el marco local: un círculo solo se refleja; un rectángulo, como siempre
+const localRect = (o, team) => (o.kind === 'circle' ? { ...o, x: team === 'right' ? -o.x : o.x } : team === 'right' ? { x: -(o.x + o.w), y: o.y, w: o.w, h: o.h } : { ...o });
+const terrainOfState = (state) => ({ obstacles: state.obstacles || [], bites: state.bites || [] });
 
 // sustitución textual de variables: x → (-x); en ode2 además y' → (-(y'))
 function substitute(expr, mode) {
@@ -211,19 +213,31 @@ export function simulateCandidate(cand, ctx, fine = false) {
   const start = { x: ctx.soldier.x, y: ctx.soldier.y };
   if (!r.ok) return { type: 'invalid', minDist: 30, endX: toLocal(start, team).x, endY: start.y, points: 1, victimId: null, polyline: [[toLocal(start, team).x, start.y], [toLocal(start, team).x, start.y]] };
   const shot = simulateShot({ mode: cand.mode, f: r.f, start, dir: team === 'right' ? -1 : 1, angle: (cand.angle || 0) * Math.PI / 180,
-    soldiers: ctx.soldiers, obstacles: ctx.obstacles, shooterId: ctx.soldier.id, ds: fine ? 0.01 : 0.05, maxSteps: fine ? 20000 : 2500 });
+    soldiers: ctx.soldiers, obstacles: ctx.obstacles, bites: ctx.bites || [], shooterId: ctx.soldier.id, ds: fine ? 0.01 : 0.05, maxSteps: fine ? 20000 : 2500 });
+  // con impactos, lo que ve la red llega hasta el primero (dónde golpea primero y lo cerca que pasó hasta ahí), como cuando
+  // el tiro se paraba en él (spec/01 §10.5); el dibujo sigue el recorrido entero
+  const hits = shot.result.hits || [];
+  const fh = shot.result.firstHit;
+  const seen = fh ? [...shot.points.slice(0, fh.points - 1), [fh.x, fh.y]] : shot.points;
   const enemies = ctx.soldiers.filter((s) => s.alive && s.team !== team);
   let minDist = 30;
-  for (const e of enemies) for (const [px, py] of shot.points) { const d = Math.hypot(e.x - px, e.y - py); if (d < minDist) minDist = d; }
-  const end = toLocal({ x: shot.result.x, y: shot.result.y }, team);
-  return { type: shot.result.type, minDist, endX: end.x, endY: end.y, points: shot.points.length, victimId: shot.result.soldierId ?? null, polyline: polyline(shot.points, team) };
+  for (const e of enemies) for (const [px, py] of seen) { const d = Math.hypot(e.x - px, e.y - py); if (d < minDist) minDist = d; }
+  const end = toLocal(fh ? { x: fh.x, y: fh.y } : { x: shot.result.x, y: shot.result.y }, team);
+  return { type: shot.result.type, end: shot.result.end, minDist, endX: end.x, endY: end.y, points: fh ? fh.points : shot.points.length, victimId: shot.result.soldierId ?? null,
+    hitIds: hits.map((h) => h.soldierId), enemiesHit: hits.filter((h) => h.team !== team).length, alliesHit: hits.filter((h) => h.team === team).length, polyline: polyline(shot.points, team) };
 }
+// "mata" y "fuego amigo" = a cuántos enemigos y a cuántos aliados alcanza (como mucho 4); con un solo impacto valen 1,
+// lo mismo que antes del tiro que atraviesa (spec/01 §10.5)
 export function simulatorFeatures(sim, ctx) {
   const { enemies } = ctxLocal(ctx);
   const t = sim.type;
-  return Float64Array.from([t === 'kill' ? 1 : 0, t === 'suicide' ? 1 : 0, t === 'obstacle' ? 1 : 0, t === 'wall' ? 1 : 0,
-    ['kill', 'suicide', 'obstacle', 'wall'].includes(t) ? 0 : 1, Math.min(1, sim.minDist / 10), sim.endX / 25, sim.endY / 15, Math.min(1, sim.points / 200),
-    t === 'kill' && enemies[0] && sim.victimId === enemies[0].id ? 1 : 0]);
+  const hitE = Number.isInteger(sim.enemiesHit) ? sim.enemiesHit : t === 'kill' ? 1 : 0;
+  const hitA = Number.isInteger(sim.alliesHit) ? sim.alliesHit : t === 'suicide' ? 1 : 0;
+  const end = sim.end || t, noHit = !hitE && !hitA;
+  const nearest = enemies[0] ? (Array.isArray(sim.hitIds) ? sim.hitIds.includes(enemies[0].id) : t === 'kill' && sim.victimId === enemies[0].id) : false;
+  return Float64Array.from([Math.min(4, hitE), Math.min(4, hitA), noHit && end === 'obstacle' ? 1 : 0, noHit && end === 'wall' ? 1 : 0,
+    noHit && !['obstacle', 'wall'].includes(end) ? 1 : 0, Math.min(1, sim.minDist / 10), sim.endX / 25, sim.endY / 15, Math.min(1, sim.points / 200),
+    nearest ? 1 : 0]);
 }
 
 // ---------- destinos de movimiento ----------
@@ -239,17 +253,18 @@ export function moveDestinations(state, soldier) {
     else {
       const th = (i - 1) * (2 * Math.PI / MOVE_DIRS);
       const reqL = { x: lc.me.x + MOVE_RADIUS * Math.cos(th), y: lc.me.y + MOVE_RADIUS * Math.sin(th) };
-      const r = slideMove({ from, requested: toWorld(reqL, lc.team), soldiers: state.soldiers, obstacles: state.obstacles, selfId: soldier.id });
+      const r = slideMove({ from, requested: toWorld(reqL, lc.team), soldiers: state.soldiers, obstacles: state.obstacles, bites: state.bites || [], selfId: soldier.id });
       to = r.to; slid = r.slid;
     }
     let cover = 0, distEnemy = null, nearest = null;
-    for (const e of enemiesW) { const d = dist(to, e); if (distEnemy === null || d < distEnemy) { distEnemy = d; nearest = e; } if (los(to, e, state.obstacles)) cover++; }
-    const seen = nearest ? los(to, nearest, state.obstacles) : false;
+    const terrain = terrainOfState(state);
+    for (const e of enemiesW) { const d = dist(to, e); if (distEnemy === null || d < distEnemy) { distEnemy = d; nearest = e; } if (los(to, e, terrain)) cover++; }
+    const seen = nearest ? los(to, nearest, terrain) : false;
     const tl = toLocal(to, lc.team);
     const allyD = lc.allies.length ? Math.min(...lc.allies.map((a) => dist(to, a))) : null;
-    const adjacent = state.obstacles.some((o) => insideExpanded(to, o, BODY + 1));
+    const adjacent = isSolid(to, terrain, BODY + 1);
     const feat = Float64Array.from([(tl.x - lc.me.x) / 2, (tl.y - lc.me.y) / 2, i === 0 ? 1 : 0, slid ? 1 : 0, cover / 4,
-      e1 ? (dist(to, e1) - d0) / 2 : 0, allyD === null ? 1 : Math.min(1, allyD / 10), e1 ? (los(to, e1, state.obstacles) ? 1 : 0) : 0, adjacent ? 1 : 0]);
+      e1 ? (dist(to, e1) - d0) / 2 : 0, allyD === null ? 1 : Math.min(1, allyD / 10), e1 ? (los(to, e1, terrain) ? 1 : 0) : 0, adjacent ? 1 : 0]);
     out.push({ i, to, stay: i === 0, slid, cover, distEnemy, los: seen, feat });
   }
   return out;
@@ -269,7 +284,7 @@ function eyeFeatures(state, soldier, lc) {
   const f = [lc.me.x / 25, lc.me.y / 15, 1, lc.allies.length / 3, lc.enemies.length / 4];
   for (let i = 0; i < 2; i++) {
     const e = lc.enemies[i];
-    if (e) f.push((e.l.x - lc.me.x) / 50, (e.l.y - lc.me.y) / 30, dist(e.l, lc.me) / DIAG, los(soldier, e, state.obstacles) ? 1 : 0, 1);
+    if (e) f.push((e.l.x - lc.me.x) / 50, (e.l.y - lc.me.y) / 30, dist(e.l, lc.me) / DIAG, los(soldier, e, terrainOfState(state)) ? 1 : 0, 1);
     else f.push(0, 0, 0, 0, 0);
   }
   const e1 = lc.enemies[0];
@@ -282,7 +297,8 @@ function eyeFeatures(state, soldier, lc) {
   return Float64Array.from(f);
 }
 function eyeObstacles(state, lc, slots) {
-  const rects = lc.obstaclesL.map((o) => ({ ...o, cx: o.x + o.w / 2, cy: o.y + o.h / 2 })).sort((a, b) => dist({ x: a.cx, y: a.cy }, lc.me) - dist({ x: b.cx, y: b.cy }, lc.me));
+  // un círculo se ve por su caja (spec/01 §10.5): mismo tamaño de entrada que un rectángulo
+  const rects = lc.obstaclesL.map((o) => (o.kind === 'circle' ? { cx: o.x, cy: o.y, w: 2 * o.r, h: 2 * o.r } : { cx: o.x + o.w / 2, cy: o.y + o.h / 2, w: o.w, h: o.h })).sort((a, b) => dist({ x: a.cx, y: a.cy }, lc.me) - dist({ x: b.cx, y: b.cy }, lc.me));
   const f = [];
   for (let i = 0; i < slots; i++) { const o = rects[i]; if (o) f.push(o.cx / 25, o.cy / 15, o.w / 10, o.h / 15, 1); else f.push(0, 0, 0, 0, 0); }
   f.push(state.obstacles.length / 8);
@@ -305,7 +321,7 @@ function eyeHistory(state, soldier, depth) {
 }
 function eyeRadar(state, soldier, lc, rays) {
   const f = [];
-  const inRect = (p, o) => p.x >= o.x && p.x <= o.x + o.w && p.y >= o.y && p.y <= o.y + o.h;
+  const terrain = terrainOfState(state);
   for (let k = 0; k < rays; k++) {
     const th = k * 2 * Math.PI / rays;
     const dirL = { x: Math.cos(th), y: Math.sin(th) };
@@ -313,7 +329,7 @@ function eyeRadar(state, soldier, lc, rays) {
     let d = 0, type = 0;
     for (let s = 1; s < 400; s++) {
       const p = { x: soldier.x + s * 0.25 * dirW.x, y: soldier.y + s * 0.25 * dirW.y };
-      if (state.obstacles.some((o) => inRect(p, o))) { d = s * 0.25; type = 1; break; }
+      if (isSolid(p, terrain, 0)) { d = s * 0.25; type = 1; break; }
       if (p.x < PLANE.xMin || p.x > PLANE.xMax || p.y < PLANE.yMin || p.y > PLANE.yMax) { d = s * 0.25; type = 0; break; }
     }
     f.push(d / DIAG, type);
@@ -325,7 +341,7 @@ function eyeClock(state, soldier, lc, phase) {
   const myPlayer = (state.players || []).find((p) => p.id === soldier.ownerId) || { kills: 0 };
   const enemyKills = (state.players || []).filter((p) => p.team !== soldier.team).reduce((s, p) => s + (p.kills || 0), 0);
   const myAlive = state.soldiers.filter((s) => s.alive && s.ownerId === soldier.ownerId).length;
-  return Float64Array.from([st.shots / MAX_SHOTS, st.shotsNoKill / STALL_SHOTS, Math.min(1, st.remaps / 3), myAlive / 4, lc.enemies.length / 4,
+  return Float64Array.from([st.shots / MAX_SHOTS, Math.min(1, st.shotsNoKill / STALL_SHOTS), Math.min(1, st.remaps / 3), myAlive / 4, lc.enemies.length / 4,
     ((myPlayer.kills || 0) - enemyKills) / 4, Math.min(1, (soldier.turns || 0) / 20), phase === 'move' ? 1 : 0]);
 }
 function eyeMates(state, soldier, lc) {
@@ -339,9 +355,15 @@ function eyeMates(state, soldier, lc) {
   for (const a of allies) {
     dx += a.l.x - lc.me.x; dy += a.l.y - lc.me.y;
     const d = dist(a.l, lc.me); minD = Math.min(minD, d); maxD = Math.max(maxD, d);
-    if (lc.enemies.some((e) => los(a, e, state.obstacles))) fLos++;
+    if (lc.enemies.some((e) => los(a, e, terrainOfState(state)))) fLos++;
     const s = lastOf(a.id);
-    if (s) { if (s.result && s.result.type === 'kill') fKill++; if (s.result && s.result.type === 'suicide') fFF++; mMin += Math.min(1, (s.minDist ?? 30) / 10); if (s.stayed) fStay++; }
+    if (s) {
+      // el tiro atraviesa: cuentan sus bajas (un tiro puede matar a un enemigo y a un aliado); los antiguos, su tipo
+      const r = s.result || {};
+      if (Number.isInteger(r.kills) ? r.kills > 0 : r.type === 'kill') fKill++;
+      if (Number.isInteger(r.friendly) ? r.friendly > 0 : r.type === 'suicide') fFF++;
+      mMin += Math.min(1, (s.minDist ?? 30) / 10); if (s.stayed) fStay++;
+    }
     else mMin += 1;
   }
   return Float64Array.from([n / 3, dx / n / 50, dy / n / 30, minD / DIAG, maxD / DIAG, fLos / n, fKill / n, fFF / n, mMin / n, fStay / n, dead / 3, 1]);
@@ -357,7 +379,7 @@ function eyeMap(state, soldier, lc, params) {
         let inside = 0;
         for (let a = 0; a < 4; a++) for (let b = 0; b < 4; b++) {
           const x = PLANE.xMin + (col + (a + 0.5) / 4) * cell, y = PLANE.yMin + (row + (b + 0.5) / 4) * cell;
-          if (lc.obstaclesL.some((o) => x >= o.x && x <= o.x + o.w && y >= o.y && y <= o.y + o.h)) inside++;
+          if (isSolid(toWorld({ x, y }, lc.team), terrainOfState(state), 0)) inside++;
         }
         grid[c * Hc * Wc + row * Wc + col] = inside / 16;
       }
@@ -381,7 +403,7 @@ export function observe(state, soldierId, genome, { phase = 'shoot', cands = nul
   const soldier = state.soldiers.find((s) => s.id === soldierId);
   if (!soldier) throw new Error(`soldado ${soldierId} no está en el estado`);
   const lc = localCtx(state, soldier);
-  const ctx = { soldiers: state.soldiers, obstacles: state.obstacles, soldier, enemies: state.soldiers.filter((s) => s.alive && s.team !== soldier.team), dir: soldier.team === 'left' ? 1 : -1, team: soldier.team };
+  const ctx = { soldiers: state.soldiers, obstacles: state.obstacles, bites: state.bites || [], soldier, enemies: state.soldiers.filter((s) => s.alive && s.team !== soldier.team), dir: soldier.team === 'left' ? 1 : -1, team: soldier.team };
   const N = g.imagination.n;
   const obs = { ctx: {}, cand: {}, move: {}, team: {}, candidates: null, destinations: null, sims: null };
   const eyes = g.blocks.filter((b) => b.type.startsWith('eye.'));
@@ -435,7 +457,7 @@ export function eyeLayout(block) {
     case 'eye.clock': push('disparos de la partida', 'disparos sin bajas', 'mapas renovados', 'mis soldados vivos', 'enemigos vivos', 'diferencia de bajas', 'mis turnos', 'fase (0 disparar, 1 mover)'); break;
     case 'eye.mates': push('compañeros vivos', 'compañeros: media x', 'compañeros: media y', 'compañero más cercano', 'compañero más lejano', 'compañeros con línea de tiro', 'compañeros que mataron', 'compañeros con fuego amigo', 'compañeros: distancia mínima del último tiro', 'compañeros que se quedaron quietos', 'compañeros muertos', 'hay compañeros'); break;
     case 'eye.candidates': push('familia recta', 'familia parábola', 'familia seno', 'familia EDO', 'familia artillería', 'familia salvaje', 'parámetro 1', 'parámetro 2', 'parámetro 3', 'error al enemigo 1', 'error al enemigo 2', 'es una EDO'); break;
-    case 'eye.simulator': push('mata', 'fuego amigo', 'choca con muro', 'choca con borde', 'otro final', 'distancia mínima al enemigo', 'x final', 'y final', 'longitud del tiro', 'la víctima es el enemigo 1'); break;
+    case 'eye.simulator': push('enemigos que mata', 'aliados que mata', 'choca con muro', 'choca con borde', 'otro final', 'distancia mínima al enemigo', 'x final', 'y final', 'longitud del tiro', 'mata al enemigo 1'); break;
     case 'eye.moves': push('desplazamiento x', 'desplazamiento y', 'es quedarse', 'deslizado', 'enemigos que me verían', 'me alejo del enemigo 1', 'distancia al aliado más cercano', 'línea de tiro al enemigo 1', 'pegado a un muro'); break;
     case 'eye.map': {
       const Wc = Math.round(50 / p.cell), Hc = Math.round(30 / p.cell);

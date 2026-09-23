@@ -28,8 +28,8 @@ export function create({ temperature = 0 } = {}) {
   const tmp = Math.max(0, Math.min(1, Number(temperature) || 0));
   return {
     meta,
-    chooseShot({ soldiers, obstacles, soldier, history = [], rng = Math.random }) {
-      const ctx = contextFor(soldiers, obstacles, soldier);
+    chooseShot({ soldiers, obstacles, bites = [], soldier, history = [], rng = Math.random }) {
+      const ctx = contextFor(soldiers, obstacles, soldier, bites);
       const cands = [];
       const n = Math.round(60 * (1 + tmp));
       for (let i = 0; i < n; i++) {

@@ -10,10 +10,10 @@ import { STEP, MAX_STEPS, MODES, TEAMS, MOVE_RADIUS, MOVE_DIRS } from '../shared
 
 export const COARSE = { ds: 0.05, maxSteps: 2500 };
 
-export function contextFor(soldiers, obstacles, soldier) {
+export function contextFor(soldiers, obstacles, soldier, bites = []) {
   const enemies = soldiers.filter((s) => s.alive && s.team !== soldier.team);
   const dir = soldier.team === TEAMS.LEFT ? 1 : -1;
-  return { soldiers, obstacles, soldier, enemies, dir };
+  return { soldiers, obstacles, bites, soldier, enemies, dir };
 }
 
 // Simula un candidato (coarse = barrido rápido para puntuar)
@@ -22,7 +22,7 @@ export function sim(ctx, cand, coarse) {
   if (!r.ok) return null;
   const shot = simulateShot({
     mode: cand.mode, f: r.f, start: { x: ctx.soldier.x, y: ctx.soldier.y },
-    angle: cand.angle || 0, soldiers: ctx.soldiers, obstacles: ctx.obstacles,
+    angle: cand.angle || 0, soldiers: ctx.soldiers, obstacles: ctx.obstacles, bites: ctx.bites || [],
     shooterId: ctx.soldier.id, dir: ctx.dir,
     ds: coarse ? COARSE.ds : STEP, maxSteps: coarse ? COARSE.maxSteps : MAX_STEPS,
   });
@@ -30,8 +30,11 @@ export function sim(ctx, cand, coarse) {
 }
 
 export function scoreShot(shot, enemies, soldier) {
-  if (shot.result.type === 'kill') return 1000;
-  if (shot.result.type === 'suicide') return -1000;
+  // el tiro atraviesa (spec/01 §10.3): dar a un aliado se evita siempre; cada enemigo alcanzado suma
+  const hits = shot.result.hits || [];
+  const allies = hits.filter((h) => h.team === soldier.team).length, foes = hits.length - allies;
+  if (allies || shot.result.type === 'suicide') return -1000;
+  if (foes || shot.result.type === 'kill') return 1000 * Math.max(1, foes);
   let near = 0;
   for (const e of enemies) for (const [px, py] of shot.points) {
     const d = Math.hypot(e.x - px, e.y - py);
@@ -182,7 +185,7 @@ export function searchShot(state, soldierId, tries = 40, opts = {}) {
   const rng = opts.rng || Math.random;
   const soldier = state.soldiers.find((s) => s.id === soldierId);
   if (!soldier) return { mode: MODES.FUNCTION, expr: '0.1*x' };
-  const ctx = contextFor(state.soldiers, state.obstacles, soldier);
+  const ctx = contextFor(state.soldiers, state.obstacles, soldier, state.bites || []);
   const cands = avoidRepeats([
     ...directShots(ctx, { jitter: 0.03, count: 5, rng }),
     ...randomTemplates(tries, rng),
@@ -209,16 +212,16 @@ export function moveOptions(ctx) {
     if (i === 0) { to = { x: from.x, y: from.y }; slid = false; }
     else {
       const th = (i - 1) * (2 * Math.PI / MOVE_DIRS);
-      const r = slideMove({ from, requested: { x: from.x + MOVE_RADIUS * Math.cos(th), y: from.y + MOVE_RADIUS * Math.sin(th) }, soldiers: ctx.soldiers, obstacles: ctx.obstacles, selfId: ctx.soldier.id });
+      const r = slideMove({ from, requested: { x: from.x + MOVE_RADIUS * Math.cos(th), y: from.y + MOVE_RADIUS * Math.sin(th) }, soldiers: ctx.soldiers, obstacles: ctx.obstacles, bites: ctx.bites || [], selfId: ctx.soldier.id });
       to = r.to; slid = r.slid;
     }
     let cover = 0, distEnemy = null, nearest = null;
     for (const e of ctx.enemies) {
       const d = Math.hypot(e.x - to.x, e.y - to.y);
       if (distEnemy === null || d < distEnemy) { distEnemy = d; nearest = e; }
-      if (los(to, e, ctx.obstacles)) cover++;
+      if (los(to, e, { obstacles: ctx.obstacles, bites: ctx.bites || [] })) cover++;
     }
-    out.push({ i, to, stay: i === 0, slid, cover, distEnemy, los: nearest ? los(to, nearest, ctx.obstacles) : false });
+    out.push({ i, to, stay: i === 0, slid, cover, distEnemy, los: nearest ? los(to, nearest, { obstacles: ctx.obstacles, bites: ctx.bites || [] }) : false });
   }
   return out;
 }

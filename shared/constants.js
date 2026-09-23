@@ -13,10 +13,11 @@ export const SHOT_SPEED = FAST ? 250 : 55;           // unidades/segundo para la
 export const NETWORK_STEP = 0.12;     // resolución de la trayectoria enviada por red
 export const MAX_PLAYERS = 8;
 export const SOLDIERS_PER_PLAYER = 2;
-// Anti-estancamiento: si nadie muere en N disparos se renueva el mapa; y hay un tope duro de disparos
+// STALL_SHOTS ya no renueva el mapa (spec/01 §10.4): solo escala "disparos sin bajas" del ojo Reloj; tope duro de disparos
 export const STALL_SHOTS = FAST ? 4 : 8;
 export const MAX_SHOTS = FAST ? 40 : 90;
 // Movimiento tras disparar (spec/01 §1)
+export const BITE_RADIUS = 0.78;     // bocado de cada explosión (12 px del original; spec/01 §10.1)
 export const MOVE_RADIUS = 2;         // radio máximo del movimiento (u)
 export const BODY = 0.5;              // cuerpo del soldado: distancia mínima a obstáculos y bordes
 export const MIN_SEPARATION = 1.0;    // distancia mínima entre centros de dos soldados vivos

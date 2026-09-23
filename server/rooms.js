@@ -50,6 +50,7 @@ export class Room {
     this.players = [];    // {id, name, token, team, isBot, soldiers}
     this.soldiers = [];   // {id, ownerId, team, x, y, alive, lastExpr}
     this.obstacles = [];
+    this.bites = [];        // bocados que las explosiones arrancan al terreno (spec/01 §10.1)
     this.turn = null;     // {playerId, soldierId, stage: 'shoot'|'move', deadline, radius?}
     this.lastShot = null; // {playerId, expr, mode, result, ts} (los puntos van por el evento 'shot')
     this.lastMove = null; // {playerId, soldierId, from, to, requested, slid, stayed, reason, ts}
@@ -64,7 +65,7 @@ export class Room {
     this.history = [];      // expresiones ya disparadas (memoria para los agentes)
     this.shots = 0;         // disparos totales de la partida
     this.shotsNoKill = 0;   // disparos seguidos sin bajas
-    this.remaps = 0;        // veces que se renovó el mapa por estancamiento
+    this.remaps = 0;        // siempre 0: ya no se renueva el mapa (spec/01 §10.4); se queda por la forma de la API
     this.agents = {};       // agente en proceso por jugador (se crean al empezar; guardan estado)
     this.pending = {};      // por jugador: {agent, choice} del turno en curso (para chooseMove)
     this.animEnd = 0;       // cuándo termina la animación del último disparo (ms)
@@ -127,7 +128,7 @@ export class Room {
     return { playerId: p ? p.id : null, soldierId: soldier ? soldier.id : null, netId: p ? p.netId || null : null };
   }
   coverOf(soldier, at = soldier) {
-    return this.soldiers.filter((e) => e.alive && e.team !== soldier.team && los(at, e, this.obstacles)).length;
+    return this.soldiers.filter((e) => e.alive && e.team !== soldier.team && los(at, e, { obstacles: this.obstacles, bites: this.bites })).length;
   }
 
   addPlayer(name, team = 'auto') {
@@ -193,6 +194,7 @@ export class Room {
     const n = this.soldiersPerPlayer;
     const map = genMap(n, this.rng);
     this.obstacles = map.obstacles;
+    this.bites = [];
     this.soldiers = [];
     for (const p of this.players) {
       const spots = map.placeSide(p.team, n);
@@ -219,7 +221,7 @@ export class Room {
     for (const p of this.players) {
       if (p.isBot) this.agents[p.id] = this.makeAgent(p);
     }
-    this.emit('game.start', { playerId: null, soldierId: null, netId: null }, { seed: this.seed, map: { name: map.name, biome: map.biome }, soldiers: n, players: this.players.map((p) => ({ playerId: p.id, name: p.name, netId: p.netId || null, agentType: p.agentType || null, team: p.team })) });
+    this.emit('game.start', { playerId: null, soldierId: null, netId: null }, { seed: this.seed, map: { name: map.name, biome: map.biome, obstacles: this.obstacles.map((o) => ({ ...o })) }, soldiers: n, players: this.players.map((p) => ({ playerId: p.id, name: p.name, netId: p.netId || null, agentType: p.agentType || null, team: p.team })) });
     // orden de turnos intercalando equipos
     const L = this.players.filter((p) => p.team === C.TEAMS.LEFT);
     const R = this.players.filter((p) => p.team === C.TEAMS.RIGHT);
@@ -319,7 +321,7 @@ export class Room {
   }
 
   moveOptionsFor(soldier) {
-    return moveOptions(contextFor(this.soldiers, this.obstacles, soldier));
+    return moveOptions(contextFor(this.soldiers, this.obstacles, soldier, this.bites));
   }
 
   agentTurn(player) {
@@ -330,7 +332,7 @@ export class Room {
     let choice;
     try {
       choice = agent.chooseShot({
-        soldiers: this.soldiers, obstacles: this.obstacles, soldier,
+        soldiers: this.soldiers, obstacles: this.obstacles, bites: this.bites, soldier,
         history: this.history.slice(-12),
         chat: this.chat.slice(-12).map((c) => c.text), // lo que dijo el rival: le llega de verdad
         temperature: player.temperature || 0,
@@ -379,8 +381,15 @@ export class Room {
     const dir = soldier.team === C.TEAMS.LEFT ? 1 : -1;
     const shot = simulateShot({
       mode, f: r.f, start: { x: soldier.x, y: soldier.y }, dir, angle,
-      soldiers: this.soldiers, obstacles: this.obstacles, shooterId: soldier.id,
+      soldiers: this.soldiers, obstacles: this.obstacles, bites: this.bites, shooterId: soldier.id,
     });
+    // el tiro atraviesa (spec/01 §10.3) y su explosión arranca un bocado si toca terreno (§10.1)
+    const hits = shot.result.hits || [];
+    const hitIds = new Set(hits.map((h) => h.soldierId));
+    const end = { x: shot.result.x, y: shot.result.y }, BR = C.BITE_RADIUS;
+    const touches = this.obstacles.some((o) => (o.kind === 'circle' ? Math.hypot(end.x - o.x, end.y - o.y) < o.r + BR : end.x > o.x - BR && end.x < o.x + o.w + BR && end.y > o.y - BR && end.y < o.y + o.h + BR));
+    const bite = touches ? { x: end.x, y: end.y, r: BR } : null;
+    if (bite) this.bites.push(bite);
 
     let minDist = 30;
     for (const e of this.soldiers) { if (!e.alive || e.team === soldier.team) continue; for (const [px, py] of shot.points) { const d = Math.hypot(e.x - px, e.y - py); if (d < minDist) minDist = d; } }
@@ -389,33 +398,42 @@ export class Room {
     const pend0 = this.pending[playerId];
     const decisionEventId = pend0 && pend0.choice && pend0.choice.decision && Number.isInteger(pend0.choice.decision.eventId) ? pend0.choice.decision.eventId : null;
     const fam = family && Array.isArray(params) ? { family, params: params.slice(0, 3) } : familyOf({ mode, expr, angle, team: soldier.team });
-    const logEntry = { turn: this.shots + 1, playerId, soldierId: soldier.id, team: soldier.team, mode, expr: String(expr).slice(0, 200), angle, family: fam.family, params: fam.params, result: { type: shot.result.type, soldierId: shot.result.soldierId ?? null }, minDist, stayed: null, points: coarsePoints(shot.points) };
+    const logEntry = { turn: this.shots + 1, playerId, soldierId: soldier.id, team: soldier.team, mode, expr: String(expr).slice(0, 200), angle, family: fam.family, params: fam.params, result: { type: shot.result.type, soldierId: shot.result.soldierId ?? null, hits: hits.map((h) => h.soldierId), kills: hits.filter((h) => h.team !== soldier.team).length, friendly: hits.filter((h) => h.team === soldier.team).length, end: shot.result.end }, minDist, stayed: null, points: coarsePoints(shot.points) };
     this.shotLog.push(logEntry);
     if (this.shotLog.length > 40) this.shotLog.shift();
-    const shotEventId = this.emit('shot', this.actorOf(soldier), { mode, expr: logEntry.expr, family: fam.family, params: fam.params, angle, result: logEntry.result, minDist, minAllyDist, decisionEventId });
+    const shotEventId = this.emit('shot', this.actorOf(soldier), { mode, expr: logEntry.expr, family: fam.family, params: fam.params, angle, result: logEntry.result, minDist, minAllyDist, decisionEventId, bite });
     // roces (spec/07 §12.1): enemigos vivos no alcanzados a ≤ 1 u de la trayectoria
     for (const e of this.soldiers) {
-      if (!e.alive || e.team === soldier.team || (shot.result.type === 'kill' && shot.result.soldierId === e.id)) continue;
+      if (!e.alive || e.team === soldier.team || hitIds.has(e.id)) continue;
       let d = Infinity; for (const [px, py] of shot.points) { const dd = Math.hypot(e.x - px, e.y - py); if (dd < d) d = dd; }
       if (d <= 1) this.emit('graze', this.actorOf(soldier), { soldierId: e.id, dist: Math.round(d * 1000) / 1000, shotEventId });
     }
     soldier.lastExpr = `${C.MODE_LABELS[mode]} ${String(expr).slice(0, 80)}`;
     let message;
-    if (shot.result.type === 'kill') {
-      const victim = this.soldiers.find((s) => s.id === shot.result.soldierId);
-      const victimOwner = this.players.find((p) => p.id === victim.ownerId);
-      victim.alive = false;
-      shooter.kills = (shooter.kills || 0) + 1;
-      if (victimOwner) victimOwner.deaths = (victimOwner.deaths || 0) + 1;
-      this.emit('kill', this.actorOf(soldier), { victimSoldierId: victim.id, victimPlayerId: victim.ownerId, victimName: victimOwner ? victimOwner.name : '?', shotEventId });
-      this.emit('death', this.actorOf(victim), { killerSoldierId: soldier.id, killerPlayerId: playerId, killerName: shooter.name, shotEventId });
-      message = `💥 ${shooter.name} eliminó a ${victimOwner?.name ?? '?'} con ${soldier.lastExpr}`;
-      if (shooter.isBot) this.banter(shooter, soldier, agentMeta(shooter.agentType).banter?.kill, { victim: victimOwner?.name ?? 'rival' });
-    } else if (shot.result.type === 'suicide') {
-      // fuego amigo: muere el aliado alcanzado; el tirador sigue vivo y se mueve (spec/01 §2.4, §9.1)
-      message = `💀 ${shooter.name} eliminó a su propio aliado con ${soldier.lastExpr}`;
-      const victimS = this.soldiers.find((s) => s.id === shot.result.soldierId);
-      if (victimS) { victimS.alive = false; this.emit('friendlyFire', this.actorOf(soldier), { victimSoldierId: victimS.id, victimPlayerId: victimS.ownerId, victimName: shooter.name, shotEventId }); this.emit('death', this.actorOf(victimS), { killerSoldierId: soldier.id, killerPlayerId: playerId, killerName: shooter.name, shotEventId }); }
+    if (hits.length) {
+      // cada alcanzado muere, en el orden del recorrido; el tirador nunca muere por su propio tiro
+      const foes = [], mates = [];
+      for (const h of hits) {
+        const victim = this.soldiers.find((q) => q.id === h.soldierId);
+        if (!victim || !victim.alive) continue;
+        const victimOwner = this.players.find((p) => p.id === victim.ownerId);
+        victim.alive = false;
+        if (victim.team !== soldier.team) {
+          shooter.kills = (shooter.kills || 0) + 1;
+          if (victimOwner) victimOwner.deaths = (victimOwner.deaths || 0) + 1;
+          this.emit('kill', this.actorOf(soldier), { victimSoldierId: victim.id, victimPlayerId: victim.ownerId, victimName: victimOwner ? victimOwner.name : '?', shotEventId });
+          foes.push(victimOwner ? victimOwner.name : '?');
+        } else {
+          this.emit('friendlyFire', this.actorOf(soldier), { victimSoldierId: victim.id, victimPlayerId: victim.ownerId, victimName: shooter.name, shotEventId });
+          mates.push(victim.id);
+        }
+        this.emit('death', this.actorOf(victim), { killerSoldierId: soldier.id, killerPlayerId: playerId, killerName: shooter.name, shotEventId });
+      }
+      const parts = [];
+      if (foes.length) parts.push(foes.length === 1 ? `💥 ${shooter.name} eliminó a ${foes[0]}` : `💥 ${shooter.name} eliminó a ${foes.length} de un tiro`);
+      if (mates.length) parts.push(mates.length === 1 ? '💀 y a un aliado' : `💀 y a ${mates.length} aliados`);
+      message = `${parts.join(' ')} con ${soldier.lastExpr}`.replace(/^💀 y a/, `💀 ${shooter.name} eliminó a`);
+      if (foes.length && shooter.isBot) this.banter(shooter, soldier, agentMeta(shooter.agentType).banter?.kill, { victim: foes[0] });
     } else if (shot.result.type === 'wall') {
       message = `🧱 ${shooter.name} (${soldier.lastExpr}) se estrelló contra el borde`;
     } else if (shot.result.type === 'obstacle') {
@@ -457,7 +475,7 @@ export class Room {
       try {
         if (mover && typeof mover.chooseMove === 'function' && soldier.alive) {
           requested = mover.chooseMove({
-            soldiers: this.soldiers, obstacles: this.obstacles, soldier,
+            soldiers: this.soldiers, obstacles: this.obstacles, bites: this.bites, soldier,
             shot: { ...this.lastShot, points: shot.points }, moveOptions: this.moveOptionsFor(soldier),
             history: this.history.slice(-12), rng: this.rng, state: this.snapshot(),
           });
@@ -500,7 +518,7 @@ export class Room {
       return { ok: true, move: this.lastMove };
     }
     if (requested && typeof requested === 'object' && requested.stay === true) requested = 'stay';
-    const r = slideMove({ from, requested, soldiers: this.soldiers, obstacles: this.obstacles, selfId: soldier.id });
+    const r = slideMove({ from, requested, soldiers: this.soldiers, obstacles: this.obstacles, bites: this.bites, selfId: soldier.id });
     soldier.x = r.to.x;
     soldier.y = r.to.y;
     const coverAfter = this.coverOf(soldier);
@@ -533,35 +551,13 @@ export class Room {
   afterShot() {
     if (this.phase !== 'playing') return;
     this.turn = null;
-    // anti-estancamiento: nadie muere en muchos disparos → renovar mapa o terminar por empate técnico
+    // tope de disparos: empate técnico
     if (this.shots >= C.MAX_SHOTS) {
       this.log('⏳ Límite de disparos alcanzado');
       return this.gameOver(true);
     }
-    if (this.shotsNoKill >= C.STALL_SHOTS) {
-      this.shotsNoKill = 0;
-      this.remaps++;
-      const map = genMap(this.soldiersPerPlayer, this.rng);
-      this.log(`🔄 Nadie muere desde hace ${C.STALL_SHOTS} disparos: mapa renovado (${this.remaps})`);
-      this.log(`🗺️ Mapa: ${map.name}`);
-      this.reposition(map);
-      this.emit('map.renew', { playerId: null, soldierId: null, netId: null }, { remaps: this.remaps, map: { name: map.name, biome: map.biome } });
-    }
+    // sin renovación de mapa (spec/01 §10.4): el terreno se va comiendo hasta que alguien gana o se llega al tope
     this.nextTurn();
-  }
-
-  // Renueva obstáculos y recoloca a los soldados vivos (los muertos permanecen)
-  reposition(pre = null) {
-    const map = pre || genMap(this.soldiersPerPlayer, this.rng);
-    this.obstacles = map.obstacles;
-    for (const p of this.players) {
-      const alive = (p.soldiers || []).filter((s) => s.alive);
-      if (!alive.length) continue;
-      const spots = map.placeSide(p.team, alive.length);
-      alive.forEach((s, i) => { s.x = spots[i].x; s.y = spots[i].y; });
-    }
-    this.history = [];
-    this.broadcast('state', this.snapshot());
   }
 
   gameOver(byLimit = false) {
@@ -709,6 +705,7 @@ export class Room {
       })),
       soldiers: this.soldiers.map((s) => ({ id: s.id, ownerId: s.ownerId, team: s.team, x: s.x, y: s.y, alive: s.alive, lastExpr: s.lastExpr, turns: s.turns || 0 })),
       obstacles: this.obstacles,
+      bites: this.bites,
       shotLog: this.shotLog.slice(-16).map((e, i, arr) => (i >= arr.length - 4 ? { ...e } : (({ points, ...rest }) => rest)(e))),
       stats: { shots: this.shots, shotsNoKill: this.shotsNoKill, remaps: this.remaps },
       lastDecision: this.lastDecision,

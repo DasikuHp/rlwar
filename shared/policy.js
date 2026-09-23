@@ -69,7 +69,7 @@ export function decideShot({ net, genome, state, soldierId, memory, team = null,
   const g = normalize(genome); const T = g.traits.temperature, pulse = Math.max(1e-6, g.traits.pulse);
   const soldier = state.soldiers.find((s) => s.id === soldierId);
   const cands = generateCandidates(state, soldier, g.imagination, makeRng(candSeed(state, soldierId)));
-  const ctx = { soldiers: state.soldiers, obstacles: state.obstacles, soldier, team: soldier.team };
+  const ctx = { soldiers: state.soldiers, obstacles: state.obstacles, bites: state.bites || [], soldier, team: soldier.team };
   const obs = withTeam(observe(state, soldierId, g, { phase: 'shoot', cands, sims }), team);
   const out = net.forward(obs, memory);
   if (!out.outputs.choose) throw new Error('la red no tiene el bloque Elegir');
@@ -135,7 +135,7 @@ export function decideMove({ net, genome, state, soldierId, memory, team = null,
       decision.logp.moveAdjust = sample.reduce((s, a, i) => s + logN(a, mu[i], pulse), 0);
       const tl = toLocal(chosen.to, soldier.team);
       const target = toWorld({ x: tl.x + 0.5 * sample[0], y: tl.y + 0.5 * sample[1] }, soldier.team);
-      const r = slideMove({ from: { x: soldier.x, y: soldier.y }, requested: target, soldiers: state.soldiers, obstacles: state.obstacles, selfId: soldierId });
+      const r = slideMove({ from: { x: soldier.x, y: soldier.y }, requested: target, soldiers: state.soldiers, obstacles: state.obstacles, bites: state.bites || [], selfId: soldierId });
       decision.moveAdjust = { mu, sample, scales: [0.5, 0.5], target, to: { x: r.to.x, y: r.to.y } };
       move = { x: r.to.x, y: r.to.y };
     } else move = chosen.stay ? 'stay' : { x: chosen.to.x, y: chosen.to.y };

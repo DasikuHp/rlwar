@@ -6,31 +6,17 @@
 // La dirección de avance es hacia el lado enemigo (equipo izquierdo: x creciente).
 
 import { PLANE, HIT_RADIUS, OBSTACLE_MARGIN, STEP, MAX_STEPS, MAX_STEEPNESS, NETWORK_STEP } from './constants.js';
+import { isSolid } from './geometry.js';
 
 const inBounds = (x, y) => x >= PLANE.xMin && x <= PLANE.xMax && y >= PLANE.yMin && y <= PLANE.yMax;
 
-function hitsObstacle(obstacles, x, y) {
-  for (const o of obstacles) {
-    if (x >= o.x - OBSTACLE_MARGIN && x <= o.x + o.w + OBSTACLE_MARGIN &&
-        y >= o.y - OBSTACLE_MARGIN && y <= o.y + o.h + OBSTACLE_MARGIN) return o;
-  }
-  return null;
-}
-
-function hitSoldier(soldiers, shooterId, x, y) {
-  for (const s of soldiers) {
-    if (!s.alive || s.id === shooterId) continue;
-    const dx = s.x - x, dy = s.y - y;
-    if (dx * dx + dy * dy <= HIT_RADIUS * HIT_RADIUS) return s;
-  }
-  return null;
-}
-
 /**
- * Simula un disparo y devuelve { points: [[x,y],...], result: {type, soldierId?, x, y} }
- * Tipos de resultado: kill | suicide | wall | obstacle | invalid | steep | maxlen
+ * Simula un disparo y devuelve { points: [[x,y],...], result: {type, end, hits, soldierId, x, y, firstHit} }
+ * El tiro atraviesa a los soldados (spec/01 §10.3): `hits` = los alcanzados en orden de recorrido; se para en
+ * `end` = obstacle | wall | invalid | steep | maxlen. `type` = kill (algún enemigo) | suicide (solo aliados) | end.
+ * `firstHit` = {x, y, points}: dónde iba el recorrido al alcanzar al primero (para el Simulador).
  */
-export function simulateShot({ mode, f, start, dir, angle = 0, soldiers = [], obstacles = [], shooterId = null, ds = STEP, maxSteps = MAX_STEPS }) {
+export function simulateShot({ mode, f, start, dir, angle = 0, soldiers = [], obstacles = [], bites = [], shooterId = null, ds = STEP, maxSteps = MAX_STEPS }) {
   const points = [[start.x, start.y]];
   let x = start.x, y = start.y;
   // pendiente inicial dy/dx: el ángulo positivo SUBE en los dos lados (spec/01 §7b); para el
@@ -38,9 +24,14 @@ export function simulateShot({ mode, f, start, dir, angle = 0, soldiers = [], ob
   let v = dir * Math.tan(angle);
   let c = null;
 
-  const finish = (type, soldierId = null, ex = x, ey = y) => {
+  const terrain = { obstacles, bites };
+  const shooterTeam = (soldiers.find((q) => q.id === shooterId) || {}).team;
+  const hits = [], hitIds = new Set();
+  let firstHit = null;
+  const finish = (end, ex = x, ey = y) => {
     points.push([ex, ey]);
-    return { points, result: { type, soldierId, x: ex, y: ey } };
+    const type = hits.some((h) => h.team !== shooterTeam) ? 'kill' : hits.length ? 'suicide' : end;
+    return { points, result: { type, end, hits, soldierId: hits.length ? hits[0].soldierId : null, x: ex, y: ey, firstHit } };
   };
 
   if (mode === 'function') {
@@ -56,11 +47,19 @@ export function simulateShot({ mode, f, start, dir, angle = 0, soldiers = [], ob
     if (!inBounds(px, py)) {
       const cx = Math.min(PLANE.xMax, Math.max(PLANE.xMin, px));
       const cy = Math.min(PLANE.yMax, Math.max(PLANE.yMin, py));
-      return finish('wall', null, cx, cy);
+      return finish('wall', cx, cy);
     }
-    if (hitsObstacle(obstacles, px, py)) return finish('obstacle', null, px, py);
-    const s = hitSoldier(soldiers, shooterId, px, py);
-    if (s) return finish(s.team === soldiers.find((q) => q.id === shooterId)?.team ? 'suicide' : 'kill', s.id, px, py);
+    if (isSolid({ x: px, y: py }, terrain, OBSTACLE_MARGIN)) return finish('obstacle', px, py);
+    // atraviesa: cada soldado vivo (menos el que dispara) a HIT_RADIUS o menos, una vez y en orden; no se para
+    for (const s of soldiers) {
+      if (!s.alive || s.id === shooterId || hitIds.has(s.id)) continue;
+      const dx = s.x - px, dy = s.y - py;
+      if (dx * dx + dy * dy <= HIT_RADIUS * HIT_RADIUS) {
+        hitIds.add(s.id);
+        hits.push({ soldierId: s.id, team: s.team, x: s.x, y: s.y });
+        if (!firstHit) firstHit = { x: px, y: py, points: points.length + 1 };
+      }
+    }
     return null;
   };
 

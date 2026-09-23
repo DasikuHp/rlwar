@@ -36,11 +36,15 @@ export function assignRewards({ reward, teamSpirit = 0.5, events, trajectory, pl
     if (ev.type === 'shot' && ev.actor.playerId === playerId) {
       const e = byDecision.get(ev.data.decisionEventId);
       if (!e) continue;
-      const t = ev.data.result && ev.data.result.type;
-      if (t === 'kill') add(e, 'kill', reward.kill);
-      else if (t === 'suicide') add(e, 'friendlyFire', reward.friendlyFire);
-      else if (typeof ev.data.minDist === 'number' && ev.data.minDist <= reward.grazeRadius) add(e, 'graze', reward.graze);
-      if (t !== 'suicide' && typeof ev.data.minAllyDist === 'number' && ev.data.minAllyDist <= 1.5) add(e, 'nearFriendly', reward.nearFriendly);
+      const res = ev.data.result || {};
+      const t = res.type;
+      // el tiro atraviesa (spec/01 §10.3): kill por cada enemigo y friendlyFire por cada aliado; sin cuentas (partidas antiguas), uno
+      const kills = Number.isInteger(res.kills) ? res.kills : t === 'kill' ? 1 : 0;
+      const friendly = Number.isInteger(res.friendly) ? res.friendly : t === 'suicide' ? 1 : 0;
+      if (kills) add(e, 'kill', reward.kill * kills);
+      if (friendly) add(e, 'friendlyFire', reward.friendlyFire * friendly);
+      if (!kills && !friendly && typeof ev.data.minDist === 'number' && ev.data.minDist <= reward.grazeRadius) add(e, 'graze', reward.graze);
+      if (!friendly && typeof ev.data.minAllyDist === 'number' && ev.data.minAllyDist <= 1.5) add(e, 'nearFriendly', reward.nearFriendly);
       const prev = myShots.filter((s) => s.id < ev.id).slice(-10);
       if (prev.some((s) => s.data.expr === ev.data.expr)) add(e, 'repeatExpr', reward.repeatExpr);
     } else if (ev.type === 'move' && ev.actor.playerId === playerId) {

@@ -19,8 +19,8 @@ export function create({ level = 2, temperature = 0 } = {}) {
   const weights = lvl === 3 ? [0.7, 0.2, 0.1] : lvl === 2 ? [0.55, 0.3, 0.15] : [0.4, 0.35, 0.25];
   return {
     meta,
-    chooseShot({ soldiers, obstacles, soldier, history = [], rng = Math.random }) {
-      const ctx = contextFor(soldiers, obstacles, soldier);
+    chooseShot({ soldiers, obstacles, bites = [], soldier, history = [], rng = Math.random }) {
+      const ctx = contextFor(soldiers, obstacles, soldier, bites);
       const cands = avoidRepeats(
         [...directShots(ctx, { jitter: 0.05 + tmp * 0.15, count: 6, rng }), ...randomTemplates(12 + lvl * 12, rng)],
         history,

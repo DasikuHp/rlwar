@@ -33,6 +33,36 @@ export function initRender(canvas) {
   requestAnimationFrame(frame);
 }
 
+// clave de la capa del terreno: el tamaño del lienzo y cada obstáculo y cada bocado (dos partidas de la misma semilla con
+// el mismo número de bocados en sitios distintos no pueden compartirla)
+export const terrainKey = (obstacles, bites, W, H) =>
+  `${W}x${H}|${obstacles.map((o) => (o.kind === 'circle' ? `c${o.x},${o.y},${o.r}` : `r${o.x},${o.y},${o.w},${o.h}`)).join(';')}|${bites.map((b) => `${b.x},${b.y},${b.r}`).join(';')}`;
+
+// terreno (spec/01 §10): círculos y rectángulos, con los bocados recortados en una capa aparte (así la cuadrícula se ve
+// a través de los agujeros); la capa se rehace solo cuando cambian el terreno o el tamaño
+function drawTerrain(obstacles, bites, s) {
+  const W = R.canvas.width, H = R.canvas.height;
+  const key = terrainKey(obstacles, bites, W, H);
+  if (!R.terrain || R.terrainKey !== key) {
+    const layer = R.terrain || document.createElement('canvas');
+    layer.width = W; layer.height = H;
+    const c = layer.getContext('2d');
+    c.clearRect(0, 0, W, H);
+    c.fillStyle = '#1c2647'; c.strokeStyle = '#43538a'; c.lineWidth = R.dpr;
+    for (const o of obstacles) {
+      c.beginPath();
+      if (o.kind === 'circle') { const [cx, cy] = w2s(o.x, o.y); c.arc(cx, cy, o.r * s, 0, Math.PI * 2); }
+      else { const [ox, oy] = w2s(o.x, o.y + o.h); if (c.roundRect) c.roundRect(ox, oy, o.w * s, o.h * s, 4 * R.dpr); else c.rect(ox, oy, o.w * s, o.h * s); }
+      c.fill(); c.stroke();
+    }
+    c.globalCompositeOperation = 'destination-out';
+    for (const b of bites) { const [bx, by] = w2s(b.x, b.y); c.beginPath(); c.arc(bx, by, b.r * s, 0, Math.PI * 2); c.fill(); }
+    c.globalCompositeOperation = 'source-over';
+    R.terrain = layer; R.terrainKey = key;
+  }
+  R.ctx.drawImage(R.terrain, 0, 0);
+}
+
 export const w2s = (x, y) => {
   const W = R.canvas.width, H = R.canvas.height;
   const s = Math.min(W / 52, H / 32);
@@ -118,14 +148,7 @@ function drawWorld() {
   ctx.strokeStyle = '#3a4a7a'; ctx.beginPath();
   ctx.moveTo(ax, y0); ctx.lineTo(ax, y1); ctx.moveTo(x0, ay); ctx.lineTo(x1, ay); ctx.stroke();
 
-  for (const o of st.obstacles) {
-    const [ox, oy] = w2s(o.x, o.y + o.h);
-    ctx.fillStyle = '#1c2647'; ctx.strokeStyle = '#43538a'; ctx.lineWidth = R.dpr;
-    ctx.beginPath();
-    if (ctx.roundRect) ctx.roundRect(ox, oy, o.w * s, o.h * s, 4 * R.dpr);
-    else ctx.rect(ox, oy, o.w * s, o.h * s);
-    ctx.fill(); ctx.stroke();
-  }
+  drawTerrain(st.obstacles || [], st.bites || [], s);
 
   const age = (sh) => (Date.now() - sh.ts) / 1000;
   for (const sh of R.shots) drawTrail(sh.points, TEAM_COLOR[sh.team], Math.max(0, .35 - age(sh) * .05), false);

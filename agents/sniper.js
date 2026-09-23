@@ -20,8 +20,8 @@ export function create({ level = 2, temperature = 0 } = {}) {
   const weights = lvl === 3 ? [0.8, 0.12, 0.08] : lvl === 2 ? [0.6, 0.25, 0.15] : [0.4, 0.35, 0.25];
   return {
     meta,
-    chooseShot({ soldiers, obstacles, soldier, history = [], rng = Math.random }) {
-      const ctx = contextFor(soldiers, obstacles, soldier);
+    chooseShot({ soldiers, obstacles, bites = [], soldier, history = [], rng = Math.random }) {
+      const ctx = contextFor(soldiers, obstacles, soldier, bites);
       const cands = directShots(ctx, { jitter: tmp * 0.2, count: 1, rng });
       // arcos finos sobre las pendientes directas (para salvar obstáculos)
       for (const e of ctx.enemies) {

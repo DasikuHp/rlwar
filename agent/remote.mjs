@@ -6,8 +6,9 @@
 //   node agent/remote.mjs --room ABCD --name Muse --team left
 //   node agent/remote.mjs --room ABCD --name RWKV --brain http --brain-url http://localhost:8000/decide
 //
-// Cerebro HTTP: POST a --brain-url con {you, soldier, soldiers, enemies, obstacles,
-// history, chat, temperature} y responde {mode, expr, angle?, say?}.
+// Cerebro HTTP: POST a --brain-url con {you, soldier, soldiers, enemies, obstacles, bites,
+// history, chat, temperature} y responde {mode, expr, angle?, say?}. `obstacles`: círculos {kind:'circle', x, y, r}
+// o rectángulos {x, y, w, h}; `bites`: bocados {x, y, r} que las explosiones le han comido al terreno (spec/01 §10).
 // `say` se publica en el chat ANTES de disparar, para que el rival lo lea en vivo.
 import { searchShot } from '../agents/lib.js';
 
@@ -76,7 +77,7 @@ async function main() {
         soldier: { id: soldier.id, x: soldier.x, y: soldier.y },
         soldiers: st.soldiers.map((s) => ({ id: s.id, team: s.team, x: s.x, y: s.y, alive: s.alive })),
         enemies: enemies.map((s) => ({ id: s.id, x: s.x, y: s.y })),
-        obstacles: st.obstacles, history: st.history || [],
+        obstacles: st.obstacles, bites: st.bites || [], history: st.history || [],
         chat: (st.chat || []).slice(-10).map((c) => c.text),
       };
       let decision;

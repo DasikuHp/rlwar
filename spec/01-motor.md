@@ -214,10 +214,12 @@ de mapa" y "como el original: atraviesa". Escala del original: el plano de 50 u 
 - `simulateShot` registra **todos** los soldados vivos (menos el que dispara) a `HIT_RADIUS` o menos del recorrido,
   cada uno una vez y en orden, y **no se para**: acaba en obstáculo, borde, valor inválido, pendiente vertical o
   longitud máxima.
-- Resultado: `{type, end, hits: [{soldierId, team, x, y}], soldierId, x, y}`; `end` ∈ {obstacle, wall, invalid,
-  steep, maxlen} es por qué se paró; `hits` en orden de recorrido; `soldierId` = el primer alcanzado (o null); `type`
-  = `kill` si alcanzó a algún enemigo, si no `suicide` si alcanzó a algún aliado, si no `end` (así quien solo mira
-  `type` sigue viendo lo mismo en los casos de un solo impacto).
+- Resultado: `{type, end, hits: [{soldierId, team, x, y}], soldierId, x, y, firstHit}`; `end` ∈ {obstacle, wall,
+  invalid, steep, maxlen} es por qué se paró; `hits` en orden de recorrido; `soldierId` = el primer alcanzado (o null);
+  `type` = `kill` si alcanzó a algún enemigo, si no `suicide` si alcanzó a algún aliado, si no `end` (así quien solo
+  mira `type` sigue viendo lo mismo en los casos de un solo impacto); `firstHit` = `{x, y, points}`: el punto del
+  recorrido donde alcanzó al primero y cuántos puntos llevaba contándolo (o null). Los `points` de antes de `firstHit`
+  más ese punto son exactamente el recorrido que devolvía el solver cuando el tiro se paraba en el primer impacto.
 - En la sala (`fire()`, único punto de validación): mueren todos los alcanzados. Por cada enemigo, un `kill` del
   tirador y un `death` de la víctima; por cada aliado, un `friendlyFire` y su `death`. El tirador nunca muere por su
   propio tiro. `shotLog` y el evento `shot` guardan `result: {type, soldierId, hits: [ids en orden], kills, friendly,
@@ -236,18 +238,37 @@ de mapa" y "como el original: atraviesa". Escala del original: el plano de 50 u 
 ### 10.5 Percepción (mismo tamaño de entrada; spec/03)
 - 🧱 Obstáculos: por hueco, un círculo da `(cx/25, cy/15, 2r/10, 2r/15, 1)` (su caja), igual que un rectángulo; el
   orden sigue siendo por cercanía. 📡 Radar, 🗺 Mapa, destinos de movimiento y línea de visión usan `isSolid`, así ven
-  los bocados.
-- 🔮 Simulador: con un solo impacto dice exactamente lo mismo que antes (así Vidente y los tests de percepción siguen
-  valiendo): `kill` = alcanza a algún enemigo, `suicide` = alcanza a algún aliado, `obstacle`/`wall`/"otro" solo si no
-  alcanza a nadie (miran `end`), fin y puntos = hasta el **primer** impacto (dónde golpea primero), y la última entrada
-  = mata al enemigo más cercano. Ajuste nuevo del ojo, `counts` ("Contar bajas", sí/no, apagado por defecto, nivel
-  Artesano): añade 2 entradas, enemigos alcanzados / 4 y aliados alcanzados / 4 (máximo 1), para que la red sepa
-  a cuántos mata un tiro que atraviesa. `eyeDim` = 10 (+2 con `counts`).
+  los bocados. También los ven la cobertura de la sala (`coverBefore/After` de los eventos `move`, la recompensa
+  "cubrirse" y el examen de cobertura), el ajuste fino del movimiento de una red y el dibujo de los candidatos de una
+  red sin Simulador.
+- 🔮 Simulador (decisión del usuario, 2026-09-24: "más RL, como decía el plan"; la IA del original, `ComputerPlayer`,
+  puntúa ±2 000 000 por cada soldado alcanzado): las dos primeras entradas son **cuántos** enemigos y **cuántos**
+  aliados alcanza el tiro (como mucho 4). Con un solo impacto valen 1, así que dice exactamente lo mismo que antes
+  (Vidente y los tests de percepción siguen valiendo) y un tiro que alinea a dos enemigos llega con un 2: la
+  recompensa, que suma `kill` por cada enemigo, es lineal en esas cuentas. `obstacle`/`wall`/"otro" solo si no alcanza
+  a nadie (miran `end`); fin, puntos y distancia mínima al enemigo = hasta el **primer** impacto (`firstHit`: dónde
+  golpea primero y lo cerca que pasó hasta ahí, lo que decía el solver cuando se paraba ahí); la última entrada = alcanza
+  al enemigo más cercano. `eyeDim` = 10, sin ajustes nuevos.
+- 👥 Compañeros: "que mataron" y "con fuego amigo" miran las cuentas del último tiro de cada compañero (`kills > 0`,
+  `friendly > 0`): un tiro que mata a un enemigo y a un aliado cuenta en los dos; los tiros antiguos, sin cuentas, por
+  su `type`.
 - Las redes guardadas siguen siendo válidas (mismas entradas), pero vieron otro terreno: conviene reentrenarlas.
 
+### 10.5b Rendimiento (auditoría de P1, 2026-09-24)
+Con 8–22 círculos, cada deslizamiento probaba los 2 880 puntos de la rejilla polar (§3) contra todos los círculos y una
+partida sin pantalla pasó de ~35 ms a ~1 s (el servidor se quedaba sin responder hasta 5,7 s durante un entreno turbo).
+Dos atajos **exactos** (mismo resultado): la rejilla descarta un punto que no mejora la distancia antes de validarlo, y
+un círculo descarta por su caja antes de calcular la distancia. Con ellos, una partida ≈ 0,2 s; sigue siendo más que
+antes porque las partidas tienen ~14 tiros en vez de ~5 (el terreno tapa más), que es el juego nuevo.
+
 ### 10.6 Tests
-`test/terreno.spec.mjs`, congelado antes del código: solidez de círculo y bocado (con y sin margen), un bocado abre un
-paso cerrado, mapas con semilla deterministas y dentro de los límites de §10.2, soldados fuera de los círculos, un tiro
-atraviesa a dos enemigos y a un aliado (tres muertes, el tirador vivo, eventos en orden), recompensa por cada baja, sin
-renovación tras muchos fallos, la moviola y "¿qué pasaría si…?" con círculos y bocados, y la percepción con el mismo
-tamaño.
+- `test/terreno.spec.mjs`, congelado antes del código (y cambiado con OK del usuario el 2026-09-24: tres errores del
+  test y el Simulador con cuentas): solidez de círculo y bocado (con y sin margen), un bocado abre un paso cerrado, mapas
+  con semilla deterministas y dentro de los límites de §10.2, soldados fuera de los círculos, un tiro atraviesa a dos
+  enemigos y a un aliado (tres muertes, el tirador vivo, eventos en orden), recompensa por cada baja, sin renovación
+  tras muchos fallos, la moviola puede rehacer el terreno con los `bite` de los tiros, la percepción con el mismo tamaño
+  y el Simulador con cuentas.
+- `test/terreno-extra.spec.mjs` (auditoría de P1): cobertura, ajuste fino del movimiento y dibujo de candidatos con
+  bocados; distancia mínima del Simulador hasta el primer impacto; Compañeros con cuentas; deslizar = la rejilla
+  completa (guarda de los atajos de §10.5b) y un tope grueso de tiempo; la clave de la capa dibujada del terreno.
+- `test/terreno-api.spec.mjs`: "¿qué pasaría si…?" por la API con círculos y bocados (escrito tras el código).

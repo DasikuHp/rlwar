@@ -843,12 +843,19 @@ export async function labApi(req, res, parts, url) {
         if (typeof s.id !== 'string' || !['left', 'right'].includes(s.team)) return bad(400, 'Cada soldado lleva id (texto) y team (left o right)');
         if (!(Number.isFinite(s.x) && Number.isFinite(s.y) && Math.abs(s.x) <= 25 && Math.abs(s.y) <= 15)) return bad(400, `El soldado ${s.id} está fuera del plano (x entre −25 y 25, y entre −15 y 15)`);
       }
-      for (const o of obstacles) if (![o.x, o.y, o.w, o.h].every(Number.isFinite) || o.w <= 0 || o.h <= 0) return bad(400, 'Cada obstáculo es {x, y, w, h} con w y h positivos');
+      for (const o of obstacles) {
+        const okCircle = o && o.kind === 'circle' && [o.x, o.y, o.r].every(Number.isFinite) && o.r > 0;
+        const okRect = o && o.kind !== 'circle' && [o.x, o.y, o.w, o.h].every(Number.isFinite) && o.w > 0 && o.h > 0;
+        if (!okCircle && !okRect) return bad(400, 'Cada obstáculo es {x, y, w, h} con w y h positivos, o un círculo {kind: "circle", x, y, r} con r positivo');
+      }
+      const bites = Array.isArray(sc.bites) ? sc.bites : [];
+      if (bites.length > 256) return bad(400, 'Como mucho 256 bocados');
+      for (const bt of bites) if (!(bt && [bt.x, bt.y, bt.r].every(Number.isFinite) && bt.r > 0)) return bad(400, 'Cada bocado es {x, y, r} con r positivo');
       const soldiers = sc.soldiers.map((s) => ({ ownerId: s.ownerId || (s.team === 'left' ? 'pL' : 'pR'), alive: s.alive !== false, turns: 0, ...s, alive: s.alive !== false }));
       const me = soldiers.find((s) => s.id === sc.soldierId);
       if (!me) return bad(400, `scene.soldierId (${sc.soldierId}) no es ningún soldado de la escena`);
       if (!me.alive) return bad(400, `El soldado ${me.id} está muerto: no puede decidir`);
-      const state = { soldiers, obstacles, shotLog: Array.isArray(sc.shots) ? sc.shots : [], stats: sc.stats || { shots: 0, shotsNoKill: 0, remaps: 0 }, players: [] };
+      const state = { soldiers, obstacles, bites, shotLog: Array.isArray(sc.shots) ? sc.shots : [], stats: sc.stats || { shots: 0, shotsNoKill: 0, remaps: 0 }, players: [] };
       const net = compile(g);
       const rng = makeRng(Number.isInteger(v.seed) ? v.seed : 1);
       const r = v.phase === 'move'

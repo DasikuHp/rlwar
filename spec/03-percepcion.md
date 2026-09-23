@@ -15,6 +15,13 @@ equipo derecho, `x' = −x` (y no cambia). Así la **misma red juega igual en lo
 - `decision` guarda `exprLocal` (lo que "pensó" la red) y `expr` (lo que se disparó).
 
 ## 2. Layout exacto de cada ojo (índice → nombre en español en el catálogo, `eyes[].layout`)
+> **Terreno de P1 (ronda 17, spec/01 §10.5):** los obstáculos son círculos (y rectángulos) con bocados. Todo lo que aquí
+> dice "rect" u "obstáculo" se lee con `isSolid` (sólido = dentro de algún obstáculo y fuera de todos los bocados):
+> LOS, 📡 Radar, 🗺 Mapa, destinos y "pegado a obstáculo". En 🧱 un círculo se ve por su caja. En 🔮 las dos primeras
+> entradas son cuántos enemigos y cuántos aliados alcanza el tiro (0–4; con un solo impacto, 1) y fin, puntos y
+> `minDist` llegan hasta el primer impacto. En ⏱ `remaps` vale siempre 0 y `shotsNoKill/STALL_SHOTS` se queda como
+> mucho en 1. En 👥 "mató" y "fuego amigo" salen de las cuentas del último tiro (`kills`, `friendly`).
+
 Normalizaciones: `dx/50`, `dy/30`, `dist/58` (diagonal del plano), `tanh` donde se indica. "LOS"
 (línea de tiro) = segmento recto sin cruzar obstáculos (muestreo cada 0.25 u). "Presente" = 1 si
 existe el elemento, 0 y ceros en el resto si no. Enemigos y aliados ordenados por distancia; **solo
@@ -32,7 +39,7 @@ vivos**; "aliados" excluye al propio soldado.
 | ⏱ `eye.clock` [8] | 0–7 | `shots/MAX_SHOTS`, `shotsNoKill/STALL_SHOTS`, `min(1, remaps/3)`, míos vivos/4, enemigos vivos/4, (mis kills − sus kills)/4, turnos de este soldado/20 (cap 1), **fase** (0 disparar, 1 mover) |
 | 👥 `eye.mates` [12] | agregados sobre aliados vivos | nº/3, media `dx/50`, media `dy/30`, min `dist/58`, max `dist/58`, fracción con LOS a algún enemigo, fracción cuyo último tiro mató, fracción con fuego amigo, media `minDist/10` del último tiro, fracción que se quedó quieta, aliados muertos/3, presente |
 | 🎯 `eye.candidates` [N×12] | por candidato | familia one-hot(6), `p1n`, `p2n`, `p3n`, error analítico en la x del enemigo 1 (`tanh(Δy/3)`, 0 si EDO), ídem enemigo 2, es-EDO |
-| 🔮 `eye.simulator` [N×10] | por candidato (barrido grueso `ds 0.05`, o fino si `fine`) | kill, suicide, obstacle, wall, otro fin, `minDist/10` (cap 1), `endX'/25`, `endY/15`, `puntos/200` (cap 1), la víctima es el enemigo 1 |
+| 🔮 `eye.simulator` [N×10] | por candidato (barrido grueso `ds 0.05`, o fino si `fine`) | enemigos alcanzados (0–4), aliados alcanzados (0–4), obstacle, wall, otro fin (estos tres solo si no alcanza a nadie), `minDist/10` (cap 1), `endX'/25`, `endY/15`, `puntos/200` (cap 1) —los cuatro hasta el primer impacto—, alcanza al enemigo 1 |
 | 🦶 `eye.moves` [9×9] | por destino (§4) | `dx'/2`, `dy/2`, es-quedarse, deslizado, enemigos con LOS hacia él/4, Δ distancia al enemigo 1 (`/2`, + = más lejos), distancia al aliado más cercano/10 (cap 1), LOS al enemigo 1 desde ahí, pegado a obstáculo (a < 1 u de un rect ampliado) |
 | 🗺 `eye.map` [C×H×W] | `W = 50/cell`, `H = 30/cell`; índice `c·H·W + fila·W + col`; fila 0 = `yMin`, col 0 = `x' = −25` | canal `obstacles`: fracción de celda cubierta (rejilla 4×4); `enemies`/`allies`/`self`: 1 en la celda del soldado vivo; `trails`: celdas cruzadas por los 2 últimos disparos de cada equipo (último 1, anterior 0.5) |
 
@@ -162,7 +169,7 @@ familyOf(shot) → {family, params}                    // clasifica un disparo a
 generateCandidates(state, soldier, imagination, rng) → cands   // §5; cands[i].i === i
 applyAdjust(cand, sample) → cand'                    // §6 (recorte de artillería incluido)
 candidateFeatures(cand, ctx) → Float64Array(12)      // eye.candidates
-simulateCandidate(cand, ctx, fine) → {type, minDist, endX, endY, points, victimId, polyline}
+simulateCandidate(cand, ctx, fine) → {type, end, minDist, endX, endY, points, victimId, hitIds, enemiesHit, alliesHit, polyline}
 simulatorFeatures(sim, ctx) → Float64Array(10)
 moveDestinations(state, soldier) → [{i, to, stay, slid, cover, distEnemy, los, feat: Float64Array(9)}]
 observe(state, soldierId, genome, { phase, cands, moves, sims }) → obs (spec/02 §5) + {names}

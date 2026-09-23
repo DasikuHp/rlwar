@@ -24,8 +24,8 @@ export function create({ temperature = 0 } = {}) {
   };
   return {
     meta,
-    chooseShot({ soldiers, obstacles, soldier, rng = Math.random }) {
-      const ctx = contextFor(soldiers, obstacles, soldier);
+    chooseShot({ soldiers, obstacles, bites = [], soldier, rng = Math.random }) {
+      const ctx = contextFor(soldiers, obstacles, soldier, bites);
       // fase 1: rejilla gruesa de (ángulo, gravedad)
       let cands = [];
       for (const g of GRAVITIES) {

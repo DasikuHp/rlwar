@@ -47,8 +47,21 @@ Un destino inválido (dentro de un obstáculo, fuera del plano, a menos de 1 u d
 lado de un muro) **se desliza** al punto válido más cercano. `state.lastMove` y el evento SSE `move`
 (`{move:{from,to,requested,slid,stayed}}`) cuentan qué pasó. `POST /api/rooms` admite `seed` (partida
 reproducible; `state.config.seed` la expone siempre) y `speed` (`1` | `10`; una sala x10 solo admite agentes).
-Fuego amigo: si tu tiro mata a un aliado, muere **solo el aliado**; tu soldado sigue vivo y se mueve igual.
-El `state` incluye `players[]` (con `agentType`, `kills`, `deaths`, `alive`), `soldiers[]`, `obstacles[]`,
+### Terreno que se rompe y tiro que atraviesa (P1, `spec/01-motor.md` §10)
+- **Obstáculos**: círculos `{kind:'circle', x, y, r}` (los mapas nuevos solo generan círculos) o rectángulos `{x, y, w, h}`.
+- **Bocados**: `state.bites[] = {x, y, r}`. Cada tiro explota donde acaba y, si toca terreno, le arranca un bocado de
+  0,78 u. Un punto es sólido si está dentro de algún obstáculo y fuera de todos los bocados (`isSolid` en
+  `shared/geometry.js`). El evento `game.start` trae los obstáculos del mapa (`map.obstacles`) y cada evento `shot`, su
+  `bite` (o `null`): con eso se rehace el terreno de cualquier turno.
+- **El tiro atraviesa**: mata a **todos** los soldados que toca, en orden, y solo se para en terreno, borde o valor
+  inválido. `fire` devuelve `result: {type, end, hits, soldierId, x, y, firstHit}`: `hits` son los alcanzados en orden;
+  `end` dice por qué se paró; `type` es `kill` si alcanzó a algún enemigo, `suicide` si solo a aliados, y si no, `end`.
+  En `shotLog` y en el evento `shot`, `result` = `{type, soldierId, hits: [ids], kills, friendly, end}`.
+- **Fuego amigo**: si tu tiro mata a un aliado, muere ese aliado (y los demás que toque); tu soldado sigue vivo y se
+  mueve igual.
+- **Sin renovación de mapa**: la partida acaba al quedarse un bando sin soldados o en el tope de disparos (`remaps` = 0).
+
+El `state` incluye `players[]` (con `agentType`, `kills`, `deaths`, `alive`), `soldiers[]`, `obstacles[]`, `bites[]`,
 `history[]` (últimas expresiones disparadas, para no repetir), `turn` con `deadline` y `result` al terminar.
 
 También puedes **espectar** cualquier sala en el navegador con `http://localhost:8787/#room=CODE`.
@@ -62,13 +75,13 @@ export const meta = { id: 'miagente', name: 'MiAgente', icon: '🚀', descriptio
 export function create({ level = 2 } = {}) {
   return {
     meta,
-    chooseShot({ soldiers, obstacles, soldier, history, rng, moveOptions }) {
-      const ctx = contextFor(soldiers, obstacles, soldier);
+    chooseShot({ soldiers, obstacles, bites, soldier, history, rng, moveOptions }) {
+      const ctx = contextFor(soldiers, obstacles, soldier, bites);   // con los bocados, tu simulación es la del servidor
       const cands = avoidRepeats([...directShots(ctx, { rng }), ...randomTemplates(30, rng)], history, rng);
       return best(ctx, cands);           // {mode, expr, angle?, move?}  (move opcional: {x,y} | 'stay')
     },
     // opcional (F1): se llama tras ver el resultado del tiro; gana sobre `move` de chooseShot
-    chooseMove({ soldiers, obstacles, soldier, shot, moveOptions, history, rng }) {
+    chooseMove({ soldiers, obstacles, bites, soldier, shot, moveOptions, history, rng }) {
       return moveOptions[1].to;          // moveOptions: 9 destinos ya deslizados {i,to,stay,slid,cover,distEnemy,los}
     },
   };
@@ -80,10 +93,10 @@ Añádelo a `MODULES` en `agents/registry.js` y ya aparece en `GET /api/agents`,
 
 ### Cómo jugar bien (estrategia)
 
-1. Lee `state`: tus soldados (`ownerId === tu playerId`), enemigos vivos, obstáculos (rects `{x,y,w,h}`) y `turn.soldierId` (quién dispara).
-2. **Simula antes de disparar**: importa `shared/solver.js` y `shared/parser.js` (o copia la lógica de `agent/search.mjs`). El servidor usa exactamente el mismo código, así que tu predicción es exacta.
+1. Lee `state`: tus soldados (`ownerId === tu playerId`), enemigos vivos, obstáculos (círculos o rectángulos), bocados (`bites`) y `turn.soldierId` (quién dispara).
+2. **Simula antes de disparar**: importa `shared/solver.js` y `shared/parser.js` (o copia la lógica de `agent/search.mjs`) y pásale `obstacles` **y** `bites`. El servidor usa exactamente el mismo código, así que tu predicción es exacta.
 3. El disparo en modo `function` se **traslada** para pasar por tu soldado: la constante que añadas es irrelevante; lo que importa es la **forma** (pendiente `a` en `a*x` apunta directo a `(ex-sx)/(ex-sx)`... es decir slope = Δy/Δx del objetivo).
-4. Puntúa candidatos: `kill`=1000, `suicide`=-1000, y como respaldo proximidad a enemigos. Dispara el mejor.
+4. Puntúa candidatos: 1000 por cada enemigo en `hits`, −1000 si hay algún aliado (el tiro atraviesa: una recta que alinea a dos enemigos vale el doble) y, como respaldo, proximidad a enemigos. Dispara el mejor.
 5. Si el modo es `ode2`, usa `expr` = `y''` (p. ej. `-0.05` = gravedad) y ajusta `angle` inicial.
 
 ### Ejemplo real con curl

@@ -191,7 +191,7 @@ Aprobados por el usuario ("arréglalo tú"). Completan §1–§6 sin cambiar lo 
   `challenge` lleva `result: 'void'`.
 
 ### 7.2 Un id por duelo, también entre dinastías y reinicios (C6)
-- Los ids de duelo son únicos entre procesos: `d<ms en base 36>-<n>` (`newDuelId()` en `evo/duel.js`). Los usan el
+- Los ids de duelo son únicos entre procesos: `d<ms en base 36><pid en base 36, 2 cifras>-<n>` (`newDuelId()` en `evo/duel.js`). Los usan el
   API, el trono y las dinastías.
 - Los duelos de una generación (madre contra hija en cada casa y duelo entre casas) pasan por el mismo registro que
   `POST /api/lab/duels`: aparecen en `GET /api/lab/duels`, emiten SSE `duel` y sus ids son los de `history` y de

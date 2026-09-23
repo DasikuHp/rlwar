@@ -300,3 +300,34 @@ red real en vivo; bofetada con efecto inmediato. Completan §1–§9 sin cambiar
   - si la red está entrenando, queda pendiente y **el siguiente sueño** del entreno la aplica con el mismo paso.
     Respuesta `{ok, reward, kind, applied: false, queued: true}`.
 - `GET /api/lab/nets/:id/feedback → {pending, applied}` (`applied`: las 50 últimas, con `pBefore`/`pAfter`).
+
+### 10.5 Precisiones tras la revisión de Fable (2026-09-23, `spec/revision-opus.md` §9: R1, R2, R4)
+Decisiones del usuario del 2026-09-23: "red ocupada" (R2) y, contra una persona, "contra sí misma" (R4).
+Completan §10.2–§10.4 sin cambiar lo que ya decían.
+- **El paso de evolución cede el bucle de verdad (R1).** Con `play` por defecto, las partidas de un paso se juegan
+  **una detrás de otra** y antes de cada una se cede el bucle de eventos (`setImmediate`): el servidor responde
+  entre partida y partida. Antes se lanzaban todas a la vez con `Promise.all` y todas las cesiones caían en la
+  misma vuelta del bucle, así que el servidor quedaba bloqueado todo el paso (16,4 s en la sonda de §9). Vale para
+  toda partida sin pantalla que se juegue así en el proceso del servidor (pasos de evolución de entrenos sin hilos,
+  de duelos y de exhibiciones, y la partida de la red real en turbo sin hilos). Con hilos, las partidas se
+  reparten entre ellos como antes. Los resultados no cambian: cada partida depende solo de su semilla.
+- **Red ocupada (R2).** Una red está ocupada mientras **entrena** (como hasta ahora), mientras **juega un duelo**
+  (`runDuel`: duelos del API, de trono y de dinastías; desde que empieza hasta que guarda, incluido el paso de
+  evolución del final) y mientras **aprende de una exhibición** (desde que acaba la partida hasta que guarda su
+  paso de evolución). `heldBy(netId)` (`evo/busy.js`) → `{kind: 'duel'|'exhibition', id}` o `null`.
+  - Todo lo que hoy responde 409 porque la red está entrenando responde también 409 si está ocupada, con el
+    motivo: editar (`PUT`), borrar, pedir hijos, operar, examinar, entrenar, retar, criar una generación y
+    empezar un duelo. Por ejemplo: `Nova está en el duelo d…: espera a que acabe para editarla o borrarla.`
+    En un reto, la reina también cuenta: si está ocupada, el reto responde 409.
+  - La bofetada o caricia a una red ocupada **queda en cola** (`{ok, reward, kind, applied: false, queued: true}`),
+    igual que al entrenar. Cuando quien la tenía la suelta (fin del duelo, fin del paso de la exhibición), si
+    nadie más la tiene, lo que haya en cola se aplica **ya**, con el mismo paso de §10.4: pesos, `optim.json`,
+    recuerdo y una entrada en `applied`. Si la red está entrenando, lo sigue aplicando el siguiente sueño.
+  - Una exhibición que acaba con una red ocupada no la toca: queda `exhibition.skipped` con el motivo.
+  - Motivo del cambio: quien tenía la red la guardaba al final con los pesos que cargó al empezar. Lo que se le
+    hubiera hecho mientras tanto (bofetadas "aplicadas", ediciones) se perdía sin aviso.
+- **Exhibición contra una persona (R4).** Si en una exhibición con `learn:true` la rival es una persona o un
+  agente externo (se sentó con `join`, no con `addagent`), su juego no se puede repetir. Por eso las copias del
+  paso de evolución juegan **contra la propia red, tal como estaba al acabar la partida** (antes de aprender de
+  ella), con `learn: false`. La línea `update` de una exhibición lleva `rival`: el id de la red rival, el tipo de
+  agente, o `'self'` si juega contra sí misma.

@@ -95,3 +95,33 @@ Nada se bloquea por nivel ✅: la interfaz filtra por `level`; el servidor acept
 F1 clic tras disparar + destino · F2 editor de cables (catálogo + validate + whatif sin red) · F3 overlay
 de candidatos y cerebro en vivo (`decision`) · F4 curvas y panel de entreno · F5 hijos y diferencias ·
 F6 árbol, trono, dinastías · F7 voz, diario, cronista, moviola, boletín, neuronas.
+
+## 9. Arreglos tras la revisión de Opus (2026-09-23, `spec/revision-opus.md` A5, M14, M16)
+Aprobados por el usuario ("arréglalo tú"; frases en el navegador "hazlo lo mejor que puedas, sin chapuzas").
+
+### 9.1 Rutas que faltaban
+- `GET /api/lab/catalog` → `mutation: [{key, name, level, explain, example, params: [{key, name, type, min, max,
+  step, default}]}]`, una entrada por cada tipo de spec/05 §1 y en ese orden; los valores por defecto son
+  `DEFAULT_MUTATION`.
+- `POST /api/lab/nets/:id/whatif {genome?, scene, phase = 'shoot', seed = 1}` → `{decision}` ("¿qué pasaría
+  si…?", sin efectos: no guarda nada). `scene = {soldiers: [{id, team, x, y, alive = true, ownerId?}], obstacles:
+  [{x, y, w, h}], soldierId, shots?, stats?}`; `genome` (opcional) sustituye a la red guardada y se valida para
+  jugar. La decisión es la de `decideShot` (o `decideMove` si `phase: 'move'`) con memoria a cero, `rng =
+  makeRng(seed)` y atribución. Errores 400 con motivo: soldado inexistente o muerto, coordenadas fuera del plano,
+  más de 32 soldados o 64 obstáculos, genoma inválido.
+- `GET /api/lab/nets/:id/curves` → `{netId, trainings: [{trainingId, points: [{game, reward, win, kills, deaths,
+  loss?, entropy?, kind?, rival?, t}]}], reigns: [...]}`: los puntos de cada entreno quedan en disco
+  (`evo/nets/<id>/curves.jsonl`, los 5 000 últimos) y sobreviven a un reinicio; `reigns` son los reinados de esa red
+  en `throne.json`.
+- `GET /api/lab/games?netId&duelId&trainingId&kind&limit=50` → `{games: [meta…]}` de la más reciente a la más
+  antigua. Cada partida guardada deja al lado su `meta` (`<gameId>.meta.json`) para listar sin abrir la partida.
+
+### 9.2 Retención de partidas (M16)
+- `saveGame` aplica la retención de spec/07 §12.1 a cada red de `meta.nets`: como mucho 200 partidas por red; se
+  borran las más antiguas que no sean duelos de trono.
+
+### 9.3 `shared/` y la verdad en el navegador (M14)
+- `shared/*.js`, `evo/truth.js` y `evo/voice.js` no usan nada de Node: `constants.js` mira `process` solo si existe
+  y `policy.js` usa el `performance` global. El servidor los sirve tal cual en `/shared/<fichero>.js`,
+  `/evo/truth.js` y `/evo/voice.js` (solo esos; nada más de `evo/`), así la interfaz compone y verifica frases con
+  el mismo código que el servidor.

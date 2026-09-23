@@ -3,13 +3,15 @@
 import { simulateShot } from '../shared/solver.js';
 import { tryCompile } from '../shared/parser.js';
 import { slideMove, los } from '../shared/geometry.js';
-import { makeRng } from '../shared/rng.js';
+import { makeRng, hash32 } from '../shared/rng.js';
 import * as C from '../shared/constants.js';
 import { genMap } from './mapgen.js';
 import { createAgent, agentMeta, DEFAULT_AGENT } from '../agents/registry.js';
 import { contextFor, moveOptions } from '../agents/lib.js';
 import { familyOf } from '../shared/percept.js';
-import { loadNet } from '../evo/store.js';
+import { loadNet, loadGame, loadLogEntry } from '../evo/store.js';
+import { checkPhrase, confidenceOf, memoryOf, recall } from '../evo/truth.js';
+import { speak } from '../evo/voice.js';
 
 const FAST = process.env.GW_FAST === '1';
 
@@ -66,6 +68,8 @@ export class Room {
     this.shotLog = [];      // F3: disparos con familia/params/minDist/stayed (máx. 40), spec/03 §9.3
     this.decisions = [];    // F3: últimas 50 decisiones de las redes (sin pantalla)
     this.lastDecision = null;
+    this.spokeTurn = {};    // voz (spec/07 §13.2): turno en que habló cada jugador (una frase por turno)
+    this.lastConfidence = {};
   }
 
   broadcast(ev, data) {
@@ -92,6 +96,7 @@ export class Room {
   banter(player, soldier, list, vars = {}) {
     if (!list || !list.length || !soldier) return;
     let text = list[this.rng.int(list.length)];
+    if (player.agentType === 'net') return; // las redes no dicen relleno (spec/07 §13.2); el sorteo se mantiene: misma partida
     for (const [k, v] of Object.entries(vars)) text = text.replaceAll(`{${k}}`, v);
     this.say(player, soldier, text);
   }
@@ -227,6 +232,8 @@ export class Room {
         this.banter(p, p.soldiers[0], agentMeta(p.agentType).banter?.intro);
       }
     }
+    this.spokeTurn = {}; this.lastConfidence = {};
+    if (!this.headless) { clearTimeout(this.introTimer); this.introTimer = setTimeout(() => this.voiceIntro(), (FAST ? 60 : 700) / this.speed); }
     this.nextTurn();
     return { ok: true };
   }
@@ -325,6 +332,11 @@ export class Room {
     }
     this.pending[player.id] = { agent, choice };
     if (choice && choice.decision) this.pushDecision(choice.decision);
+    if (player.agentType === 'net' && choice && choice.decision && choice.decision.phase === 'shoot' && Number.isInteger(choice.decision.eventId)) {
+      const conf = choice.decision.confidence || null;
+      if (conf) this.lastConfidence[player.id] = conf;
+      this.voiceTry(player, soldier, 'decision', { decision: this.events[choice.decision.eventId - 1] }, conf, choice.decision.eventId);
+    }
     if (choice && choice.reason) this.say(player, soldier, `💭 ${choice.reason}`, 'think');
     // habla primero y dispara después: da tiempo a leer el bocadillo
     const doFire = () => {
@@ -405,6 +417,7 @@ export class Room {
       message = `💤 ${shooter.name} (${soldier.lastExpr}) se quedó sin recorrido`;
     }
     this.log(message);
+    this.voiceAfterShot(shooter, soldier, shotEventId);
 
     this.lastShot = { playerId, soldierId: soldier.id, expr: String(expr).slice(0, 200), mode, result: shot.result, ts: Date.now() };
     clearTimeout(this.timer);
@@ -541,6 +554,7 @@ export class Room {
   }
 
   gameOver(byLimit = false) {
+    clearTimeout(this.introTimer);
     clearTimeout(this.timer);
     clearTimeout(this.afterTimer);
     clearTimeout(this.sayTimer);
@@ -598,6 +612,72 @@ export class Room {
     this.result = null;
     this.start(this.players[0]?.id);
     return { ok: true };
+  }
+
+  // ---- voz verificada de las redes (spec/07 §13.2): solo con pantalla; nunca toca this.rng ----
+  eventsFor(ref) {
+    if (!ref) return [];
+    if (ref.game && ref.game === this.gameId) return this.events.filter((e) => e.id === ref.id);
+    if (ref.game) { const g = loadGame(ref.game); return g ? g.events.filter((e) => e.id === ref.id) : []; }
+    if (ref.log !== undefined) { const e = loadLogEntry(ref.log); return e ? [e] : []; }
+    return [];
+  }
+  sayVerified(player, soldier, phrase, kind = 'say', confidence = null) {
+    const actor = this.actorOf(soldier);
+    const check = checkPhrase(phrase, (ref) => this.eventsFor(ref));
+    if (!check.ok) { this.emit('error', actor, { message: 'frase no verificable', text: phrase.text, missing: check.missing }); return false; }
+    const conf = confidence ? { certainty: confidence.certainty, experience: confidence.experience, confidence: confidence.confidence, level: confidence.level } : null;
+    this.emit('say', actor, { text: phrase.text, kind, refs: phrase.refs, confidence: conf });
+    this.log(player.name + ': ' + phrase.text, { playerId: player.id, soldierId: soldier ? soldier.id : null, kind, refs: phrase.refs, confidence: conf ? conf.confidence : null, level: conf ? conf.level : null });
+    return true;
+  }
+  voiceTry(player, soldier, moment, events, confidence, rngKey, { always = false, budget = true } = {}) {
+    if (this.headless || !player || player.agentType !== 'net' || !player.genome || !soldier) return false;
+    if (budget && this.spokeTurn[player.id] === this.shots) return false; // una frase por jugador y turno
+    const rng = makeRng(hash32(this.seed, rngKey));
+    const conf = confidence || this.lastConfidence[player.id] || null;
+    if (!always && rng() >= (conf ? conf.sayProbability : 0.2)) return false;
+    const rival = this.players.find((q) => q.team !== player.team);
+    const ctx = { character: (player.genome.traits && player.genome.traits.character) || 'frio', level: conf ? conf.level : 'novata', confidence: conf, rivalName: rival ? rival.name : null, events: { start: this.events.find((e) => e.type === 'game.start'), ...events } };
+    const phrase = speak(moment, ctx, rng);
+    if (!phrase) return false;
+    const ok = this.sayVerified(player, soldier, phrase, phrase.kind, conf);
+    if (ok && budget) this.spokeTurn[player.id] = this.shots;
+    return ok;
+  }
+  // presentación: el mapa, el rival y, si lo recuerda de una partida guardada, un recuerdo verificable
+  voiceIntro() {
+    if (this.phase !== 'playing') return;
+    this.players.forEach((p, i) => {
+      if (p.agentType !== 'net' || !p.genome) return;
+      const soldier = (p.soldiers || []).find((s) => s.alive);
+      const mem = memoryOf(p.genome);
+      const conf = confidenceOf({ margin: 1, games: p.genome.stats ? p.genome.stats.games : 0, recentShots: mem.recentShots }); // nivel por experiencia
+      const rival = this.players.find((q) => q.team !== p.team);
+      const rivalId = rival ? rival.netId || rival.agentType : null;
+      const remembered = rivalId ? recall(mem, { rivalId }, 3).filter((ep) => ep.rivalId === rivalId && (ep.outcome === 'death' || ep.outcome === 'kill') && ep.ref && ep.ref.game) : [];
+      const recallEvents = remembered.map((ep) => this.eventsFor(ep.ref)[0]).filter(Boolean).slice(0, 1);
+      this.voiceTry(p, soldier, 'intro', { recall: recallEvents }, conf, 900000 + i, { always: true, budget: false });
+    });
+  }
+  // tras un disparo: reacción del tirador, de quien cae y réplica del rival si falló
+  voiceAfterShot(shooter, soldier, shotEventId) {
+    if (this.headless) return;
+    const shot = this.events[shotEventId - 1];
+    if (!shot) return;
+    const mine = this.events.slice(shotEventId).filter((e) => e.data && e.data.shotEventId === shotEventId);
+    const decision = Number.isInteger(shot.data.decisionEventId) ? this.events[shot.data.decisionEventId - 1] : null;
+    const kill = mine.find((e) => e.type === 'kill'), ff = mine.find((e) => e.type === 'friendlyFire');
+    const graze = mine.filter((e) => e.type === 'graze').sort((a, b) => a.data.dist - b.data.dist)[0] || null;
+    this.voiceTry(shooter, soldier, kill ? 'kill' : ff ? 'friendlyFire' : graze ? 'graze' : 'miss', { shot, decision, kill, friendlyFire: ff, graze }, null, shotEventId * 4 + 1);
+    for (const d of mine.filter((e) => e.type === 'death')) {
+      const who = this.players.find((p) => p.id === d.actor.playerId);
+      if (who && who !== shooter) this.voiceTry(who, this.soldiers.find((s) => s.id === d.actor.soldierId), 'death', { death: d }, null, shotEventId * 4 + 2);
+    }
+    if (!kill && !ff) {
+      const other = this.players.find((p) => p.team !== shooter.team && p.agentType === 'net' && (p.soldiers || []).some((s) => s.alive));
+      if (other) this.voiceTry(other, other.soldiers.find((s) => s.alive), 'retort', { rivalShot: shot, rivalDecision: decision }, null, shotEventId * 4 + 3, { budget: false });
+    }
   }
 
   addChat(playerId, text) {

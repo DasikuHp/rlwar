@@ -83,6 +83,7 @@ try {
   results.push(await run('arreglos: bofetada y caricia con efecto inmediato', [join(ROOT, 'test', 'arreglos-bofetada.spec.mjs'), BASE]));
   results.push(await run('arreglos: trono protegido, retos anulados, ids de duelo únicos', [join(ROOT, 'test', 'arreglos-trono.spec.mjs'), BASE]));
   results.push(await run('arreglos: boletín con blanco inofensivo y adaptación equilibrada', [join(ROOT, 'test', 'arreglos-boletin.spec.mjs')]));
+  results.push(await run('arreglos: voz verificada de las redes en la sala', [join(ROOT, 'test', 'arreglos-voz.spec.mjs')]));
 } finally {
   server.kill();
 }

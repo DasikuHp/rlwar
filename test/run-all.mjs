@@ -107,6 +107,7 @@ try {
   results.push(await run('interfaz: dinastías (lógica)', [join(ROOT, 'test', 'ui-dinastias.spec.mjs')]));
   results.push(await run('interfaz: verdad, moviola, boletín y memoria (lógica)', [join(ROOT, 'test', 'ui-verdad.spec.mjs')]));
   results.push(await run('interfaz: cirugía (lógica)', [join(ROOT, 'test', 'ui-cirugia.spec.mjs')]));
+  results.push(await run('interfaz: ayudas de arranque, ¿qué pasaría si…? y primeros pasos (lógica)', [join(ROOT, 'test', 'ui-arranque.spec.mjs')]));
 } finally {
   server.kill();
 }

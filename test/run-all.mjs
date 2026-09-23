@@ -127,6 +127,9 @@ try {
   results.push(await run('terreno de círculos que se rompe y tiro que atraviesa (P1)', [join(ROOT, 'test', 'terreno.spec.mjs')]));
   results.push(await run('terreno (P1): casos de la auditoría (cobertura, ajuste, Simulador, compañeros, deslizar, dibujo)', [join(ROOT, 'test', 'terreno-extra.spec.mjs')]));
   results.push(await run('terreno (P1): "¿qué pasaría si…?" con círculos y bocados por la API', [join(ROOT, 'test', 'terreno-api.spec.mjs'), BASE]));
+  results.push(await run('terreno (P1): huecos de la prueba de mutantes', [join(ROOT, 'test', 'terreno-extra-b.spec.mjs')]));
+  results.push(await run('auditoría P0: SSE compartida, darse de baja dos veces', [join(ROOT, 'test', 'ui-sse-b.spec.mjs')]));
+  results.push(await run('receta de entreno: reloj del entreno (A1) y huecos de los mutantes', [join(ROOT, 'test', 'receta-extra.spec.mjs')]));
 } finally {
   server.kill();
 }

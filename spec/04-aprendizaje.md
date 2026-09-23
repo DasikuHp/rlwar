@@ -359,3 +359,123 @@ Completan §10.2–§10.4 sin cambiar lo que ya decían.
   paso de evolución juegan **contra la propia red, tal como estaba al acabar la partida** (antes de aprender de
   ella), con `learn: false`. La línea `update` de una exhibición lleva `rival`: el id de la red rival, el tipo de
   agente, o `'self'` si juega contra sí misma.
+
+## 11. Receta de entreno (ronda 17, 2026-09-23)
+Lo que un entreno trae **solo para ese entreno**, sin cambiar la red guardada (la red es el cuerpo; la receta, cómo se
+entrena esta vez). Decisión del usuario: `learnCfg` y además programas, currículo, recompensa de práctica, congelar
+solo en este entreno, examen antes y después, versión antes del entreno y quedarse con la mejor. Referencias: Unity
+ML-Agents (`learning_rate_schedule`, `beta_schedule`, `curriculum` con `completion_criteria`) y Huang et al. 2022,
+"The 37 implementation details of PPO" (recocido lineal de la tasa).
+
+Todos los campos son opcionales y van en el cuerpo de `POST /api/lab/trainings` (y en el `training` de `POST
+/api/lab/dynasties/generation`). `createTrainer(opts)` los recibe con los mismos nombres; `learning` es el `learnCfg`
+de §9.4 (sustituye al `learn` interno, que solo pisaba el gradiente).
+```json
+{ "learning": { "method": "both", "gradient": { "lr": 0.01, "batchGames": 8 }, "evolution": { "sigma": 0.05 } },
+  "schedule": { "lr": { "shape": "linear", "to": 0.0003 }, "entropy": { "shape": "cosine", "to": 0 },
+                "temperature": { "shape": "linear", "from": 1.5, "to": 0.8 }, "sigma": { "shape": "linear", "to": 0.005 } },
+  "reward": { "graze": 0.5 },
+  "frozen": ["d", "g"],
+  "curriculum": [
+    { "name": "Uno contra uno", "soldiers": 1, "opponents": { "antagonist": 0, "hallOfFame": 0, "self": 1 },
+      "until": { "winRate": 0.6, "window": 20, "minGames": 40 } },
+    { "name": "Contra la reina", "soldiers": 2, "opponents": { "antagonist": 1, "hallOfFame": 0, "self": 0 }, "until": { "games": 100 } },
+    { "name": "Al azar", "soldiers": "random" } ],
+  "exam": true,
+  "keepBest": true }
+```
+
+### 11.1 Aprendizaje (`learning`, el learnCfg)
+- Se mezcla por secciones sobre `genome.learning` (`method`, `gradient`, `evolution`, `both`, `sleep`): lo que trae la
+  receta gana; lo demás es lo de la red. Mismos rangos y valores que el genoma (§1, `LEARNING_RANGES`); los enteros
+  (`batchGames`, `bpttSteps`, `population`, `gamesPerCandidate`, `gradientGamesPerCycle`, `evolutionStepsPerCycle`)
+  tienen que ser enteros; `baseline` ∈ {value, mean, none}; `optimizer` ∈ {adam, sgd}; `adjustLearn`, `antithetic`,
+  `rankNormalize` son sí/no. Una clave desconocida es un error (una clave mal escrita no se ignora en silencio).
+- Todo el entreno (gradiente, evolución, "los dos", umbral de la bombilla) usa el aprendizaje mezclado. La red en disco
+  conserva el suyo. El estado de Adam es el de la red (cambiar `optimizer` a sgd solo este entreno no lo borra).
+
+### 11.2 Programas (`schedule`)
+- Cada entrada `{shape: constant | linear | cosine, to, from?}` para `lr` (gradiente), `entropy` (gradiente),
+  `temperature` (la temperatura con la que juega y aprende) y `sigma` (ruido de la evolución). `from` por defecto:
+  el valor del aprendizaje mezclado (`lr`, `entropy`, `sigma`) o `traits.temperature` de la red. Rangos de `from` y
+  `to`: los del parámetro (`LEARNING_RANGES`; temperatura, `TRAIT_RANGES`).
+- Valor con el avance `p ∈ [0, 1]`: `constant` = from · `linear` = from + (to − from)·p · `cosine` = to + (from −
+  to)·(1 + cos(π·p))/2.
+- Avance: con `duration.games = N`, `p = partidas jugadas / N` al **empezar** el lote (o el paso de evolución); con
+  `duration.minutes`, el tiempo transcurrido entre el total. Con `plateau` no se sabe cuánto dura: un programa con
+  meseta es un **400** ("los programas necesitan saber cuánto dura el entreno: usa partidas o minutos").
+- Cuándo se aplica: la temperatura se fija al empezar cada lote de gradiente y vale para todas sus partidas y para su
+  sueño (así cada lote aprende de las probabilidades con las que de verdad jugó); `lr` y `entropy`, en ese mismo
+  sueño, con el mismo `p`. En evolución, `sigma` y la temperatura se fijan al empezar cada paso (copias y partida de
+  la red real). El evento `sleep` y la línea `update` del registro llevan `applied: {lr, entropy, temperature}` (o
+  `{sigma, temperature}` en evolución).
+
+### 11.3 Recompensa de práctica (`reward`)
+- Pesos de términos de `REWARD_TERMS` (−5..5) que, durante este entreno, sustituyen a los de la red. Otra clave → 400.
+- Normalización (§2) aparte: los términos cuyo peso cambia empiezan con estadísticas vacías; los demás, con una copia
+  de las de la red. Nada de eso se guarda en la red: al acabar, `genome.reward` (pesos y `stats`) es el de antes. La
+  curva, las emociones y la fitness de la evolución de este entreno salen de la recompensa de práctica.
+- Si hay lecciones con su propia recompensa, cada combinación distinta de pesos lleva sus estadísticas (con la misma
+  regla) y las conserva si vuelve a usarse. Función pura `mergeReward(netReward, ...capas) → {reward, stats}` (las
+  capas, de menos a más prioridad) en `evo/recipe.js`; un término que acaba con el mismo peso que el de la red cuenta
+  como no cambiado.
+- Si ningún peso cambia (sin `reward` ni lecciones con recompensa), el entreno usa las estadísticas de la red como
+  siempre y las guarda.
+
+### 11.4 Congelar solo en este entreno (`frozen`)
+- Lista de ids de bloques con pesos. Durante el entreno, congelados = los de la red **más** estos (una receta nunca
+  descongela lo que la red protege: eso se hace en el Quirófano). Lo respetan el gradiente, la evolución y las
+  bofetadas y caricias que se apliquen durante el entreno. `genome.frozen` en disco no cambia.
+- Errores 400: un id que no existe o sin pesos; todos los bloques con pesos congelados ("no queda nada que aprender").
+
+### 11.5 Currículo por lecciones (`curriculum`)
+- De 1 a 16 lecciones `{name (1–40 caracteres), soldiers?, opponents?, reward?, until?}`. Mientras dura una lección,
+  sus `soldiers` y `opponents` sustituyen a los del entreno, y su `reward` se pone encima de la de práctica (lección,
+  luego receta, luego red). Con `exploiter`, ninguna lección puede traer `opponents` (400).
+- Regla de paso `until` (medida sobre las partidas **de esa lección**): `{games: n ≥ 1}` · `{winRate: 0..1, window:
+  5..100 (20), minGames ≥ window (window)}` · `{reward: x, window, minGames}` (recompensa media por partida). Se mira
+  al registrar cada partida; si se cumple, la siguiente partida ya es de la lección siguiente. La última lección no
+  tiene regla (si la trae, no pasa nada al cumplirla) y dura hasta que acabe el entreno, que siempre manda su
+  `duration`. En evolución, la medida son las partidas de la red real de cada paso.
+- Evento SSE `curriculum {id, trainingId, netId, lesson, name, reason: start | met, games}` y línea `curriculum` en el
+  registro. La vista lleva `curriculum: [{name, from, to, met, measure}]` y la lección en curso.
+
+### 11.6 Examen antes y después (`exam: true`)
+- Boletín (spec/07 §7, semillas fijas) de la red **tal como es** (con su temperatura, no la del entreno) antes de la
+  primera partida y al final, después del último sueño y de "quedarse con la mejor". La vista lleva `exam: {before,
+  after}` (`{aim, cover, survival, adaptation}`); eventos `exam {netId, trainingId, when: before | after, …}`, líneas
+  `exam` en el registro con `trainingId`, y el de después pasa a ser el boletín de la red. Mientras examina, `phase`
+  es `exam-before` o `exam-after` (entrenando, `training`).
+
+### 11.7 Versión antes del entreno (siempre)
+- Antes de la primera partida se guarda una **versión** de la red tal como estaba: `evo/nets/<id>/versions/<n>.json`
+  (`{n, ts, reason, trainingId?, genome}`, `n` creciente; se quedan las 50 últimas). La vista del entreno lleva
+  `versionBefore: n`. En `evo/store.js`: `saveVersion(genome, {reason, trainingId}) → n`, `listVersions(netId)` (la más
+  nueva primero, sin el genoma) y `loadVersion(netId, n)` (o null).
+- API: `GET /api/lab/nets/:id/versions` → `{versions: [{n, ts, reason, trainingId, paramCount}]}` (la más nueva
+  primero) · `GET …/versions/:n` → `{n, ts, reason, trainingId, genome}` · `GET …/versions/:n/diff` → la diferencia
+  de esa versión a la red de ahora (misma forma que spec/05 §5) · `POST …/versions/:n/restore` → la red vuelve a esa
+  versión: pesos, bloques, cables, aprendizaje, recompensa, rasgos, congelados e Imaginación; conserva su id, su
+  nombre, sus estadísticas, su memoria y su linaje (lo vivido no se borra). Antes de volver, la red de ahora se guarda
+  como otra versión (se puede deshacer). 404 si no existe; 409 si la red está ocupada (entrena, duelo, exhibición).
+
+### 11.8 Quedarse con la mejor (`keepBest: true`)
+- Tras cada partida, con 20 o más jugadas en este entreno, `tasa20` = victorias de las 20 últimas / 20. Cuando supera
+  la mejor hasta ahora, se guarda una copia de los pesos de ese momento. Al acabar (tras el último sueño), si la
+  `tasa20` final es menor que la mejor, la red vuelve a esos pesos. Vuelven los pesos: sus estadísticas, su memoria y
+  el estado de Adam se quedan con todo lo jugado.
+- La vista lleva `keptBest: {best, final, atGame, restored}` o `{restored: false, reason: "menos de 20 partidas"}`;
+  línea `keepBest` en el registro. Aviso que la interfaz enseña: la mejor tasa se midió contra la mezcla de rivales de
+  aquel momento.
+
+### 11.9 Vista, errores y determinismo
+- `GET /api/lab/trainings/:id` añade `recipe` (lo que se pidió), `phase`, `lesson` (`{index, name}` o null),
+  `applied` (lo último aplicado), `exam`, `versionBefore` y `keptBest`.
+- Toda la receta se valida al crear el entreno: cualquier error es un **400** con su motivo en español y un ejemplo,
+  y no se crea nada. La validación es una función pura, `validateRecipe(body, genome) → {ok, errors, recipe}`, en
+  `evo/recipe.js`, junto con el valor de un programa (`scheduleValue({shape, from, to}, p)`), el avance
+  (`progressOf(duration, {games, elapsedMs})`, null con meseta), la recompensa (`mergeReward`), el currículo
+  (`createCurriculum(lecciones)` → `{index(), lesson(), record({game, win, reward}) → null | {from, to, measure,
+  games}, summary()}`) y la mejor versión (`createBestTracker(20)` → `{record(win, game) → mejoró, result() → null |
+  {best, final, atGame}}`).
+- Misma receta y misma semilla → mismo entreno (con `duration.minutes`, el avance de los programas depende del reloj).

@@ -120,6 +120,9 @@ try {
   results.push(await run('auditoría P0: huecos de la parte 4 (mutantes que no eran equivalentes)', [join(ROOT, 'test', 'ui-huecos-p0.spec.mjs')]));
   results.push(await run('auditoría P0: arreglos de la interfaz (hilos, formulario, ¿qué pasaría si…?)', [join(ROOT, 'test', 'ui-arreglos-p0.spec.mjs')]));
   results.push(await run('auditoría P0: nombres de hijas sin repetir', [join(ROOT, 'test', 'nombres-p0.spec.mjs')]));
+  results.push(await run('receta de entreno: lógica pura', [join(ROOT, 'test', 'receta.spec.mjs')]));
+  results.push(await run('receta de entreno en el entrenador', [join(ROOT, 'test', 'receta-entreno.spec.mjs')]));
+  results.push(await run('receta de entreno por la API y versiones', [join(ROOT, 'test', 'receta-api.spec.mjs')]));
 } finally {
   server.kill();
 }

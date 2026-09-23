@@ -203,3 +203,12 @@ Aprobados por el usuario ("arréglalo tú"). Completan §1–§6 sin cambiar lo 
 - Los duelos de una generación (madre contra hija en cada casa y duelo entre casas) pasan por el mismo registro que
   `POST /api/lab/duels`: aparecen en `GET /api/lab/duels`, emiten SSE `duel` y sus ids son los de `history` y de
   los eventos `dynasty`.
+
+## 8. Auditoría P0 (2026-09-23)
+### 8.1 Retos de un reinado en la sala de la fama
+- `reignGames` de una entrada de `hallOfFame` = retos que jugó ese reinado: sus defensas (ganadas o empatadas) más el
+  reto que perdió. Ejemplo: gana un reto, empata otro y pierde el tercero → `reignGames: 3`.
+### 8.2 Semillas de los duelos de una generación
+- Las semillas internas de los duelos de una generación no son contrato: lo que manda es que una generación con la
+  misma semilla sea reproducible (§5). Por eso sus mutantes (`seed + 2000·casa`, `seed + 3000`) cuentan como
+  equivalentes.

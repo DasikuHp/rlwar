@@ -114,6 +114,9 @@ try {
   results.push(await run('interfaz: verdad, moviola, boletín y memoria (lógica)', [join(ROOT, 'test', 'ui-verdad.spec.mjs')]));
   results.push(await run('interfaz: cirugía (lógica)', [join(ROOT, 'test', 'ui-cirugia.spec.mjs')]));
   results.push(await run('interfaz: ayudas de arranque, ¿qué pasaría si…? y primeros pasos (lógica)', [join(ROOT, 'test', 'ui-arranque.spec.mjs')]));
+  results.push(await run('auditoría P0: una sola conexión SSE por URL', [join(ROOT, 'test', 'ui-sse.spec.mjs')]));
+  results.push(await run('auditoría P0: huecos antiguos del entreno y del trono', [join(ROOT, 'test', 'auditoria-p0.spec.mjs')]));
+  results.push(await run('auditoría P0: servidor (cría guardada, duración, cuerpos en UTF-8)', [join(ROOT, 'test', 'auditoria-p0-api.spec.mjs')]));
 } finally {
   server.kill();
 }

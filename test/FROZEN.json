@@ -29,6 +29,8 @@
   "test/arreglos-verdad.spec.mjs": "c3c06c1e9c50cdb6addbe18529ae1f6219462d5e41af40bf63a6f4b1a628830c",
   "test/arreglos-voz-extra.spec.mjs": "95299d7ba41a5df576ccb19d7e4426095d2616e7d71a59e2a18d420654b3e4b6",
   "test/arreglos-voz.spec.mjs": "5f17b282e8f88d6d82867d60c0a0909f1bfcab8537e622cc173fdb1dbba7a75a",
+  "test/auditoria-p0-api.spec.mjs": "3b10af4be32314fc1ddb73990d39102d8b66113e90075182a8435e69a5a021fe",
+  "test/auditoria-p0.spec.mjs": "0011c83e46db44f22aa9da4ed23585a8148845e261a1346ef525bdf3990a9c8d",
   "test/client.spec.mjs": "65659173d8eca4e4291675bcadc8e9e64d1dbba5c77400c88be063e70119156a",
   "test/entrenador-extra-b.spec.mjs": "fd6daa5e4ebe0eccfdc2408a7dca249fb34524794d1b2980d8d491a303addf8f",
   "test/entrenador-extra.spec.mjs": "cec48ae69fe22a2ae66db3ad80e5962768905efb64f53d83abcff1058edbbbea",
@@ -63,6 +65,7 @@
   "test/ui-evolucion.spec.mjs": "2cd14c2885fdd16bce3747f286ded6e4f022b46ff6e22733aea1c407d7009d89",
   "test/ui-inicio.spec.mjs": "d78496e780302268482f1a5fe8eb22b5f600123b2988932b20023a20043965be",
   "test/ui-sala.spec.mjs": "283f587fd282f43d94791723be6d9c98d0b3a2cd69b03faa52353e5a86212a6f",
+  "test/ui-sse.spec.mjs": "28d1a0a08c92eed571c52cf247c57c7231d49c1710d1ed9053a6a26732861efc",
   "test/ui-trono.spec.mjs": "ee507caf058b2db04004be416ebf262acf353e16c650781d32bf53642f4df597",
   "test/ui-verdad.spec.mjs": "940166797408d314ee96e8eb38e0634c4c13ef2c4c75cc8228ce5a8baef6613c",
   "test/verdad.spec.mjs": "6cd1955024fc4271d304eb90d20a41028c1fe7b8ee81756ca1394db0ac9983e7"

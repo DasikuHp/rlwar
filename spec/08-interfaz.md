@@ -146,3 +146,20 @@ Aprobados por el usuario ("arréglalo tú"; frases en el navegador "hazlo lo mej
 ### 10.5 Errores de pesos (B1)
 - Cada error de `PUT /api/lab/nets/:id/weights/:bloque` lleva `example` con la forma que espera ese bloque, p. ej.
   `{"W": [512 números], "b": [16 números]}`.
+### 10.6 Cuerpos en bytes y en UTF-8 (auditoría P0, 2026-09-23)
+- Los topes de §10.1 se cuentan en **bytes** del cuerpo, no en caracteres: una "ñ" son 2 bytes.
+- El cuerpo se decodifica como UTF-8 **entero, al final**: una letra partida entre dos trozos de la conexión llega
+  intacta (antes, cada trozo se pasaba a texto por separado y una "Ñ" partida llegaba como "��").
+### 10.7 Trabajos guardados con su resultado (auditoría P0, 2026-09-23)
+- El registro en disco de un trabajo terminado (§10.4) lleva su `result` completo; en una cría, el `ranking` con
+  sus hijos. Tras reiniciar, `GET /api/lab/jobs/:id` devuelve lo mismo que antes (antes, la cría se guardaba antes de
+  tener el resultado y quedaba `result: null`).
+
+## 11. Conexiones SSE en el navegador (auditoría P0, 2026-09-23)
+- El navegador solo abre 6 conexiones HTTP/1.1 a la vez por servidor, y cada SSE ocupa una mientras está abierta.
+  Por eso la interfaz abre **como mucho una conexión por URL** de SSE para toda la página, con `public/js/ui/sse.js`
+  (`createHub().on(url, tipo, fn) → off`): todas las vistas se suscriben ahí, el último `hello` se entrega a quien se
+  suscribe tarde, y la conexión se cierra cuando se va el último suscrito. Ningún otro fichero crea un `EventSource`.
+- Reproducción del fallo que evita: abrir Inicio, Entreno, Evolución, Trono y Dinastías (una SSE cada una, sin
+  cerrarse) con una sala espectada en otra pestaña dejaba Verdad y Cirugía en blanco: sus peticiones esperaban turno
+  para siempre.

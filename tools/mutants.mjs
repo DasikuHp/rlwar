@@ -4,11 +4,12 @@
 // tiempo). Nunca toca el original: trabaja sobre una copia del repo en el directorio temporal del
 // sistema (gw-mutants-<pid>), que se borra al acabar salvo --keep.
 //   node tools/mutants.mjs shared/geometry.js --tests test/motor.spec.mjs[,...] [--max N] [--seed S]
-//        [--timeout ms] [--root dir] [--json salida.json] [--keep]
-import { readFileSync, writeFileSync, rmSync, cpSync, existsSync, mkdirSync } from 'node:fs';
+//        [--timeout ms] [--root dir] [--json salida.json] [--keep] [--lines a-b,c] [--server [--port N]]
+// Con --server, en cada mutante levanta el servidor de la copia (ya mutado) y pasa su URL a los tests.
+import { readFileSync, writeFileSync, rmSync, cpSync, existsSync, mkdirSync, mkdtempSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 
 const DEFAULT_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -182,29 +183,59 @@ function copyRepo(root, workDir) {
   });
 }
 
-export async function runMutants({ root = DEFAULT_ROOT, file, tests, max = 0, seed = 1, timeoutMs = 60000, quiet = false, keep = false, workDir = null } = {}) {
+// '10-20,31' → ¿está la línea en alguno de los tramos?
+export function inLines(spec) {
+  const ranges = String(spec).split(',').map((r) => r.trim()).filter(Boolean).map((r) => { const [a, b] = r.split('-').map(Number); return [a, Number.isFinite(b) ? b : a]; });
+  return (line) => ranges.some(([a, b]) => line >= a && line <= b);
+}
+
+// servidor de la copia (spec/00 §4): GW_FAST, su puerto y un GW_EVO_DIR nuevo; ok = respondió antes de salir o de waitMs
+async function startServer(work, port, waitMs = 20000) {
+  const evoDir = mkdtempSync(join(tmpdir(), 'gw-mutants-evo-'));
+  const srv = spawn(process.execPath, [join(work, 'server', 'server.js')], { cwd: work, env: { ...process.env, GW_FAST: '1', PORT: String(port), GW_EVO_DIR: evoDir }, stdio: 'ignore' });
+  let exited = false;
+  const gone = new Promise((r) => srv.once('exit', () => { exited = true; r(); }));
+  const base = `http://localhost:${port}`;
+  const t0 = Date.now();
+  let ok = false;
+  while (!ok && !exited && Date.now() - t0 < waitMs) {
+    try { ok = (await fetch(base + '/api/health')).ok; } catch { await new Promise((r) => setTimeout(r, 100)); }
+  }
+  const stop = async () => {
+    if (!exited) { srv.kill(); await gone; }
+    try { rmSync(evoDir, { recursive: true, force: true }); } catch { /* Windows puede tardar en soltarlo */ }
+  };
+  return { ok: ok && !exited, base, stop };
+}
+
+export async function runMutants({ root = DEFAULT_ROOT, file, tests, max = 0, seed = 1, timeoutMs = 60000, quiet = false, keep = false, workDir = null, lines = null, server = false, port = 8850 } = {}) {
   if (!file || !tests || !tests.length) throw new Error('hace falta el fichero a mutar y al menos un test');
+  if (server) { let busy = false; try { busy = (await fetch(`http://localhost:${port}/api/health`)).ok; } catch { /* libre */ } if (busy) throw new Error(`el puerto ${port} ya está ocupado: los tests hablarían con otro servidor`); }
   const src = readFileSync(join(root, file), 'utf8');
   const all = generateMutants(src);
-  const chosen = sampleMutants(all, max, seed);
+  const chosen = sampleMutants(lines ? all.filter((m) => inLines(lines)(m.line)) : all, max, seed);
   const work = workDir || join(tmpdir(), `gw-mutants-${process.pid}`);
   copyRepo(root, work);
   const target = join(work, file);
   const results = [];
   const say = (s) => { if (!quiet) console.log(s); };
-  say(`🧬 ${file}: ${all.length} mutantes posibles, se prueban ${chosen.length} contra ${tests.join(', ')}`);
+  say(`🧬 ${file}: ${all.length} mutantes posibles, se prueban ${chosen.length}${lines ? ` (líneas ${lines})` : ''} contra ${tests.join(', ')}${server ? ` con servidor en el puerto ${port}` : ''}`);
   say(`${'#'.padStart(4)}  ${'línea'.padStart(5)}  cambio${' '.repeat(38)}  resultado`);
   try {
     for (let i = 0; i < chosen.length; i++) {
       const m = chosen[i];
       writeFileSync(target, applyMutant(src, m));
       let killed = false, timeout = false, detail = '';
-      for (const t of tests) {
-        const r = spawnSync(process.execPath, [join(work, t)], { cwd: work, encoding: 'utf8', timeout: timeoutMs, env: { ...process.env, GW_FAST: '1' } });
-        if (r.error && (r.error.code === 'ETIMEDOUT' || r.signal)) { killed = true; timeout = true; detail = 'tiempo'; break; }
-        if (r.signal) { killed = true; timeout = true; detail = 'tiempo'; break; }
-        if (r.status !== 0) { killed = true; detail = `sale ${r.status} en ${t}`; break; }
-      }
+      const srv = server ? await startServer(work, port) : null;
+      try {
+        if (srv && !srv.ok) { killed = true; detail = 'el servidor no arranca'; }
+        else for (const t of tests) {
+          const r = spawnSync(process.execPath, [join(work, t), ...(srv ? [srv.base] : [])], { cwd: work, encoding: 'utf8', timeout: timeoutMs, env: { ...process.env, GW_FAST: '1' } });
+          if (r.error && (r.error.code === 'ETIMEDOUT' || r.signal)) { killed = true; timeout = true; detail = 'tiempo'; break; }
+          if (r.signal) { killed = true; timeout = true; detail = 'tiempo'; break; }
+          if (r.status !== 0) { killed = true; detail = `sale ${r.status} en ${t}`; break; }
+        }
+      } finally { if (srv) await srv.stop(); }
       const res = { ...m, killed, timeout, detail };
       results.push(res);
       const change = `${m.desc}`.slice(0, 44).padEnd(44);
@@ -226,12 +257,13 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   const file = args.find((a, i) => !a.startsWith('--') && (i === 0 || !args[i - 1].startsWith('--')));
   const tests = String(opt('tests', '')).split(',').map((s) => s.trim()).filter(Boolean);
   if (!file || !tests.length) {
-    console.log('uso: node tools/mutants.mjs <fichero.js> --tests test/a.spec.mjs[,test/b.spec.mjs] [--max N] [--seed S] [--timeout ms] [--root dir] [--json out.json] [--keep]');
+    console.log('uso: node tools/mutants.mjs <fichero.js> --tests test/a.spec.mjs[,test/b.spec.mjs] [--max N] [--seed S] [--timeout ms] [--root dir] [--json out.json] [--keep] [--lines a-b,c] [--server [--port N]]');
     process.exit(2);
   }
   const r = await runMutants({
     root: opt('root', DEFAULT_ROOT), file, tests, max: Number(opt('max', 0)) || 0, seed: Number(opt('seed', 1)) || 1,
     timeoutMs: Number(opt('timeout', 60000)) || 60000, keep: args.includes('--keep'),
+    lines: opt('lines', null), server: args.includes('--server'), port: Number(opt('port', 8850)) || 8850,
   });
   const out = opt('json', null);
   if (out) writeFileSync(out, JSON.stringify(r, null, 2));

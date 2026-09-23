@@ -99,6 +99,7 @@ try {
   results.push(await run('parte 3: moviola de una partida antigua (sin copia de la red)', [join(ROOT, 'test', 'moviola-antigua.spec.mjs')]));
   results.push(await run('parte 3: casos extra en proceso (almacén y verdad)', [join(ROOT, 'test', 'arreglos-parte3-extra.spec.mjs')]));
   results.push(await run('parte 3: casos extra por la API', [join(ROOT, 'test', 'arreglos-parte3-extra-api.spec.mjs')]));
+  results.push(await run('parte 3: casos extra b (segunda pasada de mutantes)', [join(ROOT, 'test', 'arreglos-parte3-extra-b.spec.mjs')]));
   results.push(await run('interfaz: editor de redes (lógica)', [join(ROOT, 'test', 'ui-editor.spec.mjs')]));
   results.push(await run('interfaz: editor de redes, casos extra', [join(ROOT, 'test', 'ui-editor-extra.spec.mjs')]));
   results.push(await run('interfaz: inicio del laboratorio (lógica)', [join(ROOT, 'test', 'ui-inicio.spec.mjs')]));

@@ -20,6 +20,7 @@
   "test/arreglos-ocupada-extra.spec.mjs": "0aee93488ed01b6b5c0e076b5d983aab81f25dbbf815973d87dff86d2fe5280b",
   "test/arreglos-ocupada.spec.mjs": "69f38ae93597bac9e716beb46b5670b7f83aadbe86e7b8267cf646a3bed1c8ae",
   "test/arreglos-parte3-extra-api.spec.mjs": "986a6179eab9fe91b150e0edefc741d0d8f1ac40132f002cbc695c91968bc59a",
+  "test/arreglos-parte3-extra-b.spec.mjs": "4675af7319a7bb81d5ca064d9b8e564ed62446b8f815d0c9787489064db77b0b",
   "test/arreglos-parte3-extra.spec.mjs": "8b12785caa689839026a5635194dea0709090849a8579b7151e86c1c1d05cffd",
   "test/arreglos-partidas.spec.mjs": "06cf30c62d4f0ba5e395475196a749a991a4b6f0a13f6ee6b0037cc7fe57c65f",
   "test/arreglos-sala.spec.mjs": "479a4af2ad89466d49cbadf3946f4350f4f2958f4f84a72d9e3e43cb9b812100",

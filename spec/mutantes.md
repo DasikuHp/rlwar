@@ -229,3 +229,32 @@ contra el spec nuevo del arreglo.
 | 469, 478 | `===`/`!==`, `true`/`false` en `decisionEventId` y en `requested.stay === true` | código anterior al arreglo; el spec del arreglo no usa decisiones. Lo cubren `politica.spec` y `motor.spec` |
 | 474 | `slid`/`stayed` del **evento** `move` en la rama del caído | **hueco pequeño**: el test mira `lastMove`, no el evento. Riesgo bajo: el evento copia los mismos valores |
 | 476 | `ok: true` → `false` en el retorno de la rama del caído | nadie consulta `ok` de `move()` en proceso; la API lo reenvía tal cual |
+
+### R2 — aprendizaje: `evo/train.js`
+- **C4** (identidad de partida; líneas 168–176, 184–188, 207, 392–395) contra `arreglos-partidas` + `aprendizaje` +
+  `aprendizaje-extra` + `entrenador-extra`: los mutantes de las líneas nuevas se cazan. Sobreviven 11 de líneas
+  anteriores al arreglo:
+  - el comparador del `sort` por `eventId` (las entradas ya llegan ordenadas: equivalente);
+  - `meanEffective` (salida que nadie usa);
+  - `A ?? 0` (la ventaja siempre está definida);
+  - la etiqueta `valueSource`;
+  - **hueco previo real**: ningún spec fija la referencia `value` dentro de `learnFromGames` (líneas 174–175) ni
+    `stats || {}` (185). Pendiente de un spec extra.
+- **C3** (`evolutionRound`, `evolve`, paso del entrenador) contra `arreglos-metodo`: **57/209**. El test con
+  oráculo exacto fija el orden, las semillas inyectadas, los lados, las parejas antitéticas, los congelados y la
+  actualización. Sobreviven sobre todo:
+  - las **constantes de semilla** de la spec (`100003`, `7`, `gamesPerCandidate` del paso del entrenador y del
+    duelo), porque los tests solo exigen que sea determinista;
+  - la magnitud de `perBlock`/`top` del paso;
+  - `j % 2` → `% -2` (equivalente con `j ≥ 0`).
+  **Pendiente**: `arreglos-metodo-extra` con la semilla y el lado de la partida de la red real leídos de su meta, y
+  con `perBlock` recalculado desde los pesos.
+- `evo/duel.js` (paso tras el duelo) contra `arreglos-metodo`: **8/14**. Queda un superviviente que importa: si la
+  rival llevara `learn: true`, la fitness podría medirse sobre la rival. El código pone `false`, pero ningún test lo
+  vigila. Pendiente en el mismo spec extra.
+
+### R3–R5 — trono, verdad, API
+Sin tirada de mutantes todavía. Varios specs de estos arreglos (`arreglos-exhibicion`, `arreglos-bofetada` y las
+partes API de `arreglos-trono` y `arreglos-api`) necesitan un servidor, y el probador dirigido de esta sesión (un script sobre `generateMutants`/`applyMutant` de `tools/mutants.mjs`) no lo levanta en la copia.
+Hay que adaptarlo (levantar el servidor mutado en la copia) antes de poder tirar esos mutantes. Queda anotado como
+trabajo pendiente, no como justificación.

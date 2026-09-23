@@ -122,6 +122,8 @@ E:\grafwar
 │   ├── duel.js      F6: 3 mapas × 2 lados con hash32, ranking, modos frozen/hot/mix, partidas guardadas
 │   ├── throne.js    F6: reto al trono, sala de la fama (copia congelada), dinastías y generaciones
 │   ├── truth.js     F7: checkPhrase/compose (nada inventado), confianza, emoción, memoria, neuronas con nombre, diario
+│   ├── voice.js     Arreglos (Opus): voz de las redes por carácter y confianza; cada frase compuesta con compose y
+│   │                verificada por la sala (sayVerified) antes de decirse (spec/07 §13.2)
 │   └── exam.js      F7: boletín de habilidades determinista (puntería, cobertura, supervivencia, adaptación)
 ├── agents/net.js    F3: agente-red (net:<id>), memoria por soldado, trayectorias para aprender
 ├── test/            run-all.mjs (comprueba FROZEN.json y levanta servidor 8791 → TODO OK ✔)

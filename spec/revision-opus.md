@@ -401,6 +401,42 @@ genoma") y con el espíritu antagonista.
 
 ---
 
+## 8. Estado tras los arreglos (misma sesión, 2026-09-23)
+Decisiones del usuario: "arréglalo tú" (los fallos críticos y altos), dejar las plantillas como están (A6), bofetada
+inmediata, adaptación equilibrada que penaliza perder, evolución = concurso tras el duelo y la red real en vivo a
+x1/x10, frases verificadas en el navegador sin chapuzas. Proceso de cada arreglo: spec → test en rojo congelado en su
+propio commit → código → batería completa en verde → commit. Hay 8 specs nuevos `test/arreglos-*.spec.mjs` en la
+batería, que ahora tiene 38 suites y está en verde.
+
+| hallazgo | estado | commit |
+|---|---|---|
+| C1 motor.spec sin commitear | arreglado | `9dd90d4` |
+| C2 fuego amigo / turno abierto | arreglado (spec/01 §9) | `fc03781` |
+| C3 método de aprendizaje | arreglado: evolución y ambos en entrenos, duelos y exhibiciones (spec/04 §10.2) | `5cbf8f7` |
+| C4 emociones cruzadas + **C4b nuevo**: ids de soldado repetidos entre hilos que fundían episodios (4 hilos ≠ 1 hilo) | arreglado (spec/04 §10.1) | `f98e800` |
+| C5 borrar la reina / reto fallido | arreglado (spec/06 §7.1) | `bb8d39b` |
+| C6 ids de duelo | arreglado (spec/06 §7.2) | `bb8d39b` |
+| A1 bofetada/caricia | arreglado: efecto inmediato + recuerdo; cola si entrena (spec/04 §10.4) | `0bab49e` |
+| A2 exhibiciones | arreglado (spec/04 §10.3) | `aea1299` |
+| A3 voz verificada | arreglado: `evo/voice.js` + `sayVerified` (spec/07 §13.2) | `226addd` |
+| A4 boletín | arreglado (spec/07 §13.1) | `ed4342a` |
+| A5 rutas que faltaban | arreglado: whatif, curves, lista de partidas, catálogo de mutaciones, `POST /rooms {speed}` (spec/08 §9.1) | `acbe00a`, `fc03781` |
+| A6 plantillas clonadas | **se queda así** (decisión del usuario) | — |
+| M14 `shared/` en el navegador | arreglado (spec/08 §9.3) | `acbe00a` |
+| **M16 nuevo**: `pruneGames` nunca se llamaba (disco sin límite) | arreglado con `saveGameKept` (spec/08 §9.2) | `acbe00a` |
+| **nuevo**: a un bot no se le pedía `chooseMove` si el disparo no venía de su turno automático | arreglado (spec/01 §2.2) | `fc03781` |
+| M1–M13, M15, B1–B5 | **pendientes**: no se pidieron en esta ronda | — |
+
+Tests congelados que cambiaron, todos con OK del usuario y el motivo en su commit: `motor.spec` (commit de la
+versión ya congelada), `api-verdad.spec` (bofetada inmediata), y dos míos (`arreglos-motor`: salida con
+`process.exitCode` por un aborto de Node 24 en Windows; `arreglos-api`: comparación por contenido y retención en
+`saveGameKept`).
+
+**Aún falta**: la parte 2 (interfaz) no está empezada; los mutantes de A1, A2, A3, C5 y C6 están sin pasar (§6 de
+`mutantes.md`); y hay que escribir `arreglos-metodo-extra` para los huecos de mutantes de C3 (semillas exactas,
+`perBlock` del paso de evolución, rival con `learn:false`).
+
+
 ## Apéndice A — Salida completa de `node test/run-all.mjs` (árbol de trabajo, 2026-09-23)
 ```
 🔒 29 test(s) congelado(s): huellas OK

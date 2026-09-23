@@ -59,6 +59,9 @@ el único punto de validación de disparos.
   determinista), registro completo en la sala con tope y graze, partidas de muestra con reward/emotion y
   trayectorias, moviola con cerebro, bofetada/caricia, log con id y rotación; spec/07 §12. Batería 31 specs
   (29 congelados). Las 7 fases están hechas. Siguiente: segunda ronda de mutantes de F5/F6/F7 (extras).**
+- **Revisión y arreglos de Opus (2026-09-23)**: informe en `spec/revision-opus.md`. Arreglados los críticos y altos
+  menos A6 (ver su §8), con 8 specs `arreglos-*`; la batería tiene 38 suites y está en verde. Siguiente: la
+  interfaz (parte 2 del prompt de Opus).
 - F0 **a medias**: `plan.md` escrito; **falta** el selector de tropas en la UI. *(superado: ver
   arriba)*
 - F1–F5 sin empezar: no hay `move` en `rooms.js`, no existe `evo/`.
@@ -142,6 +145,18 @@ el único punto de validación de disparos.
 | Claves de datos | **Inglés** en claves JSON/API nuevas; **español** en todo texto para personas. |
 | Ángulo de artillería | Bug previo en `solver.js` (ángulo positivo baja para el equipo derecho): **se arregla en F1** (spec/01 §7b). |
 | Tests viejos | `test/smoke.mjs` y `agent.mjs autopilot` reciben una línea (`stage==='move'` → `stay`), en commit propio con motivo. |
+
+### Ronda 13 — revisión de Opus y arreglos (2026-09-23) ✅
+| Tema | Decisión |
+|---|---|
+| Fallos de la revisión | "Arréglalo tú": Opus arregla los críticos y los altos, siempre con test congelado antes del código. |
+| Plantillas | Se quedan como están: una red nueva desde plantilla es un clon exacto (mismos pesos y emblema). |
+| Evolución en duelos | "Concurso tras el duelo": una red de evolución hace un paso de evolución contra la rival al acabar. |
+| Evolución a x1/x10 | Las copias juegan sin pantalla y se ve en vivo una partida de la red real por paso. |
+| Bofetada/caricia | Efecto inmediato sobre esa decisión y recuerdo en la memoria; si la red entrena, en su próximo sueño. |
+| Adaptación del boletín | 16 partidas equilibradas por lado; adaptación = tasa media × (1 − (máx − mín)). |
+| Frases en el navegador | "Hazlo lo mejor que puedas, sin chapuzas": `shared/` se puede cargar en el navegador y el servidor sirve la verdad. |
+| Retención de partidas | La aplican quienes guardan (`saveGameKept`); `saveGame` no borra (lo fija `verdad.spec`). |
 
 ## 4. Diseño resultante (borrador, se cierra al acabar las preguntas)
 

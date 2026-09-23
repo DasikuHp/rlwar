@@ -143,6 +143,15 @@ servidor) · regresión (la suite actual).
   cronista, neuronas con nombre, bofetada/caricia; spec/07 §12). Desbloqueado para Opus: voz con compose/checkPhrase,
   diario y cronista, radar del boletín, moviola, neuronas, emociones (spec/08 §4, §6).
 - Las 7 fases están hechas. Siguiente: segunda ronda de mutantes de F5/F6/F7 con specs extra (spec/mutantes.md).
+- **Revisión de Opus (2026-09-23)** en `spec/revision-opus.md`, con 6 fallos críticos y 6 altos, y **arreglos** aprobados
+  por el usuario ("arréglalo tú"). Arreglados: fuego amigo que colgaba salas, método evolución/ambos, emociones
+  cruzadas e ids repetidos entre hilos, trono con la reina borrable, ids de duelo, bofetada inmediata, exhibiciones que
+  aprenden, voz verificada (`evo/voice.js`), boletín, rutas que faltaban (whatif, curves, lista de partidas, catálogo
+  de mutaciones), retención de 200 partidas y `shared/` en el navegador. Contratos en spec/01 §9, 04 §10, 06 §7,
+  07 §13 y 08 §9. Hay 8 specs nuevos `test/arreglos-*.spec.mjs`; la batería tiene 38 suites y está en verde. Las
+  plantillas siguen dando clones (decisión del usuario).
+- Pendiente: la parte 2 (interfaz, `spec/prompt-opus-ui.md` §3); los mutantes de R2–R5 (`spec/mutantes.md`); y los
+  hallazgos medios y bajos de la revisión (§3.3), que no se pidieron.
 
 ## 7. Cierre de cada sesión
 1. Actualiza `plan2.md` (estado de la fase) y `plan.md` §4 si cambia el stack.

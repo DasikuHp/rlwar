@@ -192,6 +192,34 @@ el único punto de validación de disparos.
 | B5 (entreno de 100 s) | Intentado reproducir 10 veces (proceso nuevo, primer entreno, 4 hilos, 16 partidas): 1,8–2,8 s, mediana 2,2 s. No reproducido; si reaparece, anotar semilla, momento y carga de la máquina. |
 | Interfaz | Construidas las 9 vistas de `spec/prompt-opus-ui.md` §3.1 más las dos ayudas de arranque de la ronda 4 que faltaban ("¿qué pasaría si…?" en el editor y primeros pasos en el inicio). El pulido visual fino, fiel a `referencia.png` y `referencianoabsoluta.png`, queda para otra sesión (petición del usuario). |
 
+### Ronda 17 — rehacer la app como un juego de verdad (2026-09-23) ✅
+Motivo (usuario): "me gusta la UI del editor de redes pero es lo único que me gusta… quiero un juego de verdad". Vistos
+sus vídeos y capturas: portada-formulario, "Ver IA vs IA" con dos heurísticos que al acabar no hace nada, barra de
+disparo en modo espectador, bocadillos solapados, registro con decimales crudos, Verdad y Cirugía en blanco, ceros
+invisibles en Cirugía. `referencia.png` ya no está en disco; manda `referencia/graphwar/` (el original) y
+`referencianoabsoluta.png`. Plan completo: `C:\Users\h\.claude\plans\pasted-content-id-4aad-trabajas-en-cozy-cake.md`.
+
+| Tema | Decisión |
+|---|---|
+| Qué es | **Entrenador de redes**: el usuario no dispara ("solo mirar; la diversión es crear las redes, mímalo muchísimo más, real y único"). Fuera de la interfaz: barra de disparo, salas por código, heurísticos y "Ver IA vs IA". La API y AGENTS.md siguen. |
+| Arranque | Portada divertida e interactiva (fluido WebGL + partículas tsParticles + constelación real de la reina) · menú con **3 partidas guardadas** · Nueva partida → tutorial → editor. |
+| Ranuras | Cada una es **un mundo entero** (redes, trono, dinastías, sala de la fama, partidas, avance del tutorial). |
+| Lo de hoy | "Deja Vidente sola y será la rival del tutorial": **Vidente 1 = rival de práctica** en cada mundo nuevo (no cuenta para el trono; las dos redes del usuario pelean por la primera corona, como en la ronda 4). El resto se **archiva** en `evo/archivo-2026-09-23/`. |
+| Tutorial | **Obligatorio, de todo el bucle, haciéndolo**, con **retos sobre escenas reales + foco guiado** ("que te enseñe de verdad"). **3 caminos** (Desde cero / Ya sé algo / Sé de RL) que revelan Aprendiz / Artesano / Científico, y **Academia** de extras a elegir. |
+| Estructura | Las **4 etapas** de `referencianoabsoluta.png`: 1 Crear · 2 Entrenar y evolucionar · 3 Duelo en vivo · 4 Trono y análisis; se puede saltar el entreno. |
+| Ficha | **Verdad y Cirugía integradas en cada red**: panel lateral completo que se despliega y se retrae (Cerebro, Historia, Memoria, Neuronas, Boletín, Familia, Quirófano). |
+| Estilo | El del mockup (azul noche, neón cian/violeta/naranja, títulos numerados). "Una UI de verdad animada y viva, nada cutre ni IA slop". |
+| Terreno (motor) | **Círculos que se rompen** como el original (8–22, r ≈ 1–4 u; bocado ≈ 0,8 u al final del tiro) y **sin renovación de mapa**. |
+| Tiro (motor) | **Atraviesa soldados** como el original: mata a todos los que toca (no al tirador) y solo se para en obstáculo, borde o valor inválido. |
+| Duelo en vivo | Panel: candidatos + decisión, activaciones y **"lo que aprende de este tiro"** (resultado, recompensa desglosada, antes/después del sueño). Razonamiento, marcador 3×2 y registro **plegados**. Bocadillos: **primero la función, luego el comentario, sin solaparse**. |
+| Fin de duelo | Resultados de verdad + **continuidad** (propone criar hijas que intenten ganar a la madre) + interruptor **"seguir solo N generaciones"**. |
+| Editor | Las 8 mejoras: banco de pruebas en vivo, probar ya, nervios que laten, deshacer y versiones, qué ve tu red, tu propia escena, arreglar con un clic, quirófano en el bloque. "Dale mimo a cada cosa." |
+| Niveles | Se revelan con el tutorial elegido; luego libres. Nada se bloquea. |
+| Sonido | Pendiente para el futuro. |
+| Proceso | **Lo crítico lo hace Opus en esta sesión** (spec → tests congelados en rojo → código → mutantes), no Fable. **La auditoría de la parte A va primero.** |
+| Tests viejos | `client.spec` y `troops.spec` se retiran con motivo (prueban la portada que se quita) y los sustituyen tests del juego nuevo. |
+| Librerías | **Excepción a "cero dependencias", solo en el navegador**: GSAP 3.15.0, Motion 13.4.2, tsParticles slim 4.4.0 y Lenis 1.3.26, **descargadas** a `public/vendor/` con versión fija, licencia y SHA-256 (sin npm install, sin CDN). |
+
 ## 4. Diseño resultante (borrador, se cierra al acabar las preguntas)
 
 ### 4.1 Tropas (F0)

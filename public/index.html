@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Graphwar Agents ⚔️</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Cpath d=%27M1 13 Q7 -3 15 10%27 stroke=%27%234fd1ff%27 stroke-width=%272%27 fill=%27none%27/%3E%3C/svg%3E">
 <link rel="stylesheet" href="/css/style.css">
 <style>
   .overlay { display: flex; align-items: center; justify-content: center; }
@@ -46,6 +47,7 @@
         <button id="btnSelfplay">🤖 Ver IA vs IA (self-play)</button>
       </div>
       <p class="hint troopsHint">Tú eliges la tropa de cada bando; las posiciones se sortean siempre.</p>
+      <p class="hint"><a class="accent" href="/evo.html">Laboratorio de redes</a>: crea y edita tus propias redes; aparecen solas en el selector de tropas.</p>
       <div id="lobby" hidden>
         <p>Código de sala: <b id="roomCode" class="accent"></b> (compártelo)</p>
         <div class="row" id="lobbyControls">
@@ -78,6 +80,8 @@
       </aside>
       <div id="canvasWrap"><canvas id="board"></canvas><div id="toast"></div></div>
       <aside id="sideRight">
+        <h3>Cerebro</h3>
+        <div id="brain" class="brain" aria-live="polite"><p class="dim">Cuando piense una red, aquí verás sus tiros candidatos, lo decidida que estaba y en qué se fijó.</p></div>
         <h3>Registro</h3>
         <ul id="chat"></ul>
         <form id="chatForm"><input id="chatInput" placeholder="Escribe..." autocomplete="off"></form>

@@ -6,7 +6,8 @@ export const R = {
   current: null,   // disparo animándose
   particles: [],
   shake: 0,
-  bubbles: [],     // {soldierId, text, until} bocadillos sobre el soldado
+  bubbles: [],     // {soldierId, text, level?, until} bocadillos sobre el soldado (level = confianza de la red)
+  think: null,     // lo que piensa una red (live.js overlay) + {team, until}: curvas imaginadas o destinos
   lastSayTs: 0,    // cuándo se habló por última vez (para retrasar el disparo)
   _cw: -1, _ch: -1,
   stars: Array.from({ length: 90 }, () => ({ x: Math.random(), y: Math.random(), r: Math.random() * 1.4 + .3, a: Math.random() * .7 + .2 })),
@@ -48,6 +49,7 @@ export function startShot(shot) {
 export function shotFinished(shot) {
   R.shots.push({ points: shot.points, team: shot.shooterTeam, ts: Date.now() });
   R.current = null;
+  if (R.think && R.think.kind === 'shoot') R.think = null; // la elegida ya se ha trazado
   const end = shot.points[shot.points.length - 1];
   burst(end[0], end[1], shot.result.type === 'kill' || shot.result.type === 'suicide' ? 60 : 26, shot.shooterTeam);
   R.shake = shot.result.type === 'kill' ? 16 : 8;
@@ -127,6 +129,7 @@ function drawWorld() {
 
   const age = (sh) => (Date.now() - sh.ts) / 1000;
   for (const sh of R.shots) drawTrail(sh.points, TEAM_COLOR[sh.team], Math.max(0, .35 - age(sh) * .05), false);
+  if (R.think && Date.now() < R.think.until) drawThink(R.think); else R.think = null;
   if (R.current) animateCurrent();
 
   for (const sol of st.soldiers) {
@@ -187,6 +190,10 @@ function drawWorld() {
     ctx.closePath(); ctx.fill();
     ctx.fillStyle = '#fff';
     ctx.fillText(txt, bx + w / 2, by + 16.5 * R.dpr, w - 12 * R.dpr);
+    if (b.level) { // confianza real de la red al hablar (spec/07 §4): novata, media o veterana
+      ctx.font = `${10 * R.dpr}px sans-serif`; ctx.textAlign = 'left'; ctx.fillStyle = color;
+      ctx.fillText(b.level, bx + 6 * R.dpr, by - 4 * R.dpr);
+    }
     ctx.restore();
   }
 }
@@ -201,6 +208,32 @@ function animateCurrent() {
   }
   drawTrail(pts.slice(0, n + 1), TEAM_COLOR[R.current.shooterTeam], .95, true, pts[n]);
   if (n >= pts.length - 1 && pts.length >= 2) shotFinished(R.current);
+}
+
+// lo que imagina una red: sus tiros candidatos tenues (más probable, más visible) y la elegida discontinua en firme;
+// en la fase de mover, los destinos (más grandes cuanto más probables) y el elegido con anillo
+function drawThink(t) {
+  const { ctx } = R;
+  const color = TEAM_COLOR[t.team] || '#fff';
+  if (t.kind === 'shoot') {
+    for (const c of t.faint) drawTrail(c.points, color, c.alpha, false);
+    if (t.chosen) {
+      ctx.save();
+      if (ctx.setLineDash) ctx.setLineDash([6 * R.dpr, 5 * R.dpr]);
+      drawTrail(t.chosen.points, '#ffffff', 0.9, false);
+      ctx.restore();
+    }
+    return;
+  }
+  for (const s of t.spots) {
+    const [x, y] = w2s(s.x, s.y);
+    ctx.save();
+    ctx.globalAlpha = 0.25 + 0.6 * Math.min(1, s.p * 3);
+    ctx.fillStyle = color;
+    ctx.beginPath(); ctx.arc(x, y, (2 + 7 * Math.min(1, s.p * 2)) * R.dpr, 0, 7); ctx.fill();
+    if (s.i === t.chosen) { ctx.globalAlpha = 1; ctx.strokeStyle = '#fff'; ctx.lineWidth = 1.5 * R.dpr; ctx.beginPath(); ctx.arc(x, y, 11 * R.dpr, 0, 7); ctx.stroke(); }
+    ctx.restore();
+  }
 }
 
 function drawTrail(pts, color, alpha, glow, head) {

@@ -50,3 +50,23 @@ footer { display: flex; align-items: center; gap: 10px; padding: 10px 16px; back
 #expr { flex: 1; font-family: Consolas, monospace; font-size: 15px; }
 #expr:disabled { opacity: .4; }
 #angleBox { display: flex; align-items: center; gap: 6px; color: var(--dim); }
+
+/* sala viva con redes (spec/08 §3): el cerebro de la red que acaba de pensar */
+#sideRight { width: 290px; }
+.brain { font-size: 12.5px; margin-bottom: 6px; }
+.brain .b-who { margin-bottom: 4px; }
+.brain .b-conf { color: var(--dim); } .brain .b-conf b { color: var(--text); font-family: Consolas, monospace; font-weight: 400; }
+.brain .lvl { display: inline-block; border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; margin-right: 4px; color: var(--text); }
+.brain .lvl-veterana { border-color: #3ddc97; color: #3ddc97; } .brain .lvl-media { border-color: #f5c451; color: #f5c451; }
+.brain .bar { display: block; height: 4px; background: #0e1526; border-radius: 2px; overflow: hidden; margin: 4px 0 6px; }
+.brain .bar i { display: block; height: 100%; background: var(--cyan); }
+.b-cands { list-style: none; margin: 4px 0; }
+.b-cands li { display: grid; grid-template-columns: 30px auto 1fr 38px; gap: 6px; align-items: baseline; padding: 1px 0; color: var(--dim); }
+.b-cands li.chosen { color: var(--text); } .b-cands li.chosen .mono:first-child { color: #fff; font-weight: 700; }
+.b-cands .expr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.b-cands .p { text-align: right; }
+.brain .mono { font-family: Consolas, monospace; }
+.b-attr { list-style: none; margin: 6px 0 2px; }
+.b-attr li { display: grid; grid-template-columns: 84px 1fr 38px; gap: 6px; align-items: center; }
+.b-attr .bar { margin: 0; }
+.b-say { color: var(--text); font-style: italic; margin-top: 4px; }

@@ -1,5 +1,6 @@
 // Cliente web: red (REST + SSE), UI y conexión con el render.
 import { initRender, startShot, R } from './render.js';
+import { overlay, topCandidates, attributionRows, attributionPhrase, confidenceView } from './live.js';
 
 const $ = (id) => document.getElementById(id);
 let session = null;                                  // {code, playerId, name, team}
@@ -31,6 +32,8 @@ function connect(roomCode) {
   evtSource.addEventListener('hello', (e) => onState(JSON.parse(e.data)));
   evtSource.addEventListener('state', (e) => onState(JSON.parse(e.data)));
   evtSource.addEventListener('shot', (e) => startShot(JSON.parse(e.data).shot));
+  evtSource.addEventListener('decision', (e) => onDecision(JSON.parse(e.data).decision));
+  evtSource.addEventListener('move', () => { if (R.think && R.think.kind === 'move') R.think = null; });
   evtSource.addEventListener('chat', (e) => {
     const d = JSON.parse(e.data);
     if (R.state) R.state.chat = d.chat;
@@ -88,6 +91,54 @@ function renderChat(chat) {
   el.scrollTop = el.scrollHeight;
 }
 
+// ---------- sala viva con redes (spec/08 §3): lo que piensa una red antes de disparar o moverse ----------
+const FAMILY = { line: 'recta', parabola: 'parábola', sine: 'seno', ode1: "EDO (y')", artillery: 'artillería', wild: 'salvaje' };
+const f2 = (v) => (typeof v === 'number' ? (Math.round(v * 100) / 100).toFixed(2) : '—');
+const esc = (v) => escapeHtml(String(v ?? ''));
+let truthMod = null; // /evo/truth.js (compose y checkPhrase, el mismo código que el servidor), solo en el navegador
+const truth = () => (truthMod ||= import('/evo/truth.js').catch(() => null));
+// el panel guarda el último disparo pensado y, debajo, adónde decidió moverse después ese mismo soldado
+const brainLast = { shoot: null, move: null };
+function onDecision(d) {
+  if (!d || !R.state) return;
+  const sol = R.state.soldiers.find((s) => s.id === d.soldierId);
+  const ov = overlay(d);
+  R.think = ov ? { ...ov, team: sol ? sol.team : 'left', until: Date.now() + (ov.kind === 'move' ? 4000 : 15000) } : null;
+  if (d.phase === 'shoot') { brainLast.shoot = d; brainLast.move = null; renderBrain(d, sol); }
+  else if (d.phase === 'move' && brainLast.shoot && brainLast.shoot.soldierId === d.soldierId) { brainLast.move = d; renderMoveLine(d); }
+}
+function renderMoveLine(d) {
+  const el = $('brainMove');
+  if (el) el.textContent = `Después eligió el destino #${d.chosenMove} de ${(d.moves || []).length}.`;
+}
+async function renderBrain(d, sol) {
+  const el = $('brain');
+  if (!el) return;
+  const st = R.state;
+  const owner = sol && st.players.find((p) => p.id === sol.ownerId);
+  const c = confidenceView(d.confidence);
+  const conf = c ? `<p class="b-conf"><span class="lvl lvl-${esc(c.level)}">${esc(c.label)}</span> certeza <b>${f2(c.certainty)}</b> · experiencia <b>${f2(c.experience)}</b> · confianza <b>${f2(c.confidence)}</b></p>`
+    + `<div class="bar" title="certeza"><i style="width:${Math.round(Math.max(0, Math.min(1, c.certainty)) * 100)}%"></i></div>` : '';
+  let body = '';
+  if (d.phase === 'shoot') {
+    body += `<ol class="b-cands">${topCandidates(d, 5).map((x) => `<li class="${x.chosen ? 'chosen' : ''}"><span class="mono">#${x.i}</span> ${esc(FAMILY[x.family] || x.family)} <span class="mono expr">${esc(x.expr)}</span><span class="mono p">${f2(x.p)}</span></li>`).join('')}</ol>`;
+    body += `<p class="dim">elegida #${d.chosen} · margen ${f2(d.margin)}</p>`;
+    const rows = attributionRows(d).filter((a) => a.share > 0);
+    if (rows.length) body += `<ul class="b-attr">${rows.map((a) => `<li><span>${esc(a.name)}</span><span class="bar"><i style="width:${Math.round(a.share * 100)}%"></i></span><span class="mono">${f2(a.share)}</span></li>`).join('')}</ul>`;
+  }
+  el.innerHTML = `<p class="b-who"><b>${esc(owner ? owner.name : d.netId)}</b> <span class="dim">antes de disparar (turno ${d.turn})</span></p>${conf}${body}<p class="b-say" id="brainSay"></p><p class="dim" id="brainMove"></p>`;
+  // la frase solo se enseña si se compone con compose y pasa checkPhrase contra esta misma decisión (spec/07 §2)
+  const f = attributionPhrase(d, { game: `g-${st.config && st.config.seed}-${st.code}`, id: d.eventId });
+  const T = f && await truth();
+  const out = $('brainSay');
+  if (!T || !out) return;
+  try {
+    const ph = T.compose(f.template, f.slots);
+    const ev = { id: d.eventId, turn: d.turn, type: 'decision', data: d };
+    if (T.checkPhrase(ph, (r) => (r.id === d.eventId ? ev : null)).ok) out.textContent = ph.text;
+  } catch { /* hueco sin evento: no se enseña */ }
+}
+
 // Bocadillos: lo hablado (kind 'say') aparece sobre el soldado 5 segundos
 const _seenSay = new Set();
 function setBubbles(chat) {
@@ -98,7 +149,7 @@ function setBubbles(chat) {
     if (_seenSay.has(key)) continue;
     _seenSay.add(key);
     if (_seenSay.size > 200) _seenSay.clear();
-    R.bubbles.push({ soldierId: c.soldierId, text: c.text, until: now + 5000 });
+    R.bubbles.push({ soldierId: c.soldierId, text: c.text, level: c.level || null, until: now + 5000 });
     R.lastSayTs = now;
   }
 }

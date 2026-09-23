@@ -44,14 +44,22 @@ const NUM = /-?\d+(?:[.,]\d+)?/g;
 const sse = listen(); await sse.ready;
 let netId, rivalId, sampleGame, decisionEv, playerId;
 await check('entreno de 20 partidas: 1 partida de muestra guardada con trajectorias, eventos reward y emotion; log con update y lesson', async () => {
-  netId = (await api('/api/lab/nets', 'POST', { template: 'seer', name: 'Delta' })).body.id;
-  rivalId = (await api('/api/lab/nets', 'POST', { template: 'sniper', name: 'Rival' })).body.id;
-  const r = await api('/api/lab/trainings', 'POST', { netId, opponents: { antagonist: 1, hallOfFame: 0, self: 0, antagonistId: rivalId }, speed: 'turbo', workers: 1, duration: { games: 20 }, soldiers: 1, seed: 11 });
-  assert.equal(r.status, 202, r.text);
-  const st = await until(async () => { const x = (await api(`/api/lab/trainings/${r.body.id}`)).body; return x.status === 'done' ? x : null; }, 120000, 'entreno');
-  assert.ok(Array.isArray(st.sampleGames) && st.sampleGames.length === 1, `sampleGames ${JSON.stringify(st.sampleGames)}`);
+  // cambio (P1, 2026-09-24; misma causa que la semilla 5, con el arreglo aprobado para ella): con el mapa de círculos, en
+  // la partida de muestra de la semilla 11 el rival mata antes de que la red decida; se busca desde la 11 la primera semilla
+  // cuya partida de muestra lleva decisiones de la red (redes nuevas en cada intento)
+  let r = null, st = null, g = null;
+  for (let seed = 11; seed < 31 && !g; seed++) {
+    netId = (await api('/api/lab/nets', 'POST', { template: 'seer', name: 'Delta' })).body.id;
+    rivalId = (await api('/api/lab/nets', 'POST', { template: 'sniper', name: 'Rival' })).body.id;
+    r = await api('/api/lab/trainings', 'POST', { netId, opponents: { antagonist: 1, hallOfFame: 0, self: 0, antagonistId: rivalId }, speed: 'turbo', workers: 1, duration: { games: 20 }, soldiers: 1, seed });
+    assert.equal(r.status, 202, r.text);
+    st = await until(async () => { const x = (await api(`/api/lab/trainings/${r.body.id}`)).body; return x.status === 'done' ? x : null; }, 120000, 'entreno');
+    assert.ok(Array.isArray(st.sampleGames) && st.sampleGames.length === 1, `sampleGames ${JSON.stringify(st.sampleGames)}`);
+    const got = (await api(`/api/lab/games/${st.sampleGames[0]}`)).body;
+    if (got.events.some((e) => e.type === 'decision' && e.actor.netId === netId)) g = got;
+  }
+  assert.ok(g, 'premisa: en alguna semilla de 11 a 30 la red decide en su partida de muestra');
   sampleGame = st.sampleGames[0];
-  const g = (await api(`/api/lab/games/${sampleGame}`)).body;
   assert.equal(g.meta.kind, 'training'); assert.equal(g.meta.trainingId, r.body.id); assert.ok(g.meta.nets.includes(netId));
   assert.ok(g.trajectories && Object.keys(g.trajectories).length >= 1, 'trayectorias guardadas');
   const types = new Set(g.events.map((e) => e.type));

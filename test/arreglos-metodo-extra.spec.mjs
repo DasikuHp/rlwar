@@ -151,11 +151,20 @@ await check('learnFromGames con baseline value y catorce partidas en el lote: V 
   const g = normalize({ ...clone(TEMPLATES.seer.genome), id: 'mx-v', name: 'MX V' });
   assert.equal(g.learning.gradient.baseline, 'value'); assert.ok(g.reward.normalize, 'la plantilla normaliza');
   assert.equal(g.reward.stats, undefined, 'sin estadísticas todavía');
-  const games = [5, 3, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 53].map((seed) => {
+  // cambio (P1, 2026-09-24; misma causa que la semilla 5, con el arreglo aprobado para ella): con el mapa de círculos,
+  // las semillas fijas daban partidas cortas o empatadas por el tope y el lote no pasaba de 20 observaciones de ningún
+  // término; se toman las 14 primeras partidas desde la 3 en las que los dos soldados de la red deciden y mueren (pierde):
+  // así "perder" y "morir" se observan 28 veces y la normalización actúa
+  const games = [];
+  for (let seed = 3; games.length < 14 && seed < 300; seed++) {
     const r = playGame({ seed, left: { type: 'net', genome: g, learn: true }, right: { type: 'greedy', level: 1 }, soldiers: 2 });
     const p = r.room.players.find((x) => x.learn);
-    return { events: r.events, trajectory: r.trajectories[p.id], playerId: p.id };
-  });
+    const sol = r.trajectories[p.id].soldiers;
+    const deciders = Object.keys(sol).filter((id) => sol[id].length);
+    const dead = new Set(r.events.filter((e) => e.type === 'death' && e.actor.playerId === p.id).map((e) => e.actor.soldierId));
+    if (deciders.length === 2 && deciders.every((id) => dead.has(id))) games.push({ events: r.events, trajectory: r.trajectories[p.id], playerId: p.id });
+  }
+  assert.equal(games.length, 14, 'premisa: 14 partidas en las que los dos soldados de la red deciden y mueren');
   const stats = {}; // las comparten las partidas del lote, en orden
   const want = new Map();
   games.forEach((game, gi) => {

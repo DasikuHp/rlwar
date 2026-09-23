@@ -158,6 +158,15 @@ el único punto de validación de disparos.
 | Frases en el navegador | "Hazlo lo mejor que puedas, sin chapuzas": `shared/` se puede cargar en el navegador y el servidor sirve la verdad. |
 | Retención de partidas | La aplican quienes guardan (`saveGameKept`); `saveGame` no borra (lo fija `verdad.spec`). |
 
+### Ronda 14 — revisión de Fable a los arreglos de Opus (2026-09-23) ✅
+| Tema | Decisión |
+|---|---|
+| Red en un duelo o en una exhibición (R2) | "Red ocupada": está ocupada como si entrenara. Editarla, borrarla, pedir hijos, operarla, examinarla, entrenarla, retar con ella y empezar otro duelo → 409 con el motivo. La bofetada o caricia va a la cola y se aplica al soltarla si nadie más la tiene (spec/04 §10.5). |
+| Exhibición contra una persona (R4) | "Contra sí misma": el paso de evolución juega contra la propia red tal como acabó la partida; la línea `update` lleva `rival: 'self'`. |
+| Plantillas (A6) | No se tocan: una red de plantilla sigue siendo un clon. |
+| Voz y tope de eventos (R5) | Anotado sin arreglar; se decide con los medios y bajos (parte 3). |
+| Test congelado `arreglos-ocupada` | Cambio autorizado: semilla en la que la red dispara y duelos x10 (`838e56c`). |
+
 ## 4. Diseño resultante (borrador, se cierra al acabar las preguntas)
 
 ### 4.1 Tropas (F0)

@@ -258,3 +258,37 @@ Sin tirada de mutantes todavía. Varios specs de estos arreglos (`arreglos-exhib
 partes API de `arreglos-trono` y `arreglos-api`) necesitan un servidor, y el probador dirigido de esta sesión (un script sobre `generateMutants`/`applyMutant` de `tools/mutants.mjs`) no lo levanta en la copia.
 Hay que adaptarlo (levantar el servidor mutado en la copia) antes de poder tirar esos mutantes. Queda anotado como
 trabajo pendiente, no como justificación.
+
+## Revisión de Fable (2026-09-23): arreglo de R1, R2 y R4 (`e0d87f4`)
+Mutantes solo en las líneas del arreglo, con `generateMutants`/`applyMutant` de `tools/mutants.mjs`. Para `evo/api.js`
+se levanta el servidor **mutado** de la copia (de ahí sale `--server` en `tools/mutants.mjs`).
+
+| fichero (líneas) | contra | cazados |
+|---|---|---|
+| `evo/busy.js` (todas) | `arreglos-ocupada` + `arreglos-ocupada-extra` | 12/12 |
+| `evo/train.js` `playHeadless` (176–184) | `arreglos-ocupada` | 2/2 |
+| `evo/train.js` `settleFeedback` (370–378) | `arreglos-ocupada-extra` | 1/1 (sin los valores de retorno que nadie leía) |
+| `evo/duel.js` `runDuel` (100–114) | `arreglos-trono` + `arreglos-ocupada` + `arreglos-ocupada-extra` | 2/2 |
+| `evo/api.js` (las 77 de `git diff -U0 0623c22 -- evo/api.js`) | `arreglos-ocupada` con servidor mutado | **33/77** |
+
+Cuatro se cazan por tiempo (`return` → `return null` en las líneas 460, 480, 557 y 617): la ruta no responde y el
+test se queda esperando. Cuentan como cazados porque un cliente también se quedaría colgado.
+
+Supervivientes de `evo/api.js`:
+| línea | mutantes | qué hace esa línea | veredicto |
+|---|---|---|---|
+| 67 | 2 × `\|\|` → `&&` | el nombre en el 409 (`who`, si no el nombre en disco, si no el id) | **test que falta**: que el 409 nombre a la red por su nombre (`Nova está en el duelo d…`), no por su id |
+| 73 | `return` → `null` | la reina **entrenando** en un reto | **test que falta**: reto con la reina entrenando → 409 |
+| 197 | `false` → `true` | `learn:false` de la rival `self` (R4) | **test que falta**: oráculo del paso de una exhibición contra una persona, como el del duelo en `arreglos-metodo-extra`. Con `learn:true`, en las partidas en que la copia juega a la derecha la fitness se mediría sobre la rival |
+| 198 | 8 | la rival de la exhibición: una red sentada con `addagent` (su genoma, `learn:false`, id = su netId) o un agente (nivel 2 si no lo dice, su temperatura) | **test que falta**: exhibición contra una red sentada con `addagent` y contra un agente sin nivel (la rival de las copias y `rival` en la línea `update`) |
+| 480 | `&&` → `\|\|` | la reina en un reto | **equivalente**: sin reina, `busyText(null)` da `null`; y si la retadora es la reina, su ocupación ya se miró antes en esta misma línea y su entreno, en la anterior |
+| 515 | 4 | criar una generación con una campeona ocupada | **test que falta**: 409 si la campeona A o la B están en un duelo |
+| 524 | 7 | reto de dinastía con la campeona o la reina ocupadas | **test que falta** |
+| 666 | 4 | pedir hijos de una red ocupada | **test que falta** |
+| 677, 691, 716 | 12 | operar (las tres rutas de cirugía) una red ocupada | **test que falta** |
+| 752 | 4 | examinar una red ocupada | **test que falta** |
+
+En resumen hay 1 equivalente y 43 huecos. El 409 de una red ocupada está probado al editar, borrar, entrenar, empezar
+un duelo y retar con la reina en un duelo. Faltan tests para pedir hijos, operar, examinar, criar, el reto de
+dinastía, la reina entrenando y el nombre en el mensaje. También falta la rival de las copias en una exhibición
+contra una persona o contra una red bot.

@@ -436,6 +436,48 @@ versión ya congelada), `api-verdad.spec` (bofetada inmediata), y dos míos (`ar
 `mutantes.md`); y hay que escribir `arreglos-metodo-extra` para los huecos de mutantes de C3 (semillas exactas,
 `perBlock` del paso de evolución, rival con `learn:false`).
 
+## 9. Revisión de Fable (Opus 5.5, 2026-09-23)
+Revisión de §8 con el contrato de `spec/README.md` §3. Decisiones del usuario: R2 = "red ocupada", R4 = "contra sí
+misma", A6 no se toca. Arreglo en `e0d87f4` (tests congelados antes: `13a74ad`, `838e56c`, `5d5c000`).
+
+| # | gravedad | qué pasaba | sonda (salida literal) | estado |
+|---|---|---|---|---|
+| R1 | alto | El paso de evolución bloqueaba el servidor: `evolutionRound` lanzaba todas las partidas con `Promise.all` y todas las cesiones (`setImmediate`) caían en la misma vuelta del bucle | exhibición `learn:true`, población 32 × 8 partidas, 3 soldados, `GW_FAST`, `/api/health` cada 50 ms: "las 3 más lentas (ms): 16410 (a los 9920 ms), 25, 7" | arreglado: una partida detrás de otra, cediendo antes de cada una (spec/04 §10.5) |
+| R2 | alto | Lo que se hacía a una red en un duelo se perdía. La bofetada respondía `applied:true` (pBefore 0.0356 → pAfter 0.0338), pero el `save()` del duelo escribía los pesos cargados al empezar (`save()` solo conserva name/names/frozen) | red de evolución (lr 1e-5, σ 1e-4) en un duelo turbo contra otra red, bofetada a los 300 ms: "\|tras bofetada − antes\| = 0.00e+0 \| \|final − tras bofetada\| = 1.70e-5 \| \|final − antes\| = 1.70e-5" y "feedback applied: 1": la bofetada (3e-3) desapareció | arreglado: red ocupada (409 con el motivo; cola que se aplica al soltarla si nadie más la tiene) |
+| R3 | doc | `newDuelId` añade el pid (`d<ms36><pid36>-<n>`) y la spec no lo decía | — | spec/06 §7.2 corregida |
+| R4 | bajo | En una exhibición contra una persona, el paso de evolución jugaba contra el agente por defecto (el *fallback* de `createAgent`) | — | arreglado: contra la propia red tal como acabó la partida (`rival: 'self'`) |
+| R5 | bajo | Los eventos de voz cuentan para `eventsPerGame` (5000) solo en salas con pantalla; una partida solo divergiría de su gemela turbo cerca del tope | — | **sin arreglar**, anotado (parte 3) |
+
+Verificado y correcto: los 5 cambios de tests congelados de Opus llevan motivo y OK del usuario; la batería inicial
+pasó 38/38; `whatif` con un genoma parcial responde 200.
+Mutantes del arreglo (detalle en `spec/mutantes.md`): `busy.js` 12/12, `settleFeedback` 1/1, `playHeadless` 2/2,
+`runDuel` 2/2; `api.js` 33/77 (1 equivalente y 43 huecos: rutas con 409 sin test).
+
+**Olores (two-hats), sin tocar**. Van en commits propios si se tocan esas zonas:
+- `server/rooms.js` L625–681: Large Class / Divergent Change (la voz vive dentro de `Room`: `sayVerified`,
+  `voiceTry`, `voiceIntro`, `voiceAfterShot`, `spokeTurn`, `lastConfidence`; 732 líneas) -> Extract Class. Queda
+  una `RoomVoice` que recibe la sala y cambia solo por motivos de voz.
+- `server/rooms.js` L634: Long Parameter List (`voiceTry`, 7 parámetros) -> Introduce Parameter Object. Queda
+  `voiceTry(player, soldier, {moment, events, confidence, rngKey, always, budget})`.
+- `evo/train.js` L396–397 y L591–595: Duplicated Code (`makeLearner.absorb` repite lo de `record()`:
+  `assignRewards` con los mismos campos, `takeFeedback` y `absorbGame`) -> Extract Function. Queda una función
+  común que puntúa una partida y la guarda en la memoria.
+- `evo/api.js` L207–250: Long Function (`onExhibitionOver`: agrupa, salta, aprende y evoluciona) -> Extract Function.
+  Queda un bucle que llama a un paso por red.
+- `evo/train.js` L487–703: Long Function (`createTrainer.run`, 217 líneas) -> Split Phase + Extract Function. Queda
+  preparar / bucle de ciclos / cierre, cada fase con su función.
+- `evo/voice.js` L36, 59, 75, 88, 103, 116, 128, 140, 156, 163: Repeated Switches (`{frio, …}[ctx.character] || []`
+  en cada momento) -> Replace Conditional with Polymorphism. Queda anotado sin hacer: cada tabla es texto junto a
+  sus datos, y separarla por carácter alejaría la frase de su momento.
+- `evo/api.js` L217, `evo/store.js` L236, `evo/truth.js` L261: Duplicated Code
+  (`(m.get(k) || m.set(k, []).get(k)).push(v)`) -> Extract Function. Queda un `pushTo(map, key, value)`.
+- `evo/api.js` L460, 480, 515, 524, 557, 617, 666, 677, 691, 716, 752: Duplicated Code (11 bloques
+  `{ const hb = heldText(…); if (hb) return bad(409, hb); }`; 677, 691 y 716 son idénticos) -> Extract Function.
+  Queda un `refuseIfHeld(id, what, who)`.
+
+**5 hallazgos (2 altos, 2 bajos, 1 de documentación) y 8 olores. El peor: R2.** Respondía `applied:true` y la
+bofetada se perdía sin aviso, así que la API mentía sobre lo que había hecho.
+
 
 ## Apéndice A — Salida completa de `node test/run-all.mjs` (árbol de trabajo, 2026-09-23)
 ```

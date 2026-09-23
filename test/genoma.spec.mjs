@@ -26,7 +26,7 @@ check('defaults decididos (ronda 2, 7, spec/02 §2, spec/03 §5, spec/04 §1–2
     gradient: { lr: 0.003, gamma: 0.95, entropy: 0.01, clipNorm: 5, batchGames: 4, bpttSteps: 8, baseline: 'value', optimizer: 'adam', adjustLearn: true },
     evolution: { population: 16, sigma: 0.02, lr: 0.01, gamesPerCandidate: 2, antithetic: true, rankNormalize: true },
     both: { gradientGamesPerCycle: 16, evolutionStepsPerCycle: 1 },
-    sleep: { lessonThreshold: 0.05 },
+    sleep: { lessonThreshold: 0.015 },
   });
   assert.equal(DEFAULT_IMAGINATION.n, 24); assert.equal(DEFAULT_IMAGINATION.targets, 'all'); assert.equal(DEFAULT_IMAGINATION.adaptive, false);
   assert.deepEqual(DEFAULT_IMAGINATION.families.line, { on: true, weight: 6, jitter: [0, 0.03, -0.03, 0.08, -0.08, 0.15, -0.15] });

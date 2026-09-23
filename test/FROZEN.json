@@ -26,7 +26,7 @@
   "test/entrenador-extra.spec.mjs": "cec48ae69fe22a2ae66db3ad80e5962768905efb64f53d83abcff1058edbbbea",
   "test/evolucion-extra.spec.mjs": "16860e5df9ae92b40e2b24cdce08aaa41118ab0ae473ee5289f654f8d52d36d1",
   "test/evolucion.spec.mjs": "0fc059d07f7eaa172251d6258c95ba673e8171ab4dcb23fc8ec9a311a84f2284",
-  "test/genoma.spec.mjs": "147045817e4f51959ac6b181a114344f1e486ae6c522f8cb1eed5ca0ede6cb3c",
+  "test/genoma.spec.mjs": "51af3b815938265792f4b0c32de2d5b7c6e4f011139980e615317af1dc21a1d1",
   "test/geometry.spec.mjs": "2c8b83388a6bb9b8159676f3d9dc62f512605cfc65280eb7e35413b768e0ca94",
   "test/motor.spec.mjs": "92901c90c30859c22f21f5aa49942f619b9eba81ab606b90473b88b9faee6996",
   "test/moves.spec.mjs": "90b9bb5721deabe830d54fd4d32d15ddbbae602339fdd158b54954b2031394e0",

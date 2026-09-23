@@ -4,7 +4,8 @@ import { BLOCKS, LIMITS, validate, normalize, countParams, DEFAULT_TRAITS, TRAIT
 import { eyeLayout } from '../shared/percept.js';
 import { TEMPLATES } from '../shared/templates.js';
 import { listNets, loadNet, saveNet, deleteNet, entryOf } from './store.js';
-import { createTrainer, makeLearner, feedbackTarget, feedbackFromGame } from './train.js';
+import { createTrainer, makeLearner, feedbackTarget, feedbackFromGame, settleFeedback } from './train.js';
+import { heldBy, holdNet, releaseNet } from './busy.js';
 import { runDuel, newDuelId, LEARNING_MODES, SPEEDS } from './duel.js';
 import { challenge, throneView, foundDynasties, runGeneration, readThroneFull, genealogyView, registerBirth, vacateNet } from './throne.js';
 import { loadGame, appendLog, readLog, loadLogEntry, listGames, saveGame, loadGameNets, readFeedback, writeFeedback, readApplied, appendApplied, readCurves, saveGameKept, netsDir } from './store.js';
@@ -59,6 +60,19 @@ function startChildrenJob({ genome, n, mutation, games, opponent, soldiers, seed
 const sseClients = new Set();
 function pushEvent(ev, data) { for (const res of sseClients) { try { res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* ignorar */ } } }
 const activeTraining = (netId) => [...trainings.values()].find((t) => t.netId === netId && ['queued', 'running', 'paused'].includes(t.status)) || null;
+// ocupada en un duelo o aprendiendo de una exhibición (spec/04 §10.5) → el motivo, o null; `what` completa la frase
+function heldText(netId, what, who = null) {
+  const h = heldBy(netId);
+  if (!h) return null;
+  const name = who || (loadNet(netId) || {}).name || netId;
+  return h.kind === 'duel' ? `${name} está en el duelo ${h.id}: espera a que acabe ${what}.` : `${name} está aprendiendo de la exhibición ${h.id}: espera a que acabe ${what}.`;
+}
+// ocupada también si entrena: para quien no tenía ya su propia comprobación de entreno (la reina en un reto)
+function busyText(netId, what, who = null) {
+  const t = activeTraining(netId);
+  if (t) return `${who || (loadNet(netId) || {}).name || netId} está entrenando (${t.id}): para el entreno ${what}.`;
+  return heldText(netId, what, who);
+}
 function trainingView(t, full = false) {
   const v = { id: t.id, netId: t.netId, status: t.status, games: t.games, updates: t.updates, steps: t.steps || 0, startedAt: t.startedAt, error: t.error };
   if (full) Object.assign(v, { elapsedMs: t.startedAt ? Date.now() - t.startedAt : 0, curve: t.curve.slice(-500), sampleGames: t.sampleGames || [], rooms: t.rooms, lastLesson: t.lastLesson, config: { ...t.config, genome: undefined } });
@@ -175,14 +189,17 @@ function throneHooks() {
 }
 
 // ---------- exhibiciones (spec/04 §10.3): salas creadas por POST /api/rooms ----------
-const exhibitionRival = (room, team) => {
+// la rival de la sala para el paso de evolución → {spec, id}; una persona (o un agente por join) no se puede repetir:
+// entonces las copias juegan contra la propia red tal como estaba al acabar la partida (`self`, spec/04 §10.5)
+const exhibitionRival = (room, team, self) => {
   const p = room.players.find((q) => q.team !== team);
   if (!p) return null;
-  return p.agentType === 'net' && p.genome ? { type: 'net', genome: p.genome, name: p.name, learn: false } : { type: p.agentType, level: p.level || 2, temperature: p.temperature || 0 };
+  if (!p.isBot) return { spec: { type: 'net', genome: self, name: self.name, learn: false }, id: 'self' };
+  return p.agentType === 'net' && p.genome ? { spec: { type: 'net', genome: p.genome, name: p.name, learn: false }, id: p.netId } : { spec: { type: p.agentType, level: p.level || 2, temperature: p.temperature || 0 }, id: p.agentType };
 };
 const logUpdate = (netId, room, r, extra = {}) => {
   const refs = [{ game: room.gameId }];
-  appendLog({ type: 'update', kind: r.update.kind, netId, roomCode: room.code, games: extra.games, loss: r.update.loss, entropy: r.update.entropy, gradNorm: r.update.gradNorm, meanFitness: r.update.meanFitness, bestFitness: r.update.bestFitness, top: r.update.top, refs });
+  appendLog({ type: 'update', kind: r.update.kind, netId, roomCode: room.code, rival: extra.rival ?? null, games: extra.games, loss: r.update.loss, entropy: r.update.entropy, gradNorm: r.update.gradNorm, meanFitness: r.update.meanFitness, bestFitness: r.update.bestFitness, top: r.update.top, refs });
   if (r.lesson) appendLog({ type: 'lesson', netId, roomCode: room.code, blockId: r.lesson.blockId, name: r.lesson.name, relChange: r.lesson.relChange, bulb: r.lesson.bulb, refs });
   pushEvent('sleep', { netId, roomCode: room.code, games: extra.games, update: r.update });
   if (r.lesson) pushEvent('lesson', { netId, roomCode: room.code, lesson: r.lesson });
@@ -200,22 +217,33 @@ export function onExhibitionOver(room) {
   for (const p of nets) (byNet.get(p.netId) || byNet.set(p.netId, []).get(p.netId)).push(p);
   for (const [netId, players] of byNet) {
     if (activeTraining(netId)) { appendLog({ type: 'exhibition.skipped', netId, roomCode: room.code, reason: 'la red está entrenando' }); continue; }
+    const held = heldBy(netId); // ocupada: quien la tiene la guardará después y pisaría lo de aquí (spec/04 §10.5)
+    if (held) { appendLog({ type: 'exhibition.skipped', netId, roomCode: room.code, reason: held.kind === 'duel' ? `la red está en el duelo ${held.id}` : `la red está aprendiendo de la exhibición ${held.id}` }); continue; }
     const disk = loadNet(netId);
     if (!disk) continue;
+    const self = JSON.parse(JSON.stringify(disk)); // tal como estaba al acabar la partida, antes de aprender de ella
+    const rival = exhibitionRival(room, players[0].team, self);
     const L = makeLearner(disk);
     const games = players.map((p) => ({ events: room.events, trajectory: trajectories[p.id] || { netId, soldiers: {} }, playerId: p.id }));
     L.addStats({ games: players.length }); // una exhibición suma partidas, nunca victorias ni bajas (spec/04 §7)
     if (!players.some((p) => p.learn)) { L.absorb(games); L.save(); continue; }
     const r = L.learn(games); // gradiente (o solo memoria si la red es de evolución)
     L.save();
-    if (r) logUpdate(netId, room, r, { games: games.length });
+    if (r) logUpdate(netId, room, r, { games: games.length, rival: rival ? rival.id : null });
     if (L.method === 'evolution' || L.method === 'both') {
-      const rival = exhibitionRival(room, players[0].team);
+      // ocupada hasta que guarda el paso: lo que llegue mientras tanto espera en cola (spec/04 §10.5)
+      const holder = { kind: 'exhibition', id: room.code };
+      holdNet(netId, holder);
       (async () => {
-        const out = await L.evolve({ rival, seed: room.seed, soldiers: room.soldiersPerPlayer });
-        if (activeTraining(netId)) { appendLog({ type: 'exhibition.skipped', netId, roomCode: room.code, reason: 'empezó un entreno durante la evolución' }); return; }
-        L.save();
-        logUpdate(netId, room, out, { games: out.update.games });
+        try {
+          const out = await L.evolve({ rival: rival.spec, seed: room.seed, soldiers: room.soldiersPerPlayer });
+          if (activeTraining(netId)) { appendLog({ type: 'exhibition.skipped', netId, roomCode: room.code, reason: 'empezó un entreno durante la evolución' }); return; }
+          L.save();
+          logUpdate(netId, room, out, { games: out.update.games, rival: rival.id });
+        } finally {
+          releaseNet(netId, holder);
+          settleFeedback(netId);
+        }
       })().catch((e) => pushEvent('error', { message: `exhibición ${room.code}: ${e.message}` }));
     }
   }
@@ -429,6 +457,7 @@ export async function labApi(req, res, parts, url) {
       if (!(soldiers === 'random' || (Number.isInteger(soldiers) && soldiers >= 1 && soldiers <= 4))) return bad(400, 'soldiers tiene que ser "random" o un entero entre 1 y 4');
       if (v.seed !== undefined && !(Number.isInteger(v.seed) && v.seed >= 0)) return bad(400, 'seed tiene que ser un entero ≥ 0');
       if (activeTraining(v.a) || activeTraining(v.b)) return bad(409, 'Una de las redes está entrenando: para el entreno antes del duelo');
+      { const hb = heldText(v.a, 'para empezar otro duelo') || heldText(v.b, 'para empezar otro duelo'); if (hb) return bad(409, hb); }
       const d = startDuel({ a: v.a, b: v.b, learning, speed, soldiers, seed: v.seed === undefined ? randomSeed() : v.seed, throne: false });
       return json(res, 202, { id: d.id, status: 'running', roomCodes: d.holder.rec.roomCodes });
     }
@@ -448,6 +477,7 @@ export async function labApi(req, res, parts, url) {
       if (v.learning !== undefined && !LEARNING_MODES.includes(v.learning)) return bad(400, `learning tiene que ser ${LEARNING_MODES.join(', ')}`);
       if (v.speed !== undefined && !SPEEDS.includes(v.speed)) return bad(400, `speed tiene que ser ${SPEEDS.join(', ')}`);
       if (activeTraining(v.challenger)) return bad(409, 'La retadora está entrenando: para el entreno antes del reto');
+      { const q = readThroneFull().queen; const hb = heldText(v.challenger, 'para retar') || (q && q !== v.challenger ? busyText(q, 'para retarla', `La reina ${(loadNet(q) || {}).name || q}`) : null); if (hb) return bad(409, hb); }
       let responded = false;
       const hooks = { ...throneHooks(), onDuelStart: ({ duelId, queen }) => { responded = true; json(res, 202, { duelId, queen, status: 'running' }); } };
       try {
@@ -482,6 +512,7 @@ export async function labApi(req, res, parts, url) {
       if (!t.dynasties.A || !t.dynasties.B) return bad(400, 'Primero funda las dos casas (POST /api/lab/dynasties)');
       for (const h of ['A', 'B']) if (!t.dynasties[h].champion) return bad(400, `La casa ${t.dynasties[h].name} no tiene campeona: vuelve a fundarla con POST /api/lab/dynasties?house=${h}`);
       if (activeTraining(t.dynasties.A.champion) || activeTraining(t.dynasties.B.champion)) return bad(409, 'Una campeona está entrenando');
+      { const hb = heldText(t.dynasties.A.champion, 'para criar una generación') || heldText(t.dynasties.B.champion, 'para criar una generación'); if (hb) return bad(409, hb); }
       const job = startGenerationJob(b.value || {});
       return json(res, 202, { jobId: job.id, status: job.status });
     }
@@ -490,6 +521,7 @@ export async function labApi(req, res, parts, url) {
       const house = t.dynasties[seg[1]];
       if (!house) return bad(404, `Casa no encontrada: ${seg[1]}`);
       if (!house.champion) return bad(400, `La casa ${house.name} no tiene campeona: vuelve a fundarla con POST /api/lab/dynasties?house=${seg[1]}`);
+      { const q = t.queen; const hb = busyText(house.champion, 'para retar') || (q && q !== house.champion ? busyText(q, 'para retarla', `La reina ${(loadNet(q) || {}).name || q}`) : null); if (hb) return bad(409, hb); }
       const b = await body();
       if (!b.ok) return bad(b.status, b.error);
       const v = b.value || {};
@@ -522,6 +554,7 @@ export async function labApi(req, res, parts, url) {
       if ((d.games !== undefined && !(Number.isInteger(d.games) && d.games >= 1)) || (d.minutes !== undefined && !(d.minutes > 0)) || (d.plateau !== undefined && !(d.plateau && Number.isInteger(d.plateau.window) && d.plateau.window >= 1))) return bad(400, 'duración inválida: {games ≥ 1} | {minutes > 0} | {plateau:{window ≥ 1, minGain}}');
       if (v.workers !== undefined && !(Number.isInteger(v.workers) && v.workers >= 1 && v.workers <= 32)) return bad(400, 'workers entre 1 y 32');
       if (activeTraining(v.netId)) return bad(409, `La red ${v.netId} ya está entrenando`);
+      { const hb = heldText(v.netId, 'para entrenarla'); if (hb) return bad(409, hb); }
       if (v.exploiter) { const th = readThroneFull(); if (!th.queen) return bad(400, 'No hay reina: la retadora explotadora necesita una reina a la que explotar'); if (th.queen === v.netId) return bad(400, 'La reina no puede explotarse a sí misma'); }
       const t = startTraining({ ...v, duration: d });
       return json(res, 202, { id: t.id, status: t.status });
@@ -581,6 +614,7 @@ export async function labApi(req, res, parts, url) {
     if (seg.length === 2) {
       if (method === 'GET') return json(res, 200, { genome, paramCount: countParams(genome), warnings: validate(genome).warnings });
       if ((method === 'DELETE' || method === 'PUT') && activeTraining(id)) return bad(409, `La red ${id} está entrenando: para el entreno antes de editarla o borrarla.`);
+      if (method === 'DELETE' || method === 'PUT') { const hb = heldText(id, 'para editarla o borrarla', genome.name); if (hb) return bad(409, hb); }
       if (method === 'DELETE') {
         // la reina y las campeonas no se borran por accidente (spec/08 §4, spec/06 §7.1)
         const isQueen = th.queen === id, houses = ['A', 'B'].filter((h) => th.dynasties[h] && th.dynasties[h].champion === id);
@@ -629,6 +663,7 @@ export async function labApi(req, res, parts, url) {
       if (!opponent) { const th = readThrone(); if (th && th.queen) opponent = loadNet(th.queen); }
       if (!opponent) opponent = genome;
       if (activeTraining(id)) return bad(409, `La red ${id} está entrenando: para el entreno antes de pedir hijos.`);
+      { const hb = heldText(id, 'para pedir hijos', genome.name); if (hb) return bad(409, hb); }
       const job = startChildrenJob({ genome, n, mutation: mutationConfig(v.mutation), games, opponent, soldiers, seed });
       return json(res, 202, { jobId: job.id, status: job.status });
     }
@@ -639,6 +674,7 @@ export async function labApi(req, res, parts, url) {
     }
     if (seg.length === 3 && seg[2] === 'frozen' && method === 'PUT') {
       if (activeTraining(id)) return bad(409, `La red ${id} está entrenando: para el entreno antes de operarla.`);
+      { const hb = heldText(id, 'para operarla', genome.name); if (hb) return bad(409, hb); }
       const b = await body();
       if (!b.ok) return bad(b.status, b.error);
       const list = b.value && b.value.blocks;
@@ -652,6 +688,7 @@ export async function labApi(req, res, parts, url) {
     }
     if (seg.length === 4 && seg[2] === 'weights' && method === 'PUT') {
       if (activeTraining(id)) return bad(409, `La red ${id} está entrenando: para el entreno antes de operarla.`);
+      { const hb = heldText(id, 'para operarla', genome.name); if (hb) return bad(409, hb); }
       const block = genome.blocks.find((x) => x.id === seg[3]);
       if (!block) return bad(404, `El bloque "${seg[3]}" no existe en ${id}`);
       const b = await body();
@@ -676,6 +713,7 @@ export async function labApi(req, res, parts, url) {
     }
     if (seg.length === 3 && seg[2] === 'transplant' && method === 'POST') {
       if (activeTraining(id)) return bad(409, `La red ${id} está entrenando: para el entreno antes de operarla.`);
+      { const hb = heldText(id, 'para operarla', genome.name); if (hb) return bad(409, hb); }
       const b = await body();
       if (!b.ok) return bad(b.status, b.error);
       const v = b.value || {};
@@ -711,6 +749,7 @@ export async function labApi(req, res, parts, url) {
       if (method === 'GET') { const b = loadBulletin(id); return b ? json(res, 200, b) : bad(404, 'Todavía no hay boletín: pide un examen con POST'); }
       if (method === 'POST') {
         if (activeTraining(id)) return bad(409, `La red ${id} está entrenando: para el entreno antes del examen.`);
+        { const hb = heldText(id, 'para examinarla', genome.name); if (hb) return bad(409, hb); }
         if (!validate(genome, { forPlay: true }).ok) return bad(400, 'La red no puede jugar (falta Elegir)');
         if ([...jobs.values()].some((j) => j.kind === 'exam' && j.netId === id && j.status === 'running')) return bad(409, 'Ya hay un examen en marcha para esta red');
         const job = startExamJob(genome);
@@ -790,8 +829,8 @@ export async function labApi(req, res, parts, url) {
       const eid = game.events.reduce((m, e) => Math.max(m, e.id || 0), 0) + 1;
       game.events.push({ id: eid, t: Date.now(), game: game.meta.gameId, turn: dec.turn, type: kind, actor: { playerId: 'usuario', soldierId: null, netId: id }, data: { decisionEventId: dec.id, amount, term } });
       saveGame(game.meta, game.events, game.trajectories || null);
-      if (activeTraining(id)) {
-        // entrenando: el siguiente sueño la aplica con el mismo paso
+      if (activeTraining(id) || heldBy(id)) {
+        // entrenando u ocupada: el siguiente sueño, o quien la suelte, la aplica con el mismo paso (spec/04 §10.5)
         const pending = readFeedback(id);
         pending.push({ kind, game: game.meta.gameId, decisionEventId: dec.id, eventId: eid, amount, ts: Date.now() });
         writeFeedback(id, pending);

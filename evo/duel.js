@@ -4,7 +4,8 @@ import { hash32 } from '../shared/rng.js';
 import { playGame } from '../server/headless.js';
 import { createRoom } from '../server/rooms.js';
 import { loadNet, saveGameKept, saveGameNets, appendLog } from './store.js';
-import { makeLearner } from './train.js';
+import { makeLearner, settleFeedback } from './train.js';
+import { holdNet, releaseNet } from './busy.js';
 
 export const LEARNING_MODES = ['frozen', 'hot', 'mix'];
 export const SPEEDS = ['turbo', 'x1', 'x10'];
@@ -97,7 +98,19 @@ export function newDuelId() {
   return `d${Date.now().toString(36)}${pid.toString(36).padStart(2, '0')}-${++duelSeq}`;
 }
 export async function runDuel(opts = {}) {
-  return playDuel({ ...opts, id: opts.id || newDuelId() });
+  const id = opts.id || newDuelId();
+  // las dos redes quedan ocupadas todo el duelo, también el paso de evolución del final (spec/04 §10.5)
+  const holder = { kind: 'duel', id }, nets = [...new Set([opts.a, opts.b])];
+  for (const netId of nets) holdNet(netId, holder);
+  try {
+    return await playDuel({ ...opts, id });
+  } finally {
+    for (const netId of nets) releaseNet(netId, holder);
+    // lo que quedó en cola mientras estaba ocupada se aplica ya, si nadie más la tiene
+    for (const netId of nets) {
+      try { settleFeedback(netId); } catch (e) { appendLog({ type: 'error', netId, duelId: id, message: `no se pudo aplicar la cola de bofetadas y caricias: ${e.message}` }); }
+    }
+  }
 }
 async function playDuel(opts) {
   const { id, a, b, learning = 'mix', speed = 'turbo', soldiers = 'random', seed = 0, throne = false, queen = null, onGame = null, shouldStop = null, saveGames = true } = opts;

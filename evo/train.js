@@ -14,6 +14,7 @@ import { emotionOf, memoryOf, updateMemory, addEpisode, rewardEvents, emotionEve
 import { readThroneFull, pickOpponent } from './league.js';
 import { adaptImagination } from './mutate.js';
 import { playGame } from '../server/headless.js';
+import { heldBy } from './busy.js';
 import { createRoom } from '../server/rooms.js';
 import { AGENTS } from '../agents/registry.js';
 
@@ -173,7 +174,14 @@ export function applyEvolution(net, { theta, epsList, sigma }, fitness, cfg = {}
 
 // ---------- evolución jugada de verdad (spec/04 §10.2) ----------
 const yieldLoop = () => new Promise((r) => setImmediate(r));
-async function playHeadless(spec) { await yieldLoop(); return playOne(spec); } // cede el bucle: el servidor sigue respondiendo
+// una partida detrás de otra y cediendo el bucle antes de cada una: el servidor responde entre partidas (spec/04 §10.5).
+// (lanzadas a la vez con Promise.all, todas las cesiones caían en la misma vuelta del bucle y el servidor se bloqueaba)
+let headlessQueue = Promise.resolve();
+function playHeadless(spec) {
+  const run = headlessQueue.then(async () => { await yieldLoop(); return playOne(spec); });
+  headlessQueue = run.catch(() => {});
+  return run;
+}
 // recompensa efectiva media por decisión de la red que aprende en una partida (la magnitud de la curva)
 function meanEffectiveOf(g, res, stats) {
   const tr = res && res.trajectories ? res.trajectories[res.playerId] : null;
@@ -358,6 +366,15 @@ export function applyQueuedFeedback({ net, genome: g, trainingId = null }) {
     const out = feedbackFromGame({ net, genome: g, game, decisionEventId: f.decisionEventId, reward, kind: f.kind, eventId: f.eventId ?? null });
     if (out.ok) appendApplied(g.id, { kind: f.kind, game: f.game, decisionEventId: f.decisionEventId, amount: f.amount || 1, reward, pBefore: out.pBefore, pAfter: out.pAfter, relChange: out.relChange, trainingId, ts: Date.now() });
   }
+}
+// al soltar una red ocupada (spec/04 §10.5): si nadie más la tiene, lo que quedó en cola se aplica ya y se guarda
+export function settleFeedback(netId) {
+  if (heldBy(netId) || !readFeedback(netId).length) return;
+  const disk = loadNet(netId);
+  if (!disk) return;
+  const L = makeLearner(disk);
+  applyQueuedFeedback({ net: L.net, genome: L.genome });
+  L.save();
 }
 // bofetadas y caricias pendientes de esta partida → términos extra para assignRewards
 export function takeFeedback(netId, gameId, slapCaress = 1) {

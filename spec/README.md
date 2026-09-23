@@ -152,6 +152,17 @@ servidor) · regresión (la suite actual).
   plantillas siguen dando clones (decisión del usuario).
 - Pendiente: la parte 2 (interfaz, `spec/prompt-opus-ui.md` §3); los mutantes de R2–R5 (`spec/mutantes.md`); y los
   hallazgos medios y bajos de la revisión (§3.3), que no se pidieron.
+- **Sesiones de Opus 5.5 (2026-09-23)**: mutantes de R2–R5 cerrados (plan2 rondas 14–15); **parte 3** (hallazgos medios y
+  bajos M1–M15, B1–B5 y R5) arreglada con tests congelados antes del código (`arreglos-sala`, `-verdad`, `-almacen`,
+  `-liga`, `tools-base`, `moviola-antigua`) y los huecos de sus mutantes cerrados con `arreglos-parte3-extra`, `-extra-api`
+  y `-extra-b`. Esos huecos incluían un fallo real de M5: el fin de una generación salía "Casa B: generation". Cuatro
+  tests congelados antiguos se cambiaron con OK del usuario (plan2 ronda 16). **Parte 4, la interfaz**: `public/evo.html`
+  con inicio, editor de redes (niveles, cables, errores junto al bloque, "¿qué pasaría si…?"), entreno, evolución (hijos,
+  pre-torneo, diferencias), trono y duelos, dinastías, verdad (diario, crónica, moviola, boletín, neuronas, memoria,
+  bofetada/caricia) y cirugía. En el juego, la sala viva: curvas imaginadas, panel Cerebro y confianza en los
+  bocadillos. Cada vista tiene la lógica pura con su test `ui-*` congelado. M12 medido (el lote limita los hilos con
+  gradiente; el entreno lo avisa, spec/04 §9.7) y B5 no reproducido en 10 vueltas. Queda el pulido visual fiel a `referencia.png` y `referencianoabsoluta.png` (otra sesión) y
+  los huecos antiguos de F4/F6 que anotó `spec/mutantes.md` ("Parte 3").
 
 ## 7. Cierre de cada sesión
 1. Actualiza `plan2.md` (estado de la fase) y `plan.md` §4 si cambia el stack.

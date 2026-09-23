@@ -97,8 +97,22 @@ E:\grafwar
 │   ├── js/render.js Canvas auto-reparado (fit tras display:none + re-encaje si
 │   │                cambia layout), w2s, rejilla+ejes, obstáculos, soldados con
 │   │                anillo de turno, nombres, **bocadillos**, estelas glow,
-│   │                partículas, shake, estrellas
-│   └── css/style.css Tema neón oscuro
+│   │                partículas, shake, estrellas. Parte 4: `think` (curvas que imagina
+│   │                una red, tenues, y la elegida discontinua; destinos al moverse) y el
+│   │                nivel de confianza sobre el bocadillo
+│   ├── js/live.js   Parte 4, sala viva: qué pintar de una decisión, candidatos más
+│   │                probables, atribución y frase "miraba sobre todo…" (compose+checkPhrase)
+│   ├── css/style.css Tema neón oscuro (+ panel Cerebro de la sala viva)
+│   ├── evo.html     Parte 4: laboratorio (#inicio, #editor/<id>, #entreno, #evolucion,
+│   │                #trono, #dinastias, #verdad, #cirugia); vistas que no se desmontan
+│   ├── css/lab.css  Tema del laboratorio (mismos tokens; color = parte del cuerpo,
+│   │                trazo = corriente; plano cuadriculado; sin degradados ni cristal)
+│   └── js/lab/      main.js (rutas) · api.js · emblem.js (sello de la semilla) ·
+│                    lógica pura con test ui-*: model (editor), home, training,
+│                    evolution, duels, dynasty, truthview, surgery, whatif · vistas:
+│                    editor, inicio, entreno, evolucion, trono, dinastias, verdad,
+│                    cirugia. validate/repair/compose/checkPhrase = el código del servidor
+│                    servido en /shared y /evo/truth.js
 ├── tools/
 │   ├── launch-selfplay.mjs Crea sala 4v4 con pareja aleatoria, start y abre el
 │   │                        navegador (lo que ejecuta Graphwar.bat)

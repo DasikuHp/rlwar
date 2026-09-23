@@ -221,6 +221,16 @@ speed`, exportada por `server/rooms.js`; en x10, de 70 a 900 ms (un tiro de 5 s 
 SSE global: `hello {trainings}` · `training` · `curve` · `sleep` · `lesson` · `milestone` · `error`.
 `GET /api/lab/nets` marca `training:true` en la red que entrena; `PUT`/`DELETE` sobre ella → 409.
 
+### 9.7 Hilos y lote (M12, medido el 2026-09-23)
+Con gradiente (y en la fase de gradiente de "ambos") las partidas de un lote se juegan con los mismos pesos antes del
+sueño, así que corren a la vez como mucho `batchGames` (4 por defecto): más hilos no aceleran. Con evolución, las
+copias de un paso juegan en paralelo y sí escala. Medido (plantilla Vidente contra plantilla Francotirador, 2 soldados, semilla 77, 32 partidas, turbo):
+gradiente 1/2/4/8 hilos = 4,57 / 4,05 / 2,97 / 3,02 s; evolución = 5,35 / 3,57 / 2,21 / 1,55 s; gradiente con
+`batchGames` 8 y 8 hilos = 2,18 s, pero con la mitad de sueños. **No se cambia cómo aprende la red** (decisión delegada,
+plan2 ronda 16): el panel de entreno avisa, con el aprendizaje de la red, de cuántos hilos se usan de verdad y de cómo
+usar más: subir "Partidas por lote" (Científico) o entrenar por evolución (`threadNote`, `test/ui-entreno-hilos`).
+`createTrainer` no admite todavía un `learnCfg` propio del entreno (la firma de §9.4 lo cita, pero no está hecho).
+
 ## 10. Arreglos tras la revisión de Opus (2026-09-23, `spec/revision-opus.md` C3, C4, A1, A2)
 Decisiones del usuario del 2026-09-23: "arréglalo tú"; evolución = concurso tras el duelo; a x1/x10 se ve la
 red real en vivo; bofetada con efecto inmediato. Completan §1–§9 sin cambiar lo que ya decían.

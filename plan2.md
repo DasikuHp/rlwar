@@ -167,6 +167,31 @@ el único punto de validación de disparos.
 | Voz y tope de eventos (R5) | Anotado sin arreglar; se decide con los medios y bajos (parte 3). |
 | Test congelado `arreglos-ocupada` | Cambio autorizado: semilla en la que la red dispara y duelos x10 (`838e56c`). |
 
+### Ronda 15 — parte 2 (mutantes) y parte 3 (medios y bajos) de la revisión (2026-09-23) ✅
+| Tema | Decisión |
+|---|---|
+| Huecos de mutantes (2.4) | "Sí, los 43 y los de 2.3": `arreglos-ocupada-extra-b` + `arreglos-voz-extra` (la voz va aparte por tamaño). |
+| M7, R5, M10, B2 | Arreglar como se propuso (x10 dividido una vez; la voz fuera del tope; 413 con motivo; soldados 1–4 o "random"). "Confío en tu criterio si hay que añadir más." |
+| M3, M4, M6, M8 | Arreglar todo (moviola del turno, retos en el diario, memoria real, sala en vivo del duelo). |
+| B1, B3, B4, B5 | Arreglar todo (validate, ruta relativa, CORS, intentar reproducir B5). |
+| M1 certeza | "Elige tú": certeza = p(favorita) − p(segunda); el `margin` del registro sigue siendo el del elegido. No obliga a tocar tests congelados. |
+| M2 moviola | Guardar la red de cada partida por su huella (sin duplicar). |
+| M15, M12, M13 | Índice de partidas + partidas comprimidas; medir y arreglar los hilos (preguntar si es de diseño); bombilla al 1,5 %. |
+| M5, M9, M11 | Cronista con nombres y en español; duelos/entrenos/trabajos en disco; duelos libres en la liga. |
+| Test congelado `genoma.spec` (M13) | Cambio autorizado: `lessonThreshold` por defecto 0.05 → 0.015. |
+| Hallazgos nuevos de la sesión | Los arreglo sin preguntar (criterio): `tools/mutants.mjs` sin línea base contaba como cazados fallos ajenos; `eventsCapped` no se reiniciaba en una revancha; un reto anulado salía en el diario como "la reina defendió el trono". Anotado sin tocar: `api-trono` y `api-evolucion` fallan si corren después de otras suites en el mismo servidor (son congelados; en `run-all` pasan por su orden). |
+
+### Ronda 16 — cierre de la parte 3 y parte 4, la interfaz (2026-09-23) ✅
+| Tema | Decisión |
+|---|---|
+| Tests congelados que chocaban con la parte 3 | Cambio autorizado ("sí, los 4 + test nuevo"): `trono.spec` busca la copia de la sala de la fama relativa a la carpeta de datos (B3); `verdad.spec` rellena el tope con eventos que no son de voz (R5); `api-verdad.spec` espera la moviola exacta (M2) y el caso `approx:true` pasa a `moviola-antigua.spec`; `arreglos-almacen` entrena contra sí misma (no depende de otras suites). |
+| `ui-inicio.spec` | Cambio autorizado: el caso 3 tenía un dato imposible (`updatedAt: 2` frente a 1000). |
+| Posiciones de los bloques en el editor | "Mira las referencias y hazlo bien": columnas del cuerpo como en `referencianoabsoluta.png` (ojos → instinto/memoria → manos y pies), colocadas solas por profundidad; el arrastre se recuerda en el navegador; el genoma no cambia. |
+| Hallazgos de la sesión | Los arreglo sin preguntar (criterio): el fin de una generación salía en el cronista como "Casa B: generation" (M5) → "<casa> gana la generación y ya lleva <n>" / "Generación sin ganadora: las casas empatan"; huecos de mutantes cubiertos por `arreglos-parte3-extra` y `-extra-api`. |
+| M12 (hilos) | Medido: con gradiente el paralelismo lo limita el lote (`batchGames` 4); la evolución escala. "Confío en tu criterio": no se toca cómo aprende; el entreno avisa de cuántos hilos se usan y cómo usar más (spec/04 §9.7). |
+| B5 (entreno de 100 s) | Intentado reproducir 10 veces (proceso nuevo, primer entreno, 4 hilos, 16 partidas): 1,8–2,8 s, mediana 2,2 s. No reproducido; si reaparece, anotar semilla, momento y carga de la máquina. |
+| Interfaz | Construidas las 9 vistas de `spec/prompt-opus-ui.md` §3.1 más las dos ayudas de arranque de la ronda 4 que faltaban ("¿qué pasaría si…?" en el editor y primeros pasos en el inicio). El pulido visual fino, fiel a `referencia.png` y `referencianoabsoluta.png`, queda para otra sesión (petición del usuario). |
+
 ## 4. Diseño resultante (borrador, se cierra al acabar las preguntas)
 
 ### 4.1 Tropas (F0)

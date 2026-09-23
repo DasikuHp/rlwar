@@ -389,3 +389,148 @@ nuevo, sobre una copia exacta sin la parte 3: **41/48**.
 | 198 (rival: red sentada o agente) | 4/10 | `&& → ||` y `level || 2` ×3: **equivalentes** (las redes sentadas llevan genoma y los agentes no; la sala recorta el nivel a 1–3, nunca llega 0). `temperature || 0` → `&&` y `|| 1`: **test que falta** — la temperatura sí cambia los tiros de `greedy`/`sniper`, pero con estas semillas no altera ninguna partida de las copias; haría falta una escena en la que la rival dispare antes con incertidumbre |
 | 515, 524 (criar, reto de dinastía) | 11/12 | 524 `&& → ||`: **equivalente** (si la reina es la campeona, su ocupación ya la miró la primera comprobación) |
 | 666, 677, 691, 716, 752 (pedir hijos, operar ×3, examinar) | 20/20 | — |
+
+## Parte 3 (2026-09-23): hallazgos medios y bajos de la revisión
+Con `tools/mutants.mjs --lines` (las líneas de `git diff -U0 HEAD` del código de la parte 3, que aún no estaba
+commiteado) y, en cada fichero, **el spec nuevo que lo prueba**. Los ficheros con servidor usan `--server`
+(servidor de la copia ya mutado). `evo/api.js` se partió por tramos según el spec que cubre cada línea.
+Los "cazados por tiempo" son rutas que dejan de responder o bucles que no acaban: un cliente también se quedaría
+colgado, así que cuentan.
+
+**Primera pasada** (spec nuevo de cada fichero):
+| fichero | líneas | contra | cazados |
+|---|---|---|---|
+| `agents/net.js` | 6, 53–54 | `arreglos-verdad` | 0/1 |
+| `evo/duel.js` | 54, 67, 74, 118, 124, 133 | `arreglos-verdad`, `-almacen`, `-liga` | 2/8 |
+| `evo/store.js` | 2–224 (las del diff) | `arreglos-almacen` | 35/76 |
+| `evo/throne.js` | 40–226 (las del diff) | `arreglos-verdad`, `-almacen`, `-liga` | 7/33 |
+| `evo/train.js` | 4, 12, 463–467, 514–518, 549, 604, 656, 682–688 | `arreglos-almacen` | 6/37 (1 por tiempo) |
+| `evo/truth.js` | 106–110, 238–256, 273, 311–336 | `arreglos-verdad` | 49/58 |
+| `server/rooms.js` | 31, 72, 113–115, 122, 216–217 | `arreglos-sala` | 24/27 |
+| `server/server.js` | 25, 33–53, 74, 105 | `arreglos-sala` | 17/24 (4 por tiempo) |
+| `shared/genome.js` | 53, 283–286, 457 | `arreglos-liga` + `genoma` | 6/6 (1 por tiempo) |
+| `tools/mutants.mjs` | 225–238, 277–284 | `tools-base` | 34/37 |
+| `evo/api.js` (sala) | 290–305, 543, 587 | `arreglos-sala` | 28/37 (2 por tiempo) |
+| `evo/api.js` (verdad) | 91–117, 146–164, 184–185, 492, 657, 824, 830 | `arreglos-verdad` | 31/53 (2 por tiempo) |
+| `evo/api.js` (almacén) | 6–137, 193–201, 235, 280, 477, 495, 572–595 | `arreglos-almacen` + `moviola-antigua` | 73/103 (6 por tiempo) |
+| `evo/api.js` (pesos) | 732–738 | `arreglos-liga` | 6/11 (1 por tiempo) |
+| `evo/api.js` (liga) | 97–98 | `arreglos-almacen`, `-liga` | 4/5 |
+
+Muchos supervivientes eran **partes antiguas de líneas tocadas**: la parte 3 añadió un campo o un argumento a
+una línea que ya existía, como `saveGameKept(…, {genomes})` o la línea de `rec` del duelo. Y había **huecos
+reales**, cerrados con tres tests nuevos:
+- `arreglos-parte3-extra` (en proceso, segundos):
+  - almacén: orden con empates, compactación del índice en el límite exacto, reconstrucción con partidas
+    antiguas en `.json` sin meta, siguiente id tras los guardados;
+  - verdad: certeza con 2 candidatos, `m` de las neuronas solo con disparos que tienen observación, frases con
+    el nombre al borrar;
+  - un **fallo real de M5**: el fin de una generación salía "Casa B: generation" (arreglado:
+    "<casa> gana la generación y ya lleva <n>" / "Generación sin ganadora: las casas empatan", spec/07 §12.8).
+- `arreglos-parte3-extra-api` (servidor propio, unos 45 s):
+  - M10: cuerpos de exactamente 100 000 / 100 001 bytes y corte a más de 4×;
+  - B2: soldados 5 y `null`, y una generación sin objeto `training`;
+  - M9: ids reales de los trabajos de cría de una generación, progreso final de cría y examen, 200/404
+    exactos, ids que siguen tras reiniciar y el entreno guardado con su vista completa;
+  - B1: pesos con un cuerpo que no es objeto y NaN en la posición 0;
+  - M2: copias de la red con varios hilos;
+  - M4: diario sin retos ajenos;
+  - M6: tope de 500 disparos al nombrar neuronas (con oráculo del recorrido);
+  - M5: nombres al borrar la reina o la campeona, y en la cría y el relevo.
+  El test reintenta **una vez** un GET cortado con ECONNRESET: es una carrera del keep-alive tras una petición
+  larga, sin ningún error en el servidor (se repitió 5 veces con su salida de error capturada).
+- `arreglos-parte3-extra-b` (en proceso), de la segunda pasada:
+  - compactación con 2 partidas vivas;
+  - partidas sin `ts` frente a `ts` 1;
+  - el tope de eventos no salta antes de tiempo, y la voz es solo `say` y el error "frase no verificable";
+  - frases de reinado y de duelo de campeonas con el nombre.
+
+**Segunda pasada**: todos los mutantes de las líneas que tenían supervivientes, contra spec + test extra; las
+expresiones antiguas, contra la suite antigua que las cubre.
+| qué se volvió a tirar | contra | cazados | lo que queda |
+|---|---|---|---|
+| `store.js`: todas las mutaciones de las líneas con supervivientes (48) | `arreglos-parte3-extra` (+ `-extra-b` en 130 y 137) | 32/48 | 16 equivalentes (tabla de abajo) |
+| `truth.js`: 109, 244, 255–256, 320, 338 y el caso nuevo de `generation` (26) | `-extra` + `arreglos-verdad` (+ `-extra-b` en 320 y 338) | 23/26 | 3 equivalentes |
+| `rooms.js` 72, 114 (7) | `verdad.spec` (+ `-extra-b` en 114: 6/6) | 6/7 | 72, equivalente |
+| `duel.js` 54, 118 (7) | `trono.spec` | 0/7 | 7 equivalentes (`duelScore` recalcula; `makePlay` recibe todo) |
+| **Pasada dirigida**: los supervivientes de api (sala, verdad, pesos), `train` 467/688, `throne` 127/199/208 y `server` 34–48 (42) | `arreglos-parte3-extra-api` | 27/42 | equivalentes; más `api.js` 34/185/495/595/657, que se cierran con `-extra-api-b` (5/8; los 3 restantes, equivalentes) |
+| Pasada dirigida: los supervivientes de api (almacén) (24) | `arreglos-parte3-extra-api` | 20/24 | los de 34/495/595, arriba |
+
+La segunda pasada "de líneas enteras" contra el test por la API tardaba unos 3,5 min por mutante: repetía también
+los que ya se cazaron en la primera. Se paró y se cambió por la **pasada dirigida**, un arnés de un solo uso en el
+scratchpad que usa `generateMutants`/`applyMutant` de `tools/mutants.mjs`. Tira solo los supervivientes de la
+primera, por su id, que es estable porque los ficheros no cambiaron entre pasadas. Los huecos que quedan de la
+parte 3 son los marcados abajo como **hueco sin test**.
+
+**Huecos antiguos que destapó esta ronda (no son de la parte 3; F4 y F6 de Fable, sin tocar)**. Son partes de
+líneas donde la parte 3 solo añadió algo. Tirados contra las suites antiguas en proceso (`aprendizaje`,
+`entrenador-extra`, `entrenador-extra-b`, `arreglos-metodo-extra`, `trono`): 7/35.
+| fichero:línea | qué no se prueba | fase |
+|---|---|---|
+| `train.js:604` | que se guarde de muestra 1 de cada 20 partidas (`k % 20`), la semilla `cfg.seed + k` de cada partida y `rivalId` | F4 (quizá lo cubra `api-trainings`, con servidor; no se tiró) |
+| `train.js:656` | que la partida de exhibición del paso de evolución se guarde como muestra | F4/A2 |
+| `throne.js:41` | `reignGames = defensas + perdidos` de la copia de la sala de la fama | F6 |
+| `throne.js:204`, `215` | las semillas de los duelos de la generación (`seed + 2000·casa`, `seed + 3000`) | F6 |
+Se anotan para una sesión de Fable o para cuando se toque ese código.
+
+**Equivalentes que quedan** (justificados):
+| fichero:línea | mutante | por qué |
+|---|---|---|
+| `store.js:147–148` | filtros `.nets.json`/`.meta.json` y el corte del id | solo eligen el camino rápido (meta al lado) o el lento (leer la partida); el resultado es el mismo y los ficheros que no son partidas no tienen `meta` |
+| `store.js:179`, `205`, `208` | `recursive`, guardas y valores de retorno de `saveRecord` | la carpeta de datos ya existe; los ids siempre son válidos (`d…`, `t7`, `j12`); nadie lee el valor devuelto |
+| `truth.js:244` | `samples \|\| []` → `&&` | quien llama siempre pasa una lista |
+| `truth.js:320`, `338` | `e.tie \|\| !e.winner`; el segundo `\|\|` de `name \|\| queen \|\| netId` | empate ⇔ sin ganadora; en `reign.start`, `queen` es el propio `netId` |
+| `rooms.js:72` | `voiceEvents = 0` → 1 en el constructor | `start()` lo pone a cero antes del primer evento |
+| `duel.js:54` | valores por defecto de `makePlay` | quien la llama los pasa todos |
+| `duel.js:118` | `wins`, `killDiff`, `ms`, `tie` iniciales | `duelScore` los recalcula tras cada partida; solo se verían antes de la primera |
+| `throne.js:204`, `215` | `league: false` y semillas de los duelos de la generación | `runDuel` no lee `league` (la liga la apunta la propia generación); las semillas son de F6, anteriores a la parte 3 |
+| `train.js:465` | orden de `genomesOf` cuando las dos redes comparten id | dentro de un lote, la copia "ella misma" es idéntica a la que aprende (se renueva en cada sueño) |
+| `train.js:604`, `656`, `549` | `k % 20`, `sample: true`, `seed + k`, `left/right` de la meta | partes antiguas (F4/A2) de líneas donde la parte 3 solo añadió `genomes` |
+| `api.js:34`, `102`, `110`, `122` (progreso inicial) | `{done: 0, total: …}` al crear el trabajo | no se ve de forma fiable desde fuera (el primer aviso llega en ms); el final sí se prueba |
+| `api.js:292–297` | límites de `readText` (48 MB en `/api/lab`) | **hueco sin test**: probar 48 MB exactos o 192 MB para el corte pesa demasiado para la batería; la misma lógica en `server.js` (100 kB) sí está probada al byte |
+| `api.js:98` | el `.catch` de un duelo que falla | **hueco sin test**: un duelo que lanza no se puede provocar desde fuera sin romper el motor |
+| `api.js:235` | partes antiguas de la línea de la exhibición | A2, probadas por `arreglos-exhibicion` |
+| `api.js:150`, `162` | `used = 0 → 1`, `>= → >` al nombrar neuronas | **hueco sin test**: el corte exacto en 500 (se prueba el recorrido y que corte, no el límite al byte) |
+| `api.js:157`, `158` | `st && st.obs`, `phase === 'shoot'` en el recuento | con partidas reales cada paso lleva `obs` y cada disparo va seguido de su movimiento: contar uno u otro por soldado da el mismo corte |
+| `api.js:657` | `ok && …` → `\|\|` | al borrar una red que existe, `ok` siempre es verdadero |
+| `api.js:738` | `badIdx >= 0` → `> 0` | `validate` rechaza después el mismo valor con el mismo código, mensaje y ejemplo |
+| `throne.js:208` | `nameOf(best.id) \|\| best.name \|\| null` | es el mismo nombre por los dos caminos |
+| `server.js:40` | `done = true` → `false` | `finish()` puede correr dos veces: resolver una promesa ya resuelta no hace nada |
+| `net.js:54` | `games: g.stats ? … : 0` → 1 | toda red guardada tiene `stats` (normalize) |
+| `tools/mutants.mjs:232–233` | `r.error \|\| r.signal`, el recorte del mensaje | un tiempo agotado trae los dos; el recorte solo cambia cuánto texto se enseña |
+
+## Parte 4 (2026-09-23): interfaz, lógica pura de cada vista
+Cada vista tiene su lógica sin DOM en un módulo con test `ui-*` escrito antes y congelado; los mutantes se tiran
+contra ese test (y el `-extra` del editor).
+| módulo | contra | cazados |
+|---|---|---|
+| `public/js/lab/model.js` (editor) | `ui-editor` + `ui-editor-extra` | 165/240 (antes del extra: 130/240) |
+| `public/js/lab/emblem.js` | `ui-editor` | 13/141 |
+| `public/js/lab/home.js` | `ui-inicio` | 70/93 |
+| `public/js/live.js` (sala viva) | `ui-sala` | 50/65 |
+| `public/js/lab/training.js` | `ui-entreno` | 119/181 |
+| `public/js/lab/evolution.js` | `ui-evolucion` | 89/105 |
+| `public/js/lab/duels.js` | `ui-trono` | 61/86 |
+| `public/js/lab/dynasty.js` | `ui-dinastias` | 57/80 |
+| `public/js/lab/truthview.js` | `ui-verdad` | 72/87 |
+| `public/js/lab/surgery.js` | `ui-cirugia` | 81/99 |
+| `public/js/lab/whatif.js` | `ui-arranque` | 40/120 |
+
+Por qué sobreviven (por tipo, no uno a uno):
+- **Tamaños y dibujo**: constantes de píxeles de la colocación (`COL_W`, `ROW_H`, `NODE`), el sello del emblema
+  (ninguna spec fija su dibujo: los tests fijan que sea determinista, distinto por semilla y sin NaN), las marcas
+  de los ejes (se prueban sus propiedades, no cada constante interna) y las coordenadas y textos de las escenas
+  de "¿qué pasaría si…?" (se prueba que sean válidas para el servidor).
+- **Orden cosmético**: el orden de filas dentro de una columna del editor (las plantillas ya listan los ojos por
+  corriente) y los desempates de ordenaciones.
+- **Límites de los formularios** (soldados 1–4, hilos 1–32, semilla < 2³¹, partidas 0–20): la validación que
+  manda es la del servidor, probada en sus specs; la del formulario solo adelanta el mensaje en español.
+- **Valores por defecto** que la API siempre rellena (`stats`, `generation`, `updatedAt`) y guardas defensivas.
+Huecos menores anotados: `home.reignOf` con el reinado abierto en la posición 0, y que la opacidad de las curvas
+imaginadas crezca estrictamente con la probabilidad (el test pide que no baje).
+
+### M12 — `public/js/lab/training.js` `threadNote` (líneas 53–63) contra `ui-entreno-hilos` (+ `-b`) y `ui-entreno` — cazados 13/15
+Primera pasada 11/15. Dos huecos reales se cerraron con `test/ui-entreno-hilos-b.spec.mjs` (escrito después del código,
+como los demás tests "extra" que salen de los mutantes): el lote de 1 partida (`Math.max(1, …)` → `Math.max(2, …)`) y
+el texto propio de "los dos" (`method === 'both'` → `!==`). Sobreviven `Math.max(1, …)` → `Math.max(0, …)` y
+`Math.max(-1, …)`, que son **equivalentes**: solo cambiarían algo con un lote de 0 o negativo, y el genoma válido lo
+limita a 1–64 (`shared/genome.js`); un 0 o un vacío ya cae en el 4 por defecto.

@@ -102,6 +102,7 @@ try {
   results.push(await run('interfaz: inicio del laboratorio (lógica)', [join(ROOT, 'test', 'ui-inicio.spec.mjs')]));
   results.push(await run('interfaz: sala viva con redes (lógica)', [join(ROOT, 'test', 'ui-sala.spec.mjs')]));
   results.push(await run('interfaz: entreno (lógica)', [join(ROOT, 'test', 'ui-entreno.spec.mjs')]));
+  results.push(await run('interfaz: evolución, hijos y diferencias (lógica)', [join(ROOT, 'test', 'ui-evolucion.spec.mjs')]));
 } finally {
   server.kill();
 }

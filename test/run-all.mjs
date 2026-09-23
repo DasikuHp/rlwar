@@ -125,6 +125,8 @@ try {
   results.push(await run('receta de entreno en el entrenador', [join(ROOT, 'test', 'receta-entreno.spec.mjs')]));
   results.push(await run('receta de entreno por la API y versiones', [join(ROOT, 'test', 'receta-api.spec.mjs')]));
   results.push(await run('terreno de círculos que se rompe y tiro que atraviesa (P1)', [join(ROOT, 'test', 'terreno.spec.mjs')]));
+  results.push(await run('terreno (P1): casos de la auditoría (cobertura, ajuste, Simulador, compañeros, deslizar, dibujo)', [join(ROOT, 'test', 'terreno-extra.spec.mjs')]));
+  results.push(await run('terreno (P1): "¿qué pasaría si…?" con círculos y bocados por la API', [join(ROOT, 'test', 'terreno-api.spec.mjs'), BASE]));
 } finally {
   server.kill();
 }

@@ -53,6 +53,8 @@
   "test/rng.spec.mjs": "4fc0264c161a540151bacbc2a4a11c8e5f6dafead07bae50eb6d6105fda0bc74",
   "test/rooms.spec.mjs": "33e70b439390b89fc32dcd6acb9c1998682c2af5ec786615ae74302a3629c719",
   "test/smoke.mjs": "708013b5e37bf82e4d13315978d0645238a15b3b229e2b9ab0335add182b6854",
+  "test/terreno-api.spec.mjs": "a0c384518331be3c0b87097c0e4a36411be423fc0c343ecacbbaae7d831bab22",
+  "test/terreno-extra.spec.mjs": "789327ef4b6eadefd81aa7d6b0e45835546ccc48ed5f2b1fbb425b5c732ef2e3",
   "test/terreno.spec.mjs": "c665a25950d785f7c0328d659eace6c57e3055b444ac2e745673c92be62416f0",
   "test/tools-base.spec.mjs": "22230ba5634eedd210b920113695da739922ba366a8e5155650e93a85809b6b2",
   "test/tools-servidor.spec.mjs": "fdb4a7aec741db4d2bba22779adaf5fe878735431db9e4aa8f90e5c82393b843",

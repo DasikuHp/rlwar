@@ -97,8 +97,10 @@ export function newDuelId() {
   return `d${Date.now().toString(36)}${pid.toString(36).padStart(2, '0')}-${++duelSeq}`;
 }
 export async function runDuel(opts = {}) {
-  const { a, b, learning = 'mix', speed = 'turbo', soldiers = 'random', seed = 0, throne = false, queen = null, onGame = null, shouldStop = null, saveGames = true } = opts;
-  const id = opts.id || newDuelId();
+  return playDuel({ ...opts, id: opts.id || newDuelId() });
+}
+async function playDuel(opts) {
+  const { id, a, b, learning = 'mix', speed = 'turbo', soldiers = 'random', seed = 0, throne = false, queen = null, onGame = null, shouldStop = null, saveGames = true } = opts;
   const rec = { id, a, b, status: 'running', learning, speed, throne, soldiers, seed, games: [], wins: { [a]: 0, [b]: 0 }, killDiff: 0, winner: null, tie: false, ms: 0, roomCodes: [], startedAt: Date.now() };
   if (opts.onStart) opts.onStart(rec);
   const stop = () => !!(shouldStop && shouldStop());

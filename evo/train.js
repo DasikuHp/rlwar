@@ -346,6 +346,19 @@ export function feedbackFromGame({ net, genome: g, game, decisionEventId, reward
   g.memory = mem;
   return { ok: true, ...out };
 }
+// bofetadas y caricias en cola → aplicadas ya sobre (net, genome), con el paso de feedbackFromGame (spec/04 §10.4)
+export function applyQueuedFeedback({ net, genome: g, trainingId = null }) {
+  const queued = readFeedback(g.id);
+  if (!queued.length) return;
+  writeFeedback(g.id, []);
+  for (const f of queued) {
+    const game = loadGame(f.game);
+    if (!game) continue;
+    const reward = (f.kind === 'slap' ? -1 : 1) * (f.amount || 1) * (g.reward.slapCaress ?? 1);
+    const out = feedbackFromGame({ net, genome: g, game, decisionEventId: f.decisionEventId, reward, kind: f.kind, eventId: f.eventId ?? null });
+    if (out.ok) appendApplied(g.id, { kind: f.kind, game: f.game, decisionEventId: f.decisionEventId, amount: f.amount || 1, reward, pBefore: out.pBefore, pAfter: out.pAfter, relChange: out.relChange, trainingId, ts: Date.now() });
+  }
+}
 // bofetadas y caricias pendientes de esta partida → términos extra para assignRewards
 export function takeFeedback(netId, gameId, slapCaress = 1) {
   const pending = readFeedback(netId);
@@ -513,18 +526,7 @@ export function createTrainer(opts = {}) {
       t.sampleGames.push(gameId);
     };
     // bofetadas y caricias que llegaron mientras entrenaba: las aplica el siguiente sueño (spec/04 §10.4)
-    const applyQueued = () => {
-      const queued = readFeedback(g.id);
-      if (!queued.length) return;
-      writeFeedback(g.id, []);
-      for (const f of queued) {
-        const game = loadGame(f.game);
-        if (!game) continue;
-        const reward = (f.kind === 'slap' ? -1 : 1) * (f.amount || 1) * (g.reward.slapCaress ?? 1);
-        const out = feedbackFromGame({ net, genome: g, game, decisionEventId: f.decisionEventId, reward, kind: f.kind, eventId: f.eventId ?? null });
-        if (out.ok) appendApplied(g.id, { kind: f.kind, game: f.game, decisionEventId: f.decisionEventId, amount: f.amount || 1, reward, pBefore: out.pBefore, pAfter: out.pAfter, relChange: out.relChange, trainingId: t.id, ts: Date.now() });
-      }
-    };
+    const applyQueued = () => applyQueuedFeedback({ net, genome: g, trainingId: t.id });
     const sleep = () => {
       applyQueued();
       if (!batch.length) return;

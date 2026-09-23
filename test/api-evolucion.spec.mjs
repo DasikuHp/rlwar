@@ -1,6 +1,9 @@
 // API de evolución, F5 (spec/05 §4, §5, §7, §8, §10.4–10.5; spec/08 §4–§6): hijos + pre-torneo como trabajo
 // con SSE, diferencias, cirugía (congelar, pesos a mano, trasplante), importación robusta.
 // Escrito ANTES del código y congelado. Uso: node test/api-evolucion.spec.mjs http://localhost:8791
+// Cambio autorizado (2026-09-23, ronda 17, OK del usuario): una segunda cría ya no repite los nombres de la primera
+// ("que no se repita, cambiamos de letra", spec/05 §10): sus ids son hydra-1d, 1e y 1f, y la hija k-ésima sigue siendo
+// idéntica a la k-ésima de la primera cría (misma semilla, mismos hijos).
 import { strict as assert } from 'node:assert';
 
 const BASE = process.argv[2];
@@ -103,15 +106,16 @@ await check('POST /children: 202 {jobId}; el trabajo avanza (SSE job), termina (
   firstBatch = Object.fromEntries(await Promise.all(rk.map(async (row) => [row.name, (await api(`/api/lab/nets/${row.id}`)).body.genome.weights])));
 });
 
-await check('POST /children: misma semilla → mismos hijos (pesos idénticos, ids con sufijo); games 0 → sin partidas; hello del SSE lleva jobs', async () => {
+await check('POST /children: misma semilla → mismos hijos (pesos idénticos, nombres nuevos sin repetir); games 0 → sin partidas; hello del SSE lleva jobs', async () => {
   const r = await api(`/api/lab/nets/${parentId}/children`, 'POST', { n: 3, pretournament: { games: 0 }, seed: 5 });
   assert.equal(r.status, 202);
   const job = await waitJob(r.body.jobId);
   assert.equal(job.status, 'done'); assert.deepEqual(job.progress, { done: 0, total: 0 });
   const rk = job.result.ranking;
-  assert.deepEqual(rk.map((x) => x.id).sort(), ['hydra-1a-2', 'hydra-1b-2', 'hydra-1c-2']);
+  assert.deepEqual(rk.map((x) => x.id).sort(), ['hydra-1d', 'hydra-1e', 'hydra-1f']);
   assert.ok(rk.every((x) => x.wins === 0 && x.kills === 0 && x.deaths === 0 && x.killDiff === 0));
-  for (const row of rk) assert.deepEqual((await api(`/api/lab/nets/${row.id}`)).body.genome.weights, firstBatch[row.name], `${row.name} determinista`);
+  const twin = { 'Hydra-1d': 'Hydra-1a', 'Hydra-1e': 'Hydra-1b', 'Hydra-1f': 'Hydra-1c' }; // la k-ésima de cada cría
+  for (const row of rk) assert.deepEqual((await api(`/api/lab/nets/${row.id}`)).body.genome.weights, firstBatch[twin[row.name]], `${row.name} determinista`);
   const sse = listen(); await sse.ready; await sleep(150);
   const hello = sse.events.find((e) => e.event === 'hello');
   assert.ok(hello && Array.isArray(hello.data.jobs) && hello.data.jobs.some((j) => j.id === r.body.jobId), 'hello con jobs');

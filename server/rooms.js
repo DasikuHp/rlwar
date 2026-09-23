@@ -26,6 +26,11 @@ function coarsePoints(points) {
   return out;
 }
 
+// duración de la animación de un disparo de `points` puntos a la velocidad de la sala (spec/04 §9.5)
+export function animMsOf(points, speed = 1) {
+  return Math.min(9000, Math.max(700, (points * C.NETWORK_STEP / (C.SHOT_SPEED * speed)) * 1000)) / (speed === 10 ? 10 : 1);
+}
+
 let seq = 1;
 const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const randCode = () => Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
@@ -427,7 +432,7 @@ export class Room {
     if (shot.result.type === 'kill' || shot.result.type === 'suicide') this.shotsNoKill = 0; else this.shotsNoKill++;
     this.broadcast('shot', { shot: { ...this.lastShot, points: shot.points, shooterTeam: soldier.team } });
 
-    const animMs = Math.min(9000, Math.max(700, (shot.points.length * C.NETWORK_STEP / (C.SHOT_SPEED * this.speed)) * 1000)) / (this.speed === 10 ? 10 : 1);
+    const animMs = animMsOf(shot.points.length, this.speed);
     this.animEnd = Date.now() + (this.headless ? 0 : animMs);
 
     // ---- movimiento tras disparar (spec/01 §2) ----

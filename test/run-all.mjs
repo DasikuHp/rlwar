@@ -86,6 +86,7 @@ try {
   results.push(await run('arreglos: voz verificada de las redes en la sala', [join(ROOT, 'test', 'arreglos-voz.spec.mjs')]));
   results.push(await run('arreglos: rutas que faltaban, retención y shared/ en el navegador', [join(ROOT, 'test', 'arreglos-api.spec.mjs'), BASE]));
   results.push(await run('arreglos (revisión de Fable): red ocupada y evolución que cede el bucle', [join(ROOT, 'test', 'arreglos-ocupada.spec.mjs'), BASE]));
+  results.push(await run('arreglos (revisión de Fable): red ocupada, casos extra', [join(ROOT, 'test', 'arreglos-ocupada-extra.spec.mjs')]));
 } finally {
   server.kill();
 }

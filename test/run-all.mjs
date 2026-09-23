@@ -105,6 +105,7 @@ try {
   results.push(await run('interfaz: evolución, hijos y diferencias (lógica)', [join(ROOT, 'test', 'ui-evolucion.spec.mjs')]));
   results.push(await run('interfaz: trono y duelos (lógica)', [join(ROOT, 'test', 'ui-trono.spec.mjs')]));
   results.push(await run('interfaz: dinastías (lógica)', [join(ROOT, 'test', 'ui-dinastias.spec.mjs')]));
+  results.push(await run('interfaz: verdad, moviola, boletín y memoria (lógica)', [join(ROOT, 'test', 'ui-verdad.spec.mjs')]));
 } finally {
   server.kill();
 }

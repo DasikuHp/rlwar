@@ -219,6 +219,9 @@ invisibles en Cirugía. `referencia.png` ya no está en disco; manda `referencia
 | Proceso | **Lo crítico lo hace Opus en esta sesión** (spec → tests congelados en rojo → código → mutantes), no Fable. **La auditoría de la parte A va primero.** |
 | Tests viejos | `client.spec` y `troops.spec` se retiran con motivo (prueban la portada que se quita) y los sustituyen tests del juego nuevo. |
 | Librerías | **Excepción a "cero dependencias", solo en el navegador**: GSAP 3.15.0, Motion 13.4.2, tsParticles slim 4.4.0 y Lenis 1.3.26, **descargadas** a `public/vendor/` con versión fija, licencia y SHA-256 (sin npm install, sin CDN). |
+| Auditoría P0 (hallazgos) | Informe en `spec/auditoria-p0.md`. Arreglados con test primero: SSE compartida (vistas en blanco), cría guardada con su resultado, duración de entrenos, cuerpos UTF-8. Módulos puros (aviso de hilos, "¿qué pasaría si…?", dureza vacía): "arréglalos todos, siendo un juego de RL no podemos hacer fallos". |
+| Nombres de hijas | "Que no se repita, cambiamos de letra": la cría sigue en la primera letra libre del mundo (2e, 2f…), también en las dinastías (spec/05 §10). |
+| Receta de entreno | `learnCfg` (todo el aprendizaje, solo durante ese entreno) **y además, todo lo propuesto**: programas que bajan solos (tasa, entropía, temperatura, ruido de la evolución), currículo por lecciones con regla de paso, recompensa de práctica (estadísticas aparte), congelar solo en este entreno, examen antes y después, versión antes del entreno y quedarse con la mejor. Fuentes: Unity ML-Agents (`learning_rate_schedule`, `beta_schedule`, `curriculum`/`completion_criteria`) y Huang et al. 2022 (recocido lineal de la tasa en PPO). |
 
 ## 4. Diseño resultante (borrador, se cierra al acabar las preguntas)
 

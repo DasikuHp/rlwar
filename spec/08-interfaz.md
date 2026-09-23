@@ -163,3 +163,12 @@ Aprobados por el usuario ("arréglalo tú"; frases en el navegador "hazlo lo mej
 - Reproducción del fallo que evita: abrir Inicio, Entreno, Evolución, Trono y Dinastías (una SSE cada una, sin
   cerrarse) con una sala espectada en otra pestaña dejaba Verdad y Cirugía en blanco: sus peticiones esperaban turno
   para siempre.
+
+## 12. Lógica de la interfaz corregida (auditoría P0, 2026-09-23)
+- **"¿Qué pasaría si…?"** (`public/js/lab/whatif.js`, `compare(before, after)`): dos decisiones eligen lo mismo si
+  eligen **el mismo candidato**, reconocido por su modo, familia, expresión y ángulo, no por su número `i` (si la
+  red editada cambia su Imaginación, el #7 de antes y el de después son tiros distintos). `before`/`after` siguen
+  dando `{i, family, expr, p, certainty}` del elegido.
+- **Formulario de entreno** (`public/js/lab/training.js`, `trainingBody`): un campo opcional vacío **no se manda**, y
+  el servidor pone su valor por defecto: dureza (2), partidas fantasma (0) y ganancia mínima de la meseta (0,02).
+- **Aviso de hilos**: `threadNote` sigue spec/04 §9.7 (corrección P0).

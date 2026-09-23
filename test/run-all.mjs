@@ -117,6 +117,9 @@ try {
   results.push(await run('auditoría P0: una sola conexión SSE por URL', [join(ROOT, 'test', 'ui-sse.spec.mjs')]));
   results.push(await run('auditoría P0: huecos antiguos del entreno y del trono', [join(ROOT, 'test', 'auditoria-p0.spec.mjs')]));
   results.push(await run('auditoría P0: servidor (cría guardada, duración, cuerpos en UTF-8)', [join(ROOT, 'test', 'auditoria-p0-api.spec.mjs')]));
+  results.push(await run('auditoría P0: huecos de la parte 4 (mutantes que no eran equivalentes)', [join(ROOT, 'test', 'ui-huecos-p0.spec.mjs')]));
+  results.push(await run('auditoría P0: arreglos de la interfaz (hilos, formulario, ¿qué pasaría si…?)', [join(ROOT, 'test', 'ui-arreglos-p0.spec.mjs')]));
+  results.push(await run('auditoría P0: nombres de hijas sin repetir', [join(ROOT, 'test', 'nombres-p0.spec.mjs')]));
 } finally {
   server.kill();
 }

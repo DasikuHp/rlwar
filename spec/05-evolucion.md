@@ -152,6 +152,11 @@ Al recalcular los pesos de un bloque tras cualquier op:
 - `emblem`: `rng() < 0.5` → `rng.int(2³¹)`; si no, XOR de 4 bits al azar (`rng.int(31)` × 4).
 - `ops[]`: `{op, blockId?, wire?:"a→b", before, after, text, undone?, reason?}`. Números del `text`:
   enteros tal cual, decimales con 2 cifras; **todos** aparecen (con ese formato) en `before`/`after`.
+- **Nombres que no se repiten (auditoría P0, 2026-09-23; decisión del usuario "que no se repita, cambiamos de
+  letra")**: con `opts.existingNames` (los nombres de las redes del mundo más los de los hermanos ya creados), la
+  letra empieza en la de `opts.sibling` y avanza hasta la primera que dé un nombre libre (sin distinguir mayúsculas).
+  Ej.: si ya existen Lince Veloz-2a…2d, una cría nueva de 3 hijas da 2e, 2f y 2g. Quien cría (`POST
+  /nets/:id/children`, las generaciones de las dinastías) pasa siempre esos nombres. Sin `existingNames`, como antes.
 - Nombre/id del hijo: base = nombre del padre sin su cola `-<generación><letra>`; hijo `${base}-${gen}${letra}`
   (`letra` = `opts.sibling` 0 → a, 1 → b…); `id = slugify(nombre)`; si choca con `opts.existingIds`, sufijo
   `-2`, `-3`… Firma: `mutate(parent, config, rng, opts = {sibling, existingIds, now})`; `now` = fecha ISO de

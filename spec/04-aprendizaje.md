@@ -231,6 +231,18 @@ plan2 ronda 16): el panel de entreno avisa, con el aprendizaje de la red, de cu�
 usar más: subir "Partidas por lote" (Científico) o entrenar por evolución (`threadNote`, `test/ui-entreno-hilos`).
 `createTrainer` no admite todavía un `learnCfg` propio del entreno (la firma de §9.4 lo cita, pero no está hecho).
 
+**Corrección (auditoría P0, 2026-09-23; P0-M2 y P0-B3).** El tope de partidas a la vez en turbo depende de la parte:
+- gradiente: el lote, `batchGames`;
+- en "los dos", la parte de gradiente: `min(batchGames, both.gradientGamesPerCycle)`, porque dentro de un ciclo no se
+  juegan más partidas de gradiente que las del ciclo (`evo/train.js`, `n = min(hilos, lo que falta del lote, lo que
+  falta del ciclo)`);
+- evolución (y la parte de evolución de "los dos"): las copias de un paso, `2·⌈population/2⌉ × gamesPerCandidate`
+  (las copias van por parejas antitéticas).
+`threadNote(learning, hilos, velocidad)` → `null` si no hay nada que avisar; si no, `{used, asked, text}` con `used` =
+lo que se usa en la parte que más limita, y el texto dice cuántos hilos usa cada parte
+(`todos` si esa parte los llena). Con evolución sola avisa si las copias no llenan los hilos. Los valores que faltan
+en `learning` son los de `DEFAULT_LEARNING`.
+
 ### 9.8 Duración de un entreno (auditoría P0, 2026-09-23)
 `elapsedMs` es el tiempo desde que empezó hasta que acabó (bien, parado o con error); mientras sigue en marcha, hasta
 ahora. Un entreno terminado no cambia su `elapsedMs` aunque se pida más tarde (antes seguía contando para siempre).

@@ -34,11 +34,11 @@ await check('shared/, evo/truth.js y evo/voice.js no usan Node: sin imports node
   assert.equal(r.stdout.trim(), 'ok', r.stderr.split('\n').slice(0, 4).join(' | '));
 });
 
-await check('partidas: cada una deja su meta al lado; listGames la usa; retención de 200 por red (saveGame la aplica)', () => {
+await check('partidas: cada una deja su meta al lado; listGames la usa; retención de 200 por red (saveGameKept la aplica)', () => {
   const ev = (g) => [{ id: 1, t: 0, game: g, turn: 0, type: 'game.start', actor: {}, data: {} }];
   for (let i = 0; i < 205; i++) {
     const gameId = `g-${i}-RET${String(i).padStart(3, '0')}`;
-    assert.equal(store.saveGame({ gameId, kind: 'training', nets: ['ret-a'], ts: 1000 + i }, ev(gameId)).ok, true);
+    assert.equal(store.saveGameKept({ gameId, kind: 'training', nets: ['ret-a'], ts: 1000 + i }, ev(gameId)).ok, true);
   }
   const files = readdirSync(store.gamesDir());
   assert.ok(files.some((f) => f.endsWith('.meta.json')), 'hay ficheros meta');
@@ -46,7 +46,7 @@ await check('partidas: cada una deja su meta al lado; listGames la usa; retenci�
   assert.equal(list.length, 200, 'como mucho 200 por red');
   assert.ok(!list.some((m) => m.ts < 1005), 'se borran las más antiguas');
   assert.ok(!files.includes('g-0-RET000.json') || !readdirSync(store.gamesDir()).includes('g-0-RET000.json'));
-  store.saveGame({ gameId: 'g-9-THRN', kind: 'duel', throne: true, nets: ['ret-a'], ts: 1 }, ev('g-9-THRN'));
+  store.saveGameKept({ gameId: 'g-9-THRN', kind: 'duel', throne: true, nets: ['ret-a'], ts: 1 }, ev('g-9-THRN'));
   assert.ok(store.listGames({ netId: 'ret-a' }).some((m) => m.gameId === 'g-9-THRN'), 'un duelo de trono no se borra');
 });
 

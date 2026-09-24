@@ -120,7 +120,10 @@ await check('diario y cronista: frases con refs al registro que pasan checkPhras
     const r = T.checkPhrase(e, () => events);
     assert.ok(r.ok, `${e.text} → ${JSON.stringify(r.missing)}`);
   }
-  await api('/api/lab/throne/challenge', 'POST', { challenger: netId });
+  // cambio (sesión 5, 2026-09-24, OK del usuario): si ya hay reina (en la batería la deja api-trono), el reto lanza un duelo
+  // que tiene ocupada a esta red; se espera a que acabe para que la bofetada de después la encuentre libre
+  const ch = await api('/api/lab/throne/challenge', 'POST', { challenger: netId });
+  if (ch.status === 202 && ch.body && ch.body.duelId) await until(async () => ['done', 'stopped', 'error'].includes((await api(`/api/lab/duels/${ch.body.duelId}`)).body.status), 120000, 'duelo del reto');
   const c = (await api('/api/lab/chronicle')).body;
   assert.ok(c.entries.some((e) => e.kind === 'reign.start' && /trono/.test(e.text) && e.refs.length), JSON.stringify(c.entries.slice(0, 2)));
 });

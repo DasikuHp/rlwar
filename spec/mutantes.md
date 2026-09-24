@@ -620,3 +620,18 @@ sobrevivió lo cubre `moverse-b` (escrito después, congelado).
 | `server/rooms.js:17–18, 519–541` | 19/22 | 520 y 522 (rama del soldado caído: `stayed` del evento y `ok` devuelto): **huecos anteriores**, ya anotados en R1 (474); 537 `&&`→`\|\|`: equivalente (el último tiro del registro es siempre el del que se mueve) |
 | `shared/reward.js:54–55` | 1/1 | — |
 | `shared/genome.js:43, 46` | 10/10 | — |
+
+## Sesión 5 (2026-09-24): el hueco `train.js:501` con `hilos-b`
+`hilos-b` (congelado): el mismo entreno turbo de 1 hilo (redes lentas, 3 soldados, 8 partidas, semilla 17, lote de 1)
+jugado en el hilo principal del propio test lo bloquea más de 1 000 ms (premisa medida: 2,2–2,6 s) y, por la API, el
+servidor contesta todas las peticiones (estado y salud) en menos de 500 ms desde la partida 1 (medido: 72–107 ms).
+
+| fichero:líneas | cazados | lo que queda |
+|---|---|---|
+| `evo/train.js:499–501` | 6/8 | **501 ×2 cazados** (el hueco queda cerrado). 500: `&&`→`\|\|`, `>`→`>=`, `1`→`0`, `1`→`−1` cazados por la premisa (con un grupo propio de 1 hilo el entreno de 1 hilo sin grupo del servidor deja de ir "aquí mismo", como dice la línea 499); `===`→`!==` y `1`→`2` **equivalentes** con 1 hilo (ya lo eran en la tanda B) |
+
+Por qué `hilos.spec` no lo cazaba siempre: solo cronometra `/api/health`; la petición de estado, que no se mide, se come
+los bloqueos sueltos. Con el código de P1b las partidas lentas duran más (0,4–3,7 s según la carga) y hoy sí lo cazaría,
+pero sin premisa medida. Lo que la medida sin sesgo destapa (no es de la línea 501; pendiente de decisión del usuario): la
+**actualización de pesos va en el hilo principal** ("coordina y aprende"): con redes lentas, 0,85 s por lote de 4; con
+Vidente normal, 0,15–0,45 s; la primera de un entreno, 0,3–0,8 s (en frío y guardando entera la partida de muestra 0).

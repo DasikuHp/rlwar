@@ -14,8 +14,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function run(label, args) {
   return new Promise((resolve) => {
+    const t0 = Date.now();
     const p = spawn(process.execPath, args, { cwd: ROOT, stdio: 'inherit' });
-    p.on('exit', (code) => resolve({ label, ok: code === 0 }));
+    p.on('exit', (code) => resolve({ label, ok: code === 0, s: (Date.now() - t0) / 1000 }));
   });
 }
 
@@ -142,12 +143,13 @@ try {
   results.push(await run('auditoría s3: huecos de los mutantes por la API (cuerpos cortados, 405 de sala)', [join(ROOT, 'test', 'huecos-s3-api.spec.mjs')]));
   results.push(await run('moverse (P1b): solo donde se puede, castigo y destinos a 1,5 u', [join(ROOT, 'test', 'moverse.spec.mjs')]));
   results.push(await run('moverse (P1b): huecos de los mutantes', [join(ROOT, 'test', 'moverse-b.spec.mjs')]));
+  results.push(await run('hilos b: el entreno de 1 hilo no vuelve al hilo principal (train.js:501)', [join(ROOT, 'test', 'hilos-b.spec.mjs')]));
 } finally {
   server.kill();
 }
 
 console.log('\n=== resumen ===');
-for (const r of results) console.log(` ${r.ok ? '✔' : '✘'} ${r.label}`);
+for (const r of results) console.log(` ${r.ok ? '✔' : '✘'} ${r.label} (${r.s.toFixed(1)} s)`);
 const failed = results.filter((r) => !r.ok).length;
 console.log(failed ? `\nFAIL ✘ (${failed})` : '\nTODO OK ✔');
 process.exit(failed ? 1 : 0);

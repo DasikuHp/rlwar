@@ -38,7 +38,7 @@ await check('GET /api/lab/catalog: bloques, ojos con layout, familias, rasgos, r
   for (const f of c.families) assert.ok(f.name && f.explain && Array.isArray(f.params));
   assert.deepEqual(c.traits.map((t) => t.key), ['temperature', 'pulse', 'teamSpirit', 'character']);
   for (const t of c.traits) assert.ok(t.name && t.explain && t.example && t.level);
-  assert.equal(c.rewardTerms.length, 11);
+  assert.equal(c.rewardTerms.length, 12);
   for (const t of c.rewardTerms) assert.ok(t.key && t.name && t.explain && t.personality && t.min === -5 && t.max === 5 && typeof t.default === 'number');
   assert.ok(c.learning.length >= 15 && c.learning.every((l) => l.key && l.name && l.explain && l.level));
   assert.ok(c.learning.some((l) => l.key === 'gradient.lr' && l.min === 1e-5 && l.max === 0.1 && l.default === 0.003));

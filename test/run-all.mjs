@@ -137,6 +137,9 @@ try {
   results.push(await run('auditoría s3: hilos para las partidas sin pantalla del servidor', [join(ROOT, 'test', 'hilos.spec.mjs')]));
   results.push(await run('auditoría s3: normalize idempotente y decisiones que no tocan el genoma', [join(ROOT, 'test', 'normalize.spec.mjs')]));
   results.push(await run('mundos (P2): 3 ranuras, aislados, meta, papelera, arranque y migración', [join(ROOT, 'test', 'mundos.spec.mjs')]));
+  results.push(await run('mundos (P2): huecos de los mutantes (rutas, límites, lo que impide cambiar de mundo, papelera)', [join(ROOT, 'test', 'mundos-b.spec.mjs')]));
+  results.push(await run('auditoría s3: huecos de los mutantes (mapas, lib, geometría, percepción, sala)', [join(ROOT, 'test', 'huecos-s3.spec.mjs')]));
+  results.push(await run('auditoría s3: huecos de los mutantes por la API (cuerpos cortados, 405 de sala)', [join(ROOT, 'test', 'huecos-s3-api.spec.mjs')]));
 } finally {
   server.kill();
 }

@@ -1,3 +1,4 @@
 # Finales de línea estables: las huellas SHA-256 de los tests congelados no deben cambiar por CRLF
 * text=auto eol=lf
 *.bat text eol=crlf
+public/vendor/** -text

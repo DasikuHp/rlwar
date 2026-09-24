@@ -11,7 +11,8 @@ import { mountDynasties } from '../lab/dinastias.js';
 import { mountTruth } from '../lab/verdad.js';
 import { mountDuel } from './espectar.js';
 import { STAGES, parseRoute, hrefOf } from './routes.js';
-import { SETTINGS, loadSettings, saveSettings, reduceMotion } from './ajustes.js';
+import { SETTINGS, SETTINGS_EVENT, loadSettings, saveSettings, reduceMotion } from './ajustes.js';
+import { setFx } from '../render.js';
 import { startBackground, startQueen, lastBeats } from './portada.js';
 import { mountFicha } from './ficha.js';
 import { startFluid } from '../ui/fx/fluid.js';
@@ -37,9 +38,14 @@ function toast(msg, kind = 'info') {
 }
 
 // ---------- ajustes ----------
-let settings = loadSettings();
-const applyMotion = () => { document.body.classList.toggle('reduce', reduceMotion(settings)); setReduce(reduceMotion(settings)); };
-applyMotion();
+// un solo objeto para todo el juego: las vistas lo reciben al montarse y ven cada cambio al momento
+const settings = loadSettings();
+const applySettings = () => {
+  const reduce = reduceMotion(settings);
+  document.body.classList.toggle('reduce', reduce); setReduce(reduce);
+  setFx({ quality: settings.quality, reduce });
+};
+applySettings();
 
 // ---------- mundos ----------
 let worlds = { active: null, worlds: [] };
@@ -65,7 +71,7 @@ let stopBg = null, stopQueen = null, introDone = false;
 async function startLayers() {
   if (stopBg) stopBg();
   const still = reduceMotion(settings) || settings.quality === 'baja';
-  const fluid = still ? null : startFluid($('fluid'), { quality: settings.quality });
+  const fluid = still || settings.fluid === 'apagada' ? null : startFluid($('fluid'), { quality: settings.quality, strength: settings.fluid === 'intensa' ? 1 : 0.4 });
   $('fluid').hidden = !fluid;
   const stopParticles = still ? () => {} : await particles($('pfx'), { quality: settings.quality });
   const COLORS = [[0.05, 0.2, 0.3], [0.14, 0.09, 0.3]];
@@ -92,7 +98,7 @@ function renderMenu() {
   const items = [
     { id: 'cont', name: 'Continuar', sub: last ? `${last.name} · ${last.nets} redes` : 'aún no hay partidas', primary: !!last, disabled: !last },
     { id: 'new', name: 'Nueva partida', sub: full.length === 3 ? 'las 3 ranuras están llenas' : `${3 - full.length} ranura${full.length === 2 ? '' : 's'} libre${full.length === 2 ? '' : 's'}`, primary: !last },
-    { id: 'load', name: 'Cargar', sub: `${full.length} de 3 partidas` },
+    { id: 'load', name: 'Cargar o borrar', sub: `${full.length} de 3 partidas guardadas` },
     { id: 'academy', name: 'Academia', sub: 'llega con el tutorial', disabled: true },
     { id: 'settings', name: 'Ajustes', sub: 'gráficos, movimiento, velocidad' },
   ];
@@ -128,7 +134,7 @@ function clearQueen() { const c = $('queenCanvas'); c.getContext('2d').clearRect
 function openNewDialog() {
   const free = worlds.worlds.filter((w) => w.empty);
   const d = $('dlgNew');
-  if (!free.length) { toast('Las 3 ranuras están llenas: borra una en Cargar para empezar otra partida.', 'error'); return; }
+  if (!free.length) { openLoadDialog('Las 3 ranuras están llenas: borra una partida para empezar otra.'); return; }
   d.innerHTML = `<header><h2 id="dlgNewT">Nueva partida</h2><button type="button" data-close>Cerrar</button></header>
     <form class="body" method="dialog" id="fNew">
       <div class="row"><label class="field">Ranura<select id="nSlot">${free.map((w) => `<option value="${w.n}">Ranura ${w.n}</option>`).join('')}</select></label>
@@ -152,7 +158,7 @@ function openNewDialog() {
   };
   d.showModal();
 }
-function openLoadDialog() {
+function openLoadDialog(note = '') {
   const d = $('dlgLoad');
   const card = (w) => (w.empty
     ? `<article class="slot empty"><h3>Ranura ${w.n}</h3><p>Vacía.</p><div class="acts"><button type="button" data-new>Nueva partida aquí</button></div></article>`
@@ -160,23 +166,24 @@ function openLoadDialog() {
       <dl><dt>Camino</dt><dd>${esc(PATH_NAME[w.path] || w.path)}</dd><dt>Redes</dt><dd>${w.nets}</dd><dt>Partidas</dt><dd>${w.games}</dd>
       <dt>Reina</dt><dd>${w.queen ? esc(w.queen.name) : '—'}</dd><dt>Reinados</dt><dd>${w.reigns}</dd><dt>Última vez</dt><dd>${esc(when(w.lastPlayedAt))}</dd></dl>
       <div class="acts"><button type="button" class="primary" data-open="${w.n}">Abrir</button><button type="button" class="danger" data-del="${w.n}">Borrar…</button></div></article>`);
-  d.innerHTML = `<header><h2 id="dlgLoadT">Cargar partida</h2><button type="button" data-close>Cerrar</button></header>
-    <div class="body"><div class="slots">${worlds.worlds.map(card).join('')}</div><p class="err" id="lErr"></p></div>`;
+  d.innerHTML = `<header><h2 id="dlgLoadT">Cargar o borrar una partida</h2><button type="button" data-close>Cerrar</button></header>
+    <div class="body">${note ? `<p class="g-note warn">${esc(note)}</p>` : ''}<div class="slots">${worlds.worlds.map(card).join('')}</div><p class="err" id="lErr"></p></div>`;
   d.querySelector('[data-close]').onclick = () => d.close();
   for (const b of d.querySelectorAll('[data-open]')) b.onclick = () => openWorld(Number(b.dataset.open), '#crear');
   for (const b of d.querySelectorAll('[data-new]')) b.onclick = () => { d.close(); openNewDialog(); };
-  // borrar: escribiendo el nombre exacto (spec/09 §4); no se pierde, la carpeta va a la papelera
+  // borrar: se confirma con un segundo clic que dice qué pasa (spec/09 §4: el servidor pide el nombre exacto, y se lo
+  // mandamos nosotros); no se pierde del todo: la carpeta va a la papelera
   for (const b of d.querySelectorAll('[data-del]')) b.onclick = () => {
     const w = worlds.worlds.find((x) => x.n === Number(b.dataset.del));
     const acts = b.parentElement;
-    acts.innerHTML = `<label class="field" style="width:100%">Escribe <b>${esc(w.name)}</b> para borrarla (va a la papelera, evo/archivo-borrados)<input data-confirm></label>
-      <button type="button" class="danger" data-really>Borrar</button><button type="button" data-cancel>Cancelar</button>`;
-    acts.querySelector('[data-confirm]').focus();
-    acts.querySelector('[data-cancel]').onclick = () => openLoadDialog();
+    acts.innerHTML = `<p class="g-note" style="width:100%">¿Borrar <b>${esc(w.name)}</b>? Desaparece del juego con sus ${w.nets} redes y sus ${w.games} partidas jugadas. Se guarda una copia en la papelera (<span class="mono">evo/archivo-borrados</span>), por si acaso.</p>
+      <button type="button" class="danger" data-really>Sí, borrarla</button><button type="button" data-cancel>No, dejarla</button>`;
+    acts.querySelector('[data-cancel]').focus();
+    acts.querySelector('[data-cancel]').onclick = () => openLoadDialog(note);
     acts.querySelector('[data-really]').onclick = async () => {
-      const r = await api(`/api/worlds/${w.n}`, 'DELETE', { confirm: acts.querySelector('[data-confirm]').value });
+      const r = await api(`/api/worlds/${w.n}`, 'DELETE', { confirm: w.name });
       if (!r.ok) { $('lErr').textContent = reasonOf(r); return; }
-      toast(`"${w.name}" está en la papelera`);
+      toast(`"${w.name}" borrada (la copia está en la papelera)`);
       await loadWorlds(); renderMenu(); openLoadDialog(); renderQueen();
     };
   };
@@ -185,12 +192,13 @@ function openLoadDialog() {
 function openSettings() {
   const d = $('dlgSettings');
   d.innerHTML = `<header><h2 id="dlgSetT">Ajustes</h2><button type="button" data-close>Cerrar</button></header>
-    <div class="body"><div class="set-grid">${SETTINGS.map((s) => `<span>${s.name}</span><div class="opts" role="radiogroup" aria-label="${s.name}">${s.options.map((o) => `<label><input type="radio" name="${s.key}" value="${o.v}"${settings[s.key] === o.v ? ' checked' : ''}><b>${o.name}</b><small>${esc(o.help)}</small></label>`).join('')}</div>`).join('')}</div>
-    <p class="g-note">Se guardan en este navegador.</p></div>`;
+    <div class="body"><div class="set-grid">${SETTINGS.map((s) => `<span>${s.name}</span><div class="opts" role="radiogroup" aria-label="${s.name}">${s.options.map((o) => `<label><input type="radio" name="${s.key}" value="${o.v}"${settings[s.key] === o.v ? ' checked' : ''}><b>${o.name}</b><small>${esc(o.help)}</small></label>`).join('')}${s.note ? `<p class="g-note">${esc(s.note)}</p>` : ''}</div>`).join('')}</div>
+    <p class="g-note">Se guardan en este navegador y se aplican al momento: la portada, el duelo y los formularios de duelo y trono.</p></div>`;
   d.querySelector('[data-close]').onclick = () => d.close();
   for (const inp of d.querySelectorAll('input[type="radio"]')) inp.onchange = () => {
-    settings = { ...settings, [inp.name]: inp.value };
-    saveSettings(settings); applyMotion();
+    settings[inp.name] = inp.value;
+    saveSettings(settings); applySettings();
+    window.dispatchEvent(new CustomEvent(SETTINGS_EVENT, { detail: { key: inp.name } }));
     if (!$('portada').hidden) { startLayers(); renderQueen(); }
   };
   d.showModal();
@@ -211,7 +219,7 @@ const MOUNT = {
   'entrenar/entrenamiento': (el) => mountTraining(el, { toast }),
   'entrenar/evolucion': (el) => mountEvolution(el, { catalog, toast }),
   'duelo/vivo': (el) => mountDuel(el, { toast, settings }),
-  'trono/trono': (el) => mountThrone(el, { toast }),
+  'trono/trono': (el) => mountThrone(el, { toast, settings }),
   'trono/dinastias': (el) => mountDynasties(el, { toast }),
   'trono/cronica': (el) => mountTruth(el, { catalog, toast, bare: true, tabs: ['cronica'] }),
 };

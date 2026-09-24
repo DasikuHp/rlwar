@@ -34,9 +34,11 @@ const FS = {
 };
 const QUALITY = { alta: { sim: 128, dye: 768, iters: 20 }, media: { sim: 96, dye: 512, iters: 12 } };
 
-export function startFluid(canvas, { quality = 'alta' } = {}) {
+// `strength` (0..1): cuánta tinta echa cada empujón y cuánto dura; 1 = a plena potencia, 0,4 = suave (Ajustes)
+export function startFluid(canvas, { quality = 'alta', strength = 1 } = {}) {
   const Q = QUALITY[quality];
   if (!Q) return null;
+  const K = Math.max(0.05, Math.min(1, strength));
   const opts = { alpha: false, antialias: false, depth: false, stencil: false, preserveDrawingBuffer: false };
   let gl = canvas.getContext('webgl2', opts);
   const gl2 = !!gl;
@@ -116,11 +118,12 @@ export function startFluid(canvas, { quality = 'alta' } = {}) {
     const aspect = canvas.width / canvas.height;
     let u = use('splat');
     tex(u.uTarget, vel.read); gl.uniform1f(u.aspect, aspect); gl.uniform2f(u.point, x, 1 - y);
-    gl.uniform3f(u.color, dx * 5000, -dy * 5000, 0); gl.uniform1f(u.radius, radius);
+    const push = 5000 * (0.35 + 0.65 * K);
+    gl.uniform3f(u.color, dx * push, -dy * push, 0); gl.uniform1f(u.radius, radius);
     draw(vel.write); vel.swap();
     u = use('splat');
     tex(u.uTarget, dye.read); gl.uniform1f(u.aspect, aspect); gl.uniform2f(u.point, x, 1 - y);
-    gl.uniform3f(u.color, rgb[0], rgb[1], rgb[2]); gl.uniform1f(u.radius, radius);
+    gl.uniform3f(u.color, rgb[0] * K, rgb[1] * K, rgb[2] * K); gl.uniform1f(u.radius, radius);
     draw(dye.write); dye.swap();
   }
 
@@ -132,7 +135,7 @@ export function startFluid(canvas, { quality = 'alta' } = {}) {
     for (let i = 0; i < Q.iters; i++) { u = use('pressure'); tex(u.uPressure, pres.read); tex(u.uDivergence, div); draw(pres.write); pres.swap(); }
     u = use('gradient'); tex(u.uPressure, pres.read); tex(u.uVelocity, vel.read); draw(vel.write); vel.swap();
     u = use('advect'); tex(u.uVelocity, vel.read); tex(u.uSource, vel.read); gl.uniform1f(u.dt, dt); gl.uniform1f(u.dissipation, 0.25); draw(vel.write); vel.swap();
-    u = use('advect'); tex(u.uVelocity, vel.read); tex(u.uSource, dye.read); gl.uniform1f(u.dt, dt); gl.uniform1f(u.dissipation, 0.9); draw(dye.write); dye.swap();
+    u = use('advect'); tex(u.uVelocity, vel.read); tex(u.uSource, dye.read); gl.uniform1f(u.dt, dt); gl.uniform1f(u.dissipation, 0.9 + 1.4 * (1 - K)); draw(dye.write); dye.swap();
     u = use('display'); tex(u.uTexture, dye.read); gl.uniform3f(u.base, 6 / 255, 10 / 255, 20 / 255); draw(null);
   }
 

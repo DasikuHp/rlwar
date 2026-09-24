@@ -1,11 +1,12 @@
 // Etapa 3 · Duelo en vivo (P5): lanzar un duelo entre dos redes y mirarlo pensar. Sin barra de disparo: aquí nadie dispara
 // a mano. Plano con render.js, candidatos y decisión de live.js (lo que la red pensó de verdad) y el registro de la sala.
 // También vale para espectar cualquier sala por su código (#room=CODE, AGENTS.md).
-import { initRender, startShot, R } from '../render.js';
+import { initRender, startShot, R, resetRoom, say, expect, fnText, TEAM_COLOR } from '../render.js';
 import { overlay, topCandidates, confidenceView, attributionPhrase } from '../live.js';
 import { hub } from '../ui/sse.js';
 import { api, reasonOf } from '../lab/api.js';
 import { patch } from '../ui/patch.js';
+import { SETTINGS_EVENT } from './ajustes.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const f2 = (v) => (typeof v === 'number' ? (Math.round(v * 100) / 100).toFixed(2) : '—');
@@ -29,6 +30,7 @@ export function mountDuel(root, { toast, settings }) {
     <div class="stage-canvas">
       <div class="bar"><span class="who" id="dWho">Ningún duelo en directo</span><span class="mono dim" id="dTurn"></span></div>
       <canvas id="dCanvas" aria-label="Plano de la partida"></canvas>
+      <div class="fnbar" id="dFn" role="status" aria-live="polite"><span class="dim">Aquí sale la función de cada tiro, como en el original, y lo que consigue.</span></div>
     </div>
     <aside class="right">
       <section><h3>Candidatos y decisión</h3><div class="brain" id="dBrain"><p class="empty">Cuando una red piense, aquí verás sus 5 mejores candidatos y cuál eligió, con su certeza.</p></div></section>
@@ -44,10 +46,11 @@ export function mountDuel(root, { toast, settings }) {
   function renderForm() {
     const opt = (sel) => nets.map((n) => `<option value="${esc(n.id)}"${n.id === sel ? ' selected' : ''}>${esc(n.name)}</option>`).join('');
     if (nets.length < 2) { patch($('dForm'), '<p class="empty">Hacen falta dos redes. Crea otra en <a href="#crear">1 · Crear</a> (desde una plantilla tarda un clic).</p>'); return; }
-    const speed = settings.speed === 'x1' ? 'x1' : 'x10';
+    const speed = settings.speed;
+    const SPEEDS = [['x10', 'x10 — en directo, rápido'], ['x1', 'x1 — como el original'], ['turbo', 'turbo — sin pantalla, solo el resultado']];
     patch($('dForm'), `<label class="field">Red A<select id="dA">${opt(nets[0].id)}</select></label>
       <label class="field">Red B<select id="dB">${opt(nets[1].id)}</select></label>
-      <label class="field">Velocidad<select id="dSpeed"><option value="x10"${speed === 'x10' ? ' selected' : ''}>x10 — en directo, rápido</option><option value="x1"${speed === 'x1' ? ' selected' : ''}>x1 — como el original</option></select></label>
+      <label class="field">Velocidad<select id="dSpeed">${SPEEDS.map(([v, t]) => `<option value="${v}"${speed === v ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
       <label class="field">Cómo aprenden<select id="dLearn">${LEARNING.map((l) => `<option value="${l.v}">${l.name}</option>`).join('')}</select></label>
       <p class="dim" id="dLearnHelp">${esc(LEARNING[0].help)}</p>
       <button type="button" class="primary" id="dGo">Empezar duelo (6 partidas)</button>`);
@@ -90,21 +93,22 @@ export function mountDuel(root, { toast, settings }) {
       <span class="dim">Partidas</span><b>${d.games.length} / 6</b><span class="dim">Diferencia de bajas</span><b>${d.killDiff > 0 ? '+' : ''}${d.killDiff ?? 0}</b>`);
   }
 
+  window.addEventListener(SETTINGS_EVENT, (e) => { if (e.detail && e.detail.key === 'speed' && nets.length >= 2) renderForm(); });
   $('dList').addEventListener('click', (e) => { const a = e.target.closest('[data-duel]'); if (!a) return; e.preventDefault(); follow = a.dataset.duel; loadDuels(); });
 
   // ---- la sala en directo ----
   function watchRoom(code) {
     for (const off of offRoom) off();
     room = code;
-    R.state = null; R.shots = []; R.current = null; R.think = null; R.bubbles = [];
+    resetRoom(); held = null; chat = [];
     $('dLog').innerHTML = ''; $('dBrain').innerHTML = '<p class="empty">Esperando a que una red piense…</p>';
     const url = `/api/rooms/${code}/events`;
     offRoom = [
       hub.on(url, 'hello', onState), hub.on(url, 'state', onState),
-      hub.on(url, 'shot', (d) => startShot(d.shot)),
+      hub.on(url, 'shot', (d) => onShot(d.shot)),
       hub.on(url, 'decision', (d) => onDecision(d.decision)),
       hub.on(url, 'move', () => { if (R.think && R.think.kind === 'move') R.think = null; }),
-      hub.on(url, 'chat', (d) => { if (R.state) R.state.chat = d.chat; renderLog(d.chat); bubbles(d.chat); }),
+      hub.on(url, 'chat', (d) => { if (R.state) R.state.chat = d.chat; chat = d.chat || []; logSoon(); bubbles(d.chat); }),
     ];
     api(`/api/rooms/${code}/state`).then((r) => {
       if (r.ok) { onState(r.body); return; }
@@ -120,22 +124,70 @@ export function mountDuel(root, { toast, settings }) {
     const alive = (team) => st.soldiers.filter((s) => s.alive && s.team === team).length;
     patch($('dWho'), `<b style="color:#4fd1ff">${side('left')}</b> <span class="mono">${alive('left')} vs ${alive('right')}</span> <b style="color:#ff9f43">${side('right')}</b> <span class="dim">· sala ${esc(st.code)}${st.phase === 'over' ? ' · acabada' : ''}</span>`);
     $('dTurn').textContent = st.stats ? `disparo ${st.stats.shots}` : '';
-    renderLog(st.chat);
+    chat = st.chat || chat; logSoon();
   }
-  function renderLog(chat) {
+
+  // ---- registro, como el chat del original: el nombre en negrita y del color de su bando ----
+  // Lo que pasa con un tiro (💥, 🪨…) y lo que la red dice al dispararlo se escriben en el servidor a la vez que el tiro;
+  // aquí se guardan hasta que su curva llega al final, para que el registro no cuente el resultado antes de verlo.
+  let chat = [], held = null, logTimer = null;
+  const logSoon = () => { clearTimeout(logTimer); logTimer = setTimeout(renderLog, 60); }; // el tiro llega justo detrás del chat
+  function colorNames(html) {
+    const st = R.state;
+    if (!st) return html;
+    let out = html;
+    for (const p of [...st.players].sort((a, b) => b.name.length - a.name.length)) {
+      const n = esc(p.name);
+      if (n) out = out.split(n).join(`<b style="color:${TEAM_COLOR[p.team] || '#fff'}">${n}</b>`);
+    }
+    return out;
+  }
+  function renderLog() {
     const el = $('dLog');
     const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
-    patch(el, (chat || []).filter((c) => c.kind !== 'say').slice(-60).map((c) => `<li data-key="${esc(`${c.t}|${c.text}`)}">${esc(c.text)}</li>`).join(''));
+    const shown = chat.filter((c) => !(held && c.t >= held.from && c.t <= held.to)).slice(-60);
+    patch(el, shown.map((c) => `<li data-key="${esc(`${c.t}|${c.text}`)}" class="${c.playerId ? 'said' : 'sys'}${c.kind === 'think' ? ' think' : ''}">${colorNames(esc(c.text))}</li>`).join(''));
     if (atEnd) el.scrollTop = el.scrollHeight; // si estás leyendo más arriba, no te lo mueve
   }
+  // ---- la barra de la función, como el campo "y =" del original: quién tira, qué función y qué consigue ----
+  const RESULT = { obstacle: '🪨 choca con un obstáculo', wall: '🧱 se sale del plano', invalid: '❌ la función no vale ahí y explota', steep: '📐 se pone vertical y explota' };
+  function resultText(shot) {
+    const r = shot.result || {}, st = R.state;
+    const nameOfSoldier = (id) => { const s = st && st.soldiers.find((x) => x.id === id); const p = s && st.players.find((q) => q.id === s.ownerId); return p ? p.name : id; };
+    const hits = (r.hits || []).map((h) => (typeof h === 'string' ? h : h.soldierId));
+    const shooter = st && st.soldiers.find((s) => s.id === shot.soldierId);
+    const foes = hits.filter((id) => { const s = st && st.soldiers.find((x) => x.id === id); return s && shooter && s.team !== shooter.team; });
+    const mates = hits.length - foes.length;
+    const parts = [];
+    if (foes.length) parts.push(`💥 elimina a ${foes.map(nameOfSoldier).join(' y a ')}`);
+    if (mates) parts.push(`💀 ${foes.length ? 'y a' : 'alcanza a'} ${mates === 1 ? 'un aliado' : `${mates} aliados`}`);
+    return parts.length ? parts.join(' ') : RESULT[r.type] || '💤 se queda sin recorrido';
+  }
+  function fnBar(shot, landedYet) {
+    const st = R.state;
+    const p = st && st.players.find((q) => q.id === shot.playerId);
+    const color = TEAM_COLOR[shot.shooterTeam] || '#fff';
+    patch($('dFn'), `<b class="fn-who" style="color:${color};border-color:${color}">${esc(p ? p.name : '?')}</b>
+      <span class="fn-expr mono" style="color:${color}">${esc(fnText(shot))}</span>
+      <span class="fn-res">${landedYet ? esc(resultText(shot)) : '<span class="dim">trazando…</span>'}</span>`);
+  }
+  function onShot(shot) {
+    startShot(shot); // si el anterior seguía trazándose, se completa aquí (y suelta lo suyo del registro)
+    held = { from: shot.ts - 40, to: shot.ts + 5 };
+    fnBar(shot, false);
+    logSoon();
+  }
+  R.onLanded = (shot) => { if (!root.isConnected) return; held = null; fnBar(shot, true); renderLog(); };
+
+  // ---- bocadillos: lo que dice cada red sale sobre su soldado, después de su función (ui/bubbles.js) ----
   const seenSay = new Set();
-  function bubbles(chat) {
-    const now = Date.now();
-    for (const c of chat || []) {
+  function bubbles(list) {
+    for (const c of list || []) {
       if (c.kind !== 'say' || !c.soldierId) continue;
       const key = `${c.t}|${c.text}`; if (seenSay.has(key)) continue;
       seenSay.add(key); if (seenSay.size > 200) seenSay.clear();
-      R.bubbles.push({ soldierId: c.soldierId, text: c.text, level: c.level || null, until: now + 5000 }); R.lastSayTs = now;
+      const cut = c.text.indexOf(': ');
+      say({ soldierId: c.soldierId, text: cut >= 0 && cut < 40 ? c.text.slice(cut + 2) : c.text, level: c.level || null });
     }
   }
   async function onDecision(d) {
@@ -145,6 +197,7 @@ export function mountDuel(root, { toast, settings }) {
     const ov = overlay(d);
     R.think = ov ? { ...ov, team: sol ? sol.team : 'left', until: Date.now() + (ov.kind === 'move' ? 4000 : 15000) } : null;
     if (d.phase !== 'shoot') return;
+    expect(d.soldierId);
     const owner = sol && st.players.find((p) => p.id === sol.ownerId);
     const c = confidenceView(d.confidence);
     $('dBrain').innerHTML = `<p><b>${esc(owner ? owner.name : d.netId)}</b> <span class="dim">antes de disparar</span></p>

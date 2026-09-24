@@ -4,7 +4,7 @@
 import * as M from './model.js';
 import { emblemSVG } from './emblem.js';
 import { api, reasonOf } from './api.js';
-import { validate, repair, countParams, outDims } from '/shared/genome.js';
+import { validate, repair, countParams, outDims, newGenome } from '/shared/genome.js';
 import { makeRng } from '/shared/rng.js';
 import * as W from './whatif.js';
 
@@ -32,6 +32,9 @@ const IMAGINATION = (limits) => [
   { key: 'adaptive', name: 'Adaptativa', type: 'bool', level: 'artesano',
     explain: 'En cada sueño, el peso de cada familia se acerca a lo que de verdad elige: peso ← 0,9·peso + 0,1·uso.', example: 'Si casi siempre elige parábolas, cada vez imagina más parábolas.' },
 ];
+// "Desde cero" va la primera de las plantillas: una red sin bloques que montas tú (sesión 8: el tutorial empieza así)
+const BLANK = { key: 'blank', name: '✳️ Desde cero', paramCount: 0,
+  why: 'Sin ningún bloque: tú decides qué ve, cómo piensa y qué hace. Para poder jugar necesita, como mínimo, Candidatos (los tiros que imagina) unidos a Elegir (el que escoge uno).' };
 const FAMILY_WEIGHT = { key: 'weight', name: 'Peso', type: 'number', min: 0, max: 100, step: 1, explain: 'Parte de los tiros imaginados que salen de esta familia (proporcional al peso).' };
 
 export function mountEditor(root, { catalog, toast }) {
@@ -118,7 +121,23 @@ export function mountEditor(root, { catalog, toast }) {
       S.panelTab = 'issues'; render(); toast(reasonOf(r), 'error');
     }
   }
+  // desde cero: una red sin ningún bloque (válida para guardar; para jugar le faltará Elegir, y el editor lo dice)
+  const slug = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 28);
+  async function createBlank(name) {
+    const base = slug(name).length >= 3 ? slug(name) : 'mi-red';
+    const taken = new Set(S.nets.map((n) => n.id));
+    let id = base;
+    for (let k = 2; taken.has(id); k++) id = `${base}-${k}`;
+    const genome = newGenome({ id, name: String(name || 'Mi red').slice(0, 32), blocks: [], wires: [] }, makeRng((Math.random() * 2 ** 31) >>> 0));
+    const r = await api('/api/lab/nets', 'POST', { genome });
+    if (!r.ok) { toast(reasonOf(r), 'error'); return; }
+    S.tplOpen = null;
+    await loadNets();
+    await open(r.body.id);
+    toast(`Red en blanco creada: ${genome.name}. Empieza por los Ojos (qué ve).`);
+  }
   async function createFromTemplate(key, name) {
+    if (key === 'blank') { await createBlank(name); return; }
     const r = await api('/api/lab/nets', 'POST', { template: key, name });
     if (!r.ok) { toast(reasonOf(r), 'error'); return; }
     S.tplOpen = null;
@@ -205,11 +224,11 @@ export function mountEditor(root, { catalog, toast }) {
         <span class="net-nm">${esc(n.name)}</span>
         <span class="net-sub">gen ${esc(n.generation ?? 0)}${n.stats && Number.isFinite(n.stats.games) ? ` · ${n.stats.games} partidas` : ''}${n.isQueen ? ' · reina' : ''}${n.training ? ' · entrenando' : ''}</span>
       </button></li>`).join('')}</ul>` : '<p class="empty">Aún no tienes redes. Crea la primera desde una plantilla.</p>';
-    const tpls = S.templates.map((t) => `
+    const tpls = [BLANK, ...S.templates].map((t) => `
       <li class="tpl ${S.tplOpen === t.key ? 'open' : ''}">
-        <button type="button" class="tpl-head" data-tpl="${esc(t.key)}" aria-expanded="${S.tplOpen === t.key}"><span>${esc(t.name)}</span><small>${t.paramCount.toLocaleString('es-ES')} pesos</small></button>
+        <button type="button" class="tpl-head" data-tpl="${esc(t.key)}" aria-expanded="${S.tplOpen === t.key}"><span>${esc(t.name)}</span><small>${t.paramCount ? `${t.paramCount.toLocaleString('es-ES')} pesos` : 'sin bloques'}</small></button>
         <p>${esc(t.why)}</p>
-        ${S.tplOpen === t.key ? `<form class="tpl-form" data-create="${esc(t.key)}"><label>Nombre <input name="name" value="${esc(t.name.replace(/^\S+\s/, ''))}" maxlength="32" required></label><button class="primary" type="submit">Crear red</button></form>` : ''}
+        ${S.tplOpen === t.key ? `<form class="tpl-form" data-create="${esc(t.key)}"><label>Nombre <input name="name" value="${esc(t.key === 'blank' ? 'Mi red' : t.name.replace(/^\S+\s/, ''))}" maxlength="32" required></label><button class="primary" type="submit">Crear red</button></form>` : ''}
       </li>`).join('');
     r.innerHTML = `${tabs}
       <h3>Tus redes <small>${S.nets.length}</small></h3>${nets}

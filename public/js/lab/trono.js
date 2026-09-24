@@ -18,9 +18,12 @@ const LEARN = [
 const SPEED = [['turbo', 'turbo', 'sin pantalla: el marcador al instante'], ['x10', 'x10', 'salas visibles a 10 veces la velocidad'], ['x1', 'x1', 'salas normales, con bocadillos']];
 const STATUS = { running: 'en juego', done: 'terminado', stopped: 'parado', error: 'con error' };
 
-export function mountThrone(root, { toast }) {
-  const S = { nets: [], throne: null, duels: [], genealogy: null, sel: null, ch: { challenger: '', learning: 'mix', speed: 'turbo' }, duel: { a: '', b: '', learning: 'mix', speed: 'turbo', soldiers: 'random', seed: '' } };
+export function mountThrone(root, { toast, settings = null }) {
+  // la velocidad que sale marcada es la de Ajustes ("Velocidad de duelos y retos"); si la cambias allí, cambia aquí
+  const speed0 = () => (settings && ['turbo', 'x10', 'x1'].includes(settings.speed) ? settings.speed : 'turbo');
+  const S = { nets: [], throne: null, duels: [], genealogy: null, sel: null, ch: { challenger: '', learning: 'mix', speed: speed0() }, duel: { a: '', b: '', learning: 'mix', speed: speed0(), soldiers: 'random', seed: '' } };
   let es = null, timer = null;
+  if (typeof window !== 'undefined') window.addEventListener('gw:settings', (e) => { if (e.detail && e.detail.key === 'speed') { S.ch.speed = speed0(); S.duel.speed = speed0(); render(); } });
   const net = (id) => S.nets.find((n) => n.id === id);
   const nameOf = (id) => (net(id) ? net(id).name : id);
 

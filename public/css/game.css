@@ -82,7 +82,7 @@ dialog.g-dlg::backdrop { background: #02050dcc; backdrop-filter: blur(3px); }
 .g-dlg .body { padding: 18px 22px 22px; display: grid; gap: 16px; max-height: 76vh; overflow-y: auto; }
 .g-dlg .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 body.game label.field { display: grid; gap: 4px; color: var(--dim); font-size: 13px; }
-body.game label.field select, body.game label.field input { color: var(--text); }
+body.game label.field select, body.game label.field input { color: var(--text); width: 100%; min-width: 0; max-width: 100%; }
 .g-dlg .err { color: var(--bad); min-height: 1.2em; }
 .slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
 .slot { border: 1px solid var(--line-2); border-radius: 12px; padding: 16px; background: var(--panel-2); display: grid; gap: 8px; align-content: start; min-height: 220px; }
@@ -109,7 +109,11 @@ body.game label.field select, body.game label.field input { color: var(--text); 
 .duel-live aside { border-right: 1px solid var(--line); padding: 14px; overflow-y: auto; display: grid; gap: 12px; align-content: start; background: #070d1ccc; }
 .duel-live aside.right { border-right: 0; border-left: 1px solid var(--line); }
 .duel-live h3 { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .14em; color: var(--dim); }
-.duel-live .stage-canvas { position: relative; min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.duel-live .stage-canvas { position: relative; min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.fnbar { display: flex; gap: 12px; align-items: center; min-height: 44px; padding: 8px 14px; border-top: 1px solid var(--line); background: #070d1ccc; font-size: 14px; }
+.fnbar .fn-who { font-weight: 500; border: 1px solid; border-radius: 6px; padding: 1px 8px; font-size: 12.5px; white-space: nowrap; }
+.fnbar .fn-expr { font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.fnbar .fn-res { white-space: nowrap; color: var(--text); }
 .duel-live .bar { display: flex; gap: 12px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .duel-live .bar .who { flex: 1; }
 .duel-live canvas { width: 100%; height: 100%; display: block; }
@@ -131,7 +135,9 @@ body.game label.field select, body.game label.field input { color: var(--text); 
 .b-cands .p { text-align: right; font-family: var(--mono); }
 .b-say { font-style: italic; }
 .log { list-style: none; display: grid; gap: 3px; font-size: 12.5px; color: var(--dim); max-height: 38vh; overflow-y: auto; }
-.log li b { color: var(--text); font-weight: 500; }
+.log li b { color: var(--text); font-weight: 600; }
+.log li.said { color: var(--text); }
+.log li.think { color: var(--dim); font-style: italic; }
 .score { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; font-size: 13px; }
 .score b { font-family: var(--mono); font-weight: 400; }
 
@@ -184,6 +190,7 @@ body.game .queen-name button.link:hover { color: var(--cyan); }
 /* ---------- aviso y mensajes ---------- */
 body.game #toast { z-index: 40; }
 .g-note { color: var(--dim); font-size: 13px; }
+.g-note.warn { color: var(--gold); }
 
 @media (max-width: 1400px) {
   .g-stages a { padding: 7px 9px; letter-spacing: .08em; }

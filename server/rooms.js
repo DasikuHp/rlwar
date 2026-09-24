@@ -452,7 +452,7 @@ export class Room {
     this.log(message);
     this.voiceAfterShot(shooter, soldier, shotEventId);
 
-    this.lastShot = { playerId, soldierId: soldier.id, expr: String(expr).slice(0, 200), mode, result: shot.result, ts: Date.now() };
+    this.lastShot = { playerId, soldierId: soldier.id, expr: String(expr).slice(0, 200), mode, angle: mode === C.MODES.ODE2 ? angle : null, result: shot.result, ts: Date.now() };
     clearTimeout(this.timer);
     this.history.push(String(expr));
     if (this.history.length > 40) this.history.shift();

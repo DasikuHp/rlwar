@@ -1,18 +1,31 @@
-// Editor de redes (parte 4, spec/prompt-opus-ui.md §3.1; spec/08 §1, §4 y §7). Bloques por cables sobre el plano,
-// tres niveles de vista, errores de validate en español con su ejemplo junto al bloque culpable, importar y exportar.
-// La validación y el reparto de pesos usan el MISMO código que el servidor (/shared/genome.js, spec/08 §9.3).
+// Etapa 1 · Crear: el editor de redes (P6, plan ronda 17; spec/08 §1, §4 y §7). Distribución del panel 1 del mockup:
+// plantillas y bloques a la izquierda, el lienzo por columnas en el orden de la señal (ENTRADAS · INSTINTO · MEMORIA ·
+// SALIDAS según lo que haya), y abajo "Configuración de la capa" y "¿Qué hace esta capa?" junto al banco de pruebas.
+// Las 8 mejoras: banco de pruebas en vivo (con tu propia escena), qué ve tu red, probar ya contra otra red, nervios que
+// laten con la señal real, deshacer/rehacer y versiones con sus diferencias, arreglar con un clic, y los pesos del
+// bloque (que abren el Quirófano de la ficha). Sesión 8: todo más explicado, y si algo no se puede, una pista de dónde
+// podría ir o de qué le falta a tu red.
+// La validación, el reparto de pesos y la decisión del banco usan el MISMO código que el servidor (/shared, spec/08 §9.3).
 import * as M from './model.js';
+import * as Hn from './hints.js';
+import * as Bn from './bench.js';
+import * as Hi from './history.js';
 import { emblemSVG } from './emblem.js';
 import { api, reasonOf } from './api.js';
 import { validate, repair, countParams, outDims, newGenome } from '/shared/genome.js';
 import { makeRng } from '/shared/rng.js';
-import * as W from './whatif.js';
+import { patch } from '../ui/patch.js';
+import { popIn } from '../ui/fx/anim.js';
+import { initRender, startShot, R, resetRoom, say, expect, fnText, TEAM_COLOR } from '../render.js';
+import { hub } from '../ui/sse.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = (v) => (typeof v === 'number' ? (Number.isInteger(v) ? String(v) : String(Math.round(v * 1e6) / 1e6)) : String(v));
+const f2 = (v) => (Number.isFinite(v) ? (Math.round(v * 100) / 100).toFixed(2) : '—');
+const pct = (v) => `${Math.round(v * 100)} %`;
 const FAMILY_ES = { line: 'recta', parabola: 'parábola', sine: 'seno', ode1: "EDO (y')", artillery: 'artillería', wild: 'salvaje' };
 const STREAM = { ctx: 'contexto', cand: 'candidatos', move: 'destinos', mix: 'candidatos y destinos juntos' };
-const LS = { level: 'gw.lab.level', pos: (id) => `gw.lab.pos.${id}` };
+const LS = { level: 'gw.lab.level', pos: (id) => `gw.lab.pos.${id}`, bottom: 'gw.ed.bottom' };
 const store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* sin almacenamiento: solo se pierde la posición */ } },
@@ -20,6 +33,7 @@ const store = {
 };
 const clone = (v) => JSON.parse(JSON.stringify(v));
 const sameArr = (a, b) => Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((v, i) => v === b[i]);
+const when = (ms) => (ms ? new Date(ms).toLocaleString('es-ES', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
 
 // Imaginación (spec/03 §5, spec/05 §6): el catálogo trae las familias; n, objetivos y "adaptativa" se explican aquí
 const IMAGINATION = (limits) => [
@@ -33,26 +47,46 @@ const IMAGINATION = (limits) => [
     explain: 'En cada sueño, el peso de cada familia se acerca a lo que de verdad elige: peso ← 0,9·peso + 0,1·uso.', example: 'Si casi siempre elige parábolas, cada vez imagina más parábolas.' },
 ];
 // "Desde cero" va la primera de las plantillas: una red sin bloques que montas tú (sesión 8: el tutorial empieza así)
-const BLANK = { key: 'blank', name: '✳️ Desde cero', paramCount: 0,
+const BLANK = { key: 'blank', name: '✳️ Desde cero', short: 'sin bloques: la montas tú', paramCount: 0,
   why: 'Sin ningún bloque: tú decides qué ve, cómo piensa y qué hace. Para poder jugar necesita, como mínimo, Candidatos (los tiros que imagina) unidos a Elegir (el que escoge uno).' };
+const TPL_SHORT = { sniper: 'solo geometría, sin trampas', turtle: 'recuerda y se cubre', seer: 've el futuro de cada tiro', empty: 'lo mínimo que dispara' };
 const FAMILY_WEIGHT = { key: 'weight', name: 'Peso', type: 'number', min: 0, max: 100, step: 1, explain: 'Parte de los tiros imaginados que salen de esta familia (proporcional al peso).' };
+// títulos de columna del mockup: lo que hay en cada columna, en mayúsculas, con su pregunta
+const COLTITLE = { eyes: ['Entradas', '¿Qué ve?'], instinct: ['Instinto', '¿Cómo piensa?'], memory: ['Memoria', '¿Qué recuerda?'], out: ['Salidas', '¿Qué hace?'] };
+// medidas del lienzo: tarjetas más altas que las de model.js (llevan qué hacen y sus neuronas); se escala su colocación
+const CARD = { w: 176, h: 70 }, COL_W = 232, ROW_K = 92 / 66, PAD = { x: 24, y: 78 };
+const GENES = [['traits', 'Carácter'], ['reward', 'Recompensa'], ['learning', 'Aprendizaje'], ['imagination', 'Imaginación']];
+const PTABS = [['capa', 'Capa'], ['genes', 'Genes'], ['ve', 'Qué ve tu red'], ['versiones', 'Versiones'], ['avisos', 'Avisos']];
 
 export function mountEditor(root, { catalog, toast }) {
   const S = {
     level: M.LEVELS.includes(store.get(LS.level, 'aprendiz')) ? store.get(LS.level, 'aprendiz') : 'aprendiz',
-    nets: [], templates: [], railTab: 'nets', panelTab: 'block',
-    netId: null, saved: null, genome: null, check: null, forPlay: null, dims: null, streams: {}, issues: null, params: null,
-    server: null, sel: null, pos: {}, zoom: 1, fit: true, wi: { scene: 'abierto', seed: 1, res: null, busy: false, note: null }, dirty: false, pending: null, tplOpen: null, confirm: null,
+    nets: [], templates: [], panelTab: 'capa', genesTab: 'traits',
+    netId: null, saved: null, base: null, genome: null, check: null, forPlay: null, dims: null, streams: {}, issues: null, params: null,
+    server: null, sel: null, pos: {}, zoom: 1, fit: true, dirty: false, pending: null, tplOpen: null, confirm: null,
+    hist: Hi.createHistory(null), menu: false, slotEl: null, palHover: null, link: null, folded: store.get('gw.ed.folded', false) === true,
+    bench: { scene: 'abierto', custom: null, phase: 'shoot', seed: 1, now: null, saved: null, savedKey: null, sig: null, pick: null, busy: false },
+    versions: { list: null, open: null, diff: null, ver: null, busy: false },
+    probe: null,
   };
-  let drag = null, link = null, suppressClick = false;
+  let drag = null, suppressClick = false, benchTimer = null;
 
   root.innerHTML = `
-    <header class="ed-head" id="edHead"></header>
-    <aside class="ed-rail" id="edRail"></aside>
+    <div class="ed-slot-fallback" id="edHead"></div>
+    <aside class="ed-rail" id="edRail" aria-label="Plantillas y bloques"></aside>
+    <div class="ed-tools" id="edTools"></div>
     <div class="ed-board" id="edBoard" aria-label="Lienzo de la red"></div>
-    <section class="ed-panel" id="edPanel" aria-label="Ajustes"></section>
+    <div class="ed-split" id="edSplit" role="separator" aria-orientation="horizontal" aria-label="Arrastra para dar más sitio al lienzo o a los ajustes" tabindex="0"></div>
+    <section class="ed-panel" id="edPanel" aria-label="La capa elegida y los genes"></section>
+    <section class="ed-bench" id="edBench" aria-label="Banco de pruebas"></section>
+    <div class="ed-probe" id="edProbe" hidden></div>
     <div class="ed-modal" id="edModal" hidden></div>`;
   const $ = (id) => root.querySelector('#' + id);
+  // alto del panel de abajo: lo último que elegiste, o un tercio de la ventana; plegado, solo sus pestañas
+  const bottomH = () => Math.max(180, Math.min(620, store.get(LS.bottom, null) ?? Math.round(Math.min(262, (typeof innerHeight === 'number' ? innerHeight : 800) * 0.34))));
+  const applyBottom = () => root.style.setProperty('--ed-bottom', S.folded ? '42px' : `${bottomH()}px`);
+  applyBottom();
+  function fold(v) { S.folded = v; store.set('gw.ed.folded', v); applyBottom(); renderPanel(); if (S.fit) setTimeout(renderBoard, 30); }
 
   // ---------- estado del genoma ----------
   function recheck() {
@@ -64,21 +98,29 @@ export function mountEditor(root, { catalog, toast }) {
     S.streams = M.streams(g, catalog);
     S.issues = M.issuesOf(S.check);
   }
-  // pesos: los guardados se conservan si su forma sigue valiendo; si no, repair pone pesos nuevos (semilla = emblema)
+  // pesos: los guardados se conservan si su forma sigue valiendo; si no, repair pone pesos nuevos (semilla = emblema).
+  // opts: {select, partial, label, key} — label y key van al historial (key junta los cambios seguidos de un deslizador)
   function commit(next, opts = {}) {
     const w = { ...(next.weights || {}) };
     if (S.saved) for (const b of next.blocks) {
       const old = S.saved.blocks.find((x) => x.id === b.id && x.type === b.type);
       if (old && S.saved.weights && S.saved.weights[b.id]) w[b.id] = S.saved.weights[b.id];
     }
+    const before = S.genome;
     S.genome = repair({ ...next, weights: w }, makeRng((Number(next.emblem) >>> 0) % 2 ** 31)).genome;
-    S.dirty = true;
+    S.hist = Hi.record(S.hist, S.genome, opts.label || Hi.describe(before, S.genome, catalog), opts.key ?? null, Date.now());
+    afterChange(opts);
+  }
+  function afterChange(opts = {}) {
+    S.dirty = S.genome !== S.base;
     S.server = null;
     recheck();
     if (opts.select !== undefined) S.sel = opts.select;
-    if (opts.partial) { renderHead(); renderBoard(); } else render();
-    if (S.panelTab === 'whatif') scheduleWhatif();
+    if (opts.partial) { renderHead(); renderTools(); renderBoard(); } else render();
+    scheduleBench();
   }
+  function undo() { if (!Hi.canUndo(S.hist)) return; const l = Hi.undoLabel(S.hist); S.hist = Hi.undo(S.hist); S.genome = S.hist.present; afterChange(); toast(`Deshecho: ${l}`); }
+  function redo() { if (!Hi.canRedo(S.hist)) return; const l = Hi.redoLabel(S.hist); S.hist = Hi.redo(S.hist); S.genome = S.hist.present; afterChange(); toast(`Rehecho: ${l}`); }
   // bloques que ya existían y estrenan pesos al guardar (cambió su forma): lo aprendido en ellos se pierde
   function freshBlocks() {
     if (!S.saved || !S.genome) return [];
@@ -99,26 +141,29 @@ export function mountEditor(root, { catalog, toast }) {
     if (!force && S.dirty && S.netId && netId !== S.netId) { S.pending = netId; showModal(); return; }
     const r = await api(`/api/lab/nets/${encodeURIComponent(netId)}`);
     if (!r.ok) { toast(reasonOf(r), 'error'); return; }
-    S.netId = netId; S.saved = clone(r.body.genome); S.genome = clone(r.body.genome); S.dirty = false; S.server = null; S.sel = null;
+    S.netId = netId; S.saved = clone(r.body.genome); S.genome = clone(r.body.genome); S.base = S.genome; S.dirty = false; S.server = null; S.sel = null;
+    S.hist = Hi.createHistory(S.genome);
     S.pos = store.get(LS.pos(netId), {}) || {};
-    S.wi.res = null;
-    S.fit = true; // al abrir, encaja el ancho de la red en el lienzo
-    S.railTab = 'blocks';
+    S.fit = true; S.menu = false;
+    S.bench.saved = null; S.bench.savedKey = null; S.versions = { list: null, open: null, diff: null, ver: null, busy: false };
     recheck();
-    if (location.hash !== `#editor/${netId}`) history.replaceState(null, '', `#editor/${netId}`);
+    if (location.hash !== `#crear/${netId}`) history.replaceState(null, '', `#crear/${netId}`);
     render();
+    scheduleBench(0);
+    if (S.panelTab === 'versiones') loadVersions();
   }
   async function save() {
     if (!S.genome) return;
-    if (!S.check.ok) { S.panelTab = 'issues'; render(); toast('Hay errores: arréglalos antes de guardar (están en Avisos y junto a cada bloque).', 'error'); return; }
+    if (!S.check.ok) { S.panelTab = 'avisos'; render(); toast('Hay errores: arréglalos antes de guardar (están en Avisos y junto a cada bloque).', 'error'); return; }
     const r = await api(`/api/lab/nets/${encodeURIComponent(S.netId)}`, 'PUT', S.genome);
     if (r.ok) {
-      S.saved = clone(S.genome); S.dirty = false; S.server = { warnings: r.body.warnings || [] };
-      if (S.panelTab === 'whatif') scheduleWhatif();
-      await loadNets(); render(); toast('Red guardada.');
+      S.saved = clone(S.genome); S.base = S.genome; S.dirty = false; S.server = { warnings: r.body.warnings || [] };
+      S.bench.saved = null; S.bench.savedKey = null; S.versions.list = null;
+      await loadNets(); render(); scheduleBench(0); toast(r.body.version ? `Red guardada. La de antes queda como versión ${r.body.version} (Versiones).` : 'Red guardada.');
+      if (S.panelTab === 'versiones') loadVersions();
     } else {
       S.server = { status: r.status, error: reasonOf(r), errors: (r.body && r.body.errors) || [] };
-      S.panelTab = 'issues'; render(); toast(reasonOf(r), 'error');
+      S.panelTab = 'avisos'; render(); toast(reasonOf(r), 'error');
     }
   }
   // desde cero: una red sin ningún bloque (válida para guardar; para jugar le faltará Elegir, y el editor lo dice)
@@ -156,7 +201,7 @@ export function mountEditor(root, { catalog, toast }) {
       return;
     }
     await loadNets();
-    await open(r.body.id); // con cambios sin guardar, pregunta antes de cambiar de red
+    await open(r.body.id);
     toast(`Red importada como «${r.body.id}».`);
   }
   async function removeNet(force = false) {
@@ -165,128 +210,198 @@ export function mountEditor(root, { catalog, toast }) {
     if (!r.ok) { toast(reasonOf(r), 'error'); return; }
     store.del(LS.pos(S.netId));
     const gone = S.genome.name;
-    S.netId = null; S.saved = null; S.genome = null; S.dirty = false; S.sel = null; S.railTab = 'nets';
-    history.replaceState(null, '', '#editor');
+    S.netId = null; S.saved = null; S.genome = null; S.base = null; S.dirty = false; S.sel = null;
+    history.replaceState(null, '', '#crear');
     await loadNets(); render(); toast(`Red borrada: ${gone}.`);
   }
 
   // ---------- pintar ----------
-  function render() { renderHead(); renderRail(); renderBoard(); renderPanel(); }
+  function render() { renderHead(); renderRail(); renderTools(); renderBoard(); renderPanel(); renderBench(); }
 
   function statusOf() {
     if (!S.genome) return null;
     const errs = S.check.errors.length;
     if (errs) return { cls: 'bad', text: `${errs} ${errs === 1 ? 'error' : 'errores'}: no se puede guardar` };
-    if (!S.forPlay.ok) return { cls: 'warn', text: 'Se puede guardar, pero no puede jugar: le falta Elegir' };
+    if (!S.forPlay.ok) {
+      const miss = Hn.readiness(S.genome, catalog).filter((x) => x.required && !x.ok);
+      return { cls: 'warn', text: `Se puede guardar, pero aún no puede jugar${miss.length ? `: le falta ${miss[0].text.split(':')[0].toLowerCase()}` : ''}` };
+    }
     return { cls: 'good', text: 'Lista para jugar' };
   }
+
+  // cabecera: en la fila del título de la etapa (como en el mockup): emblema, nombre, deshacer, Guardar y ⋯
   function renderHead() {
-    const h = $('edHead');
-    const lv = M.LEVELS.map((l) => `<button type="button" data-level="${l}" aria-pressed="${S.level === l}">${M.LEVEL_NAMES[l]}</button>`).join('');
+    const h = S.slotEl && S.slotEl.isConnected ? S.slotEl : $('edHead');
+    $('edHead').hidden = h !== $('edHead');
     if (!S.genome) {
-      h.innerHTML = `<div class="ed-title"><h1>Editor de redes</h1><p class="dim">Elige una red o crea una desde una plantilla.</p></div><div class="ed-levels" role="group" aria-label="Nivel de vista">${lv}</div>`;
+      patch(h, `<div class="edh"><span class="edh-hint">Elige una red o crea una desde una plantilla (a la izquierda).</span>${menuHTML()}</div>`);
       return;
     }
-    const g = S.genome, st = statusOf(), gen = g.lineage && Number.isInteger(g.lineage.generation) ? g.lineage.generation : 0;
-    const net = S.nets.find((n) => n.id === S.netId);
-    h.innerHTML = `
-      <div class="ed-emblem" title="Emblema: sale de la semilla ${esc(g.emblem)}">${emblemSVG(g.emblem, 44)}</div>
-      <div class="ed-title">
-        <label class="sr" for="edName">Nombre de la red</label>
-        <input id="edName" class="ed-name" value="${esc(g.name)}" maxlength="32" spellcheck="false">
-        <p class="ed-facts"><span class="mono">${esc(g.id)}</span><span>generación ${gen}</span><span>${g.blocks.length} bloques</span><span>${S.params === null ? 'pesos: —' : `${S.params.toLocaleString('es-ES')} pesos`}</span>${net && net.stats && Number.isFinite(net.stats.games) ? `<span>${net.stats.games} partidas</span>` : ''}${net && net.isQueen ? '<span class="tag queen">reina</span>' : ''}${net && net.house ? `<span class="tag">campeona de la casa ${esc(net.house)}</span>` : ''}${net && net.training ? '<span class="tag busy">entrenando</span>' : ''}</p>
-      </div>
-      <div class="ed-levels" role="group" aria-label="Nivel de vista">${lv}</div>
-      <p class="ed-status ${st.cls}" role="status">${esc(st.text)}${S.dirty ? '<span class="dirty">cambios sin guardar</span>' : ''}</p>
-      <div class="ed-actions">
-        <button type="button" class="primary" data-act="save" ${S.check.ok ? '' : 'aria-disabled="true"'}>Guardar</button>
-        <a class="btn" href="/api/lab/nets/${encodeURIComponent(S.netId)}/export" download="${esc(S.netId)}.json" ${S.dirty ? 'title="Exporta lo guardado: guarda antes para exportar tus cambios"' : ''}>Exportar</a>
-        <button type="button" data-act="delete">Borrar…</button>
-      </div>`;
+    const g = S.genome;
+    const u = Hi.undoLabel(S.hist), r = Hi.redoLabel(S.hist);
+    patch(h, `<div class="edh">
+      <span class="edh-em" title="Emblema: sale de la semilla ${esc(g.emblem)}">${emblemSVG(g.emblem, 34)}</span>
+      <label class="edh-name"><small>Nombre de la red</small><input id="edName" value="${esc(g.name)}" maxlength="32" spellcheck="false"></label>
+      <span class="edh-undo" role="group" aria-label="Deshacer y rehacer">
+        <button type="button" data-act="undo" ${u ? '' : 'disabled'} title="${esc(u ? `Deshacer: ${u} (Ctrl+Z)` : 'Nada que deshacer')}" aria-label="Deshacer">↶</button>
+        <button type="button" data-act="redo" ${r ? '' : 'disabled'} title="${esc(r ? `Rehacer: ${r} (Ctrl+Y)` : 'Nada que rehacer')}" aria-label="Rehacer">↷</button></span>
+      <button type="button" class="primary" data-act="save" ${S.check.ok ? '' : 'aria-disabled="true"'} title="Guarda la red (Ctrl+S). La de antes queda en Versiones.">Guardar</button>
+      ${menuHTML()}</div>`);
+  }
+  function menuHTML() {
+    const others = S.nets.filter((n) => n.id !== S.netId);
+    return `<span class="edh-more"><button type="button" data-act="menu" aria-expanded="${S.menu}" aria-label="Más: abrir otra red, exportar, importar, versiones, borrar">⋯</button>
+      <div class="menu" ${S.menu ? '' : 'hidden'} role="menu">
+        ${others.length ? `<p class="menu-h">Abrir otra red</p>${others.map((n) => `<button type="button" role="menuitem" data-open="${esc(n.id)}"><span class="net-em" aria-hidden="true">${emblemSVG(n.emblem, 20)}</span>${esc(n.name)}<small>gen ${esc(n.generation ?? 0)}${n.isQueen ? ' · reina' : ''}</small></button>`).join('')}` : ''}
+        ${S.genome ? `<p class="menu-h">Esta red</p>
+        <a class="btn" role="menuitem" href="/api/lab/nets/${encodeURIComponent(S.netId)}/export" download="${esc(S.netId)}.json" ${S.dirty ? 'title="Exporta lo guardado: guarda antes para exportar tus cambios"' : ''}>Exportar (.json)</a>
+        <button type="button" role="menuitem" data-ptab="versiones">Versiones y cambios</button>
+        <button type="button" role="menuitem" data-ficha="${esc(S.netId)}">Abrir su ficha</button>
+        <button type="button" role="menuitem" class="danger" data-act="delete">Borrar esta red…</button>` : ''}
+        <p class="menu-h">Traer</p><label class="btn file" role="menuitem">Importar un genoma (.json)<input type="file" accept=".json,application/json" data-import hidden></label>
+      </div></span>`;
   }
 
+  // raíl: plantillas (con su porqué) y bloques (con lo que hacen y si se pueden añadir ya)
   function renderRail() {
-    const r = $('edRail');
-    const tabs = `<div class="tabs" role="tablist">
-      <button role="tab" type="button" data-rail="nets" aria-selected="${S.railTab === 'nets'}">Redes</button>
-      <button role="tab" type="button" data-rail="blocks" aria-selected="${S.railTab === 'blocks'}" ${S.genome ? '' : 'disabled'}>Bloques</button></div>`;
-    if (S.railTab === 'blocks' && S.genome) {
+    const tpls = [BLANK, ...S.templates].map((t) => {
+      const ico = /^\S+/.exec(t.name)[0], nm = t.name.replace(/^\S+\s/, '');
+      const opened = S.tplOpen === t.key;
+      return `<li class="tpl2${opened ? ' open' : ''}" data-key="t:${esc(t.key)}">
+        <button type="button" class="tpl2-head" data-tpl="${esc(t.key)}" aria-expanded="${opened}"><span class="ti" aria-hidden="true">${esc(ico)}</span><b>${esc(nm)}</b><small>${esc(t.short || TPL_SHORT[t.key] || '')}</small></button>
+        ${opened ? `<div class="tpl2-body"><p>${esc(t.why)}</p><p class="dim">${t.paramCount ? `${t.paramCount.toLocaleString('es-ES')} pesos` : 'sin bloques ni pesos'}</p>
+          <form class="tpl-form" data-create="${esc(t.key)}"><label>Nombre <input name="name" value="${esc(t.key === 'blank' ? 'Mi red' : nm)}" maxlength="32" required></label><button class="primary" type="submit">Crear red</button></form></div>` : ''}
+      </li>`;
+    }).join('');
+    let pal = '';
+    if (S.genome) {
       const groups = M.palette(catalog, S.level).map((g) => `
-        <h3 class="grp g-${g.key}">${esc(g.name)}<small>${esc(g.ask)}</small></h3>
-        <ul class="pal">${g.blocks.map((b) => `<li><button type="button" class="pal-item g-${g.key}" data-add="${esc(b.type)}" title="${esc(b.explain)}"><span class="ico" aria-hidden="true">${esc(b.icon)}</span>${esc(b.name)}</button></li>`).join('')}</ul>`).join('');
+        <h4 class="grp g-${g.key}">${esc(g.name)}<small>${esc(g.ask)}</small></h4>
+        <ul class="pal">${g.blocks.map((b) => {
+          const a = Hn.advice(S.genome, catalog, b.type);
+          const short = String(b.explain).split(/[.:]/)[0];
+          return `<li data-key="p:${esc(b.type)}"><button type="button" class="pal-item g-${g.key}${a.can ? '' : ' no'}${a.missing ? ' missing' : ''}" data-add="${esc(b.type)}" ${a.can ? '' : 'aria-disabled="true"'} aria-describedby="palHint"><span class="ico" aria-hidden="true">${esc(b.icon)}</span><span class="pn">${esc(b.name)}</span><small>${esc(short)}</small></button></li>`;
+        }).join('')}</ul>`).join('');
       const hidden = catalog.blocks.length - M.palette(catalog, S.level).reduce((s, g) => s + g.blocks.length, 0);
-      r.innerHTML = `${tabs}<p class="hint">Pulsa un bloque para añadirlo; después únelo con cables arrastrando desde su punto de salida.</p>${groups}${hidden ? `<p class="hint">${hidden} bloques más en ${S.level === 'aprendiz' ? 'Artesano y Científico' : 'Científico'}.</p>` : ''}`;
-      return;
+      const hov = S.palHover && M.entryOf(catalog, S.palHover);
+      const a = hov && Hn.advice(S.genome, catalog, S.palHover);
+      pal = `<h3>Nuevo bloque <small>pulsa para añadirlo</small></h3>
+        <p class="pal-hint${a && !a.can ? ' no' : ''}" id="palHint" aria-live="polite">${hov ? `<b>${esc(hov.icon)} ${esc(hov.name)}</b>: ${esc(hov.explain)}<span class="why">${esc(a.why)}</span>` : 'Pasa el ratón (o el foco) por un bloque: aquí verás qué hace y dónde irá en tu red.'}</p>
+        ${groups}${hidden ? `<p class="hint">${hidden} bloques más en ${S.level === 'aprendiz' ? 'Artesano y Científico' : 'Científico'}: cambia la vista arriba del lienzo (nada se bloquea).</p>` : ''}`;
     }
-    const nets = S.nets.length ? `<ul class="nets">${S.nets.map((n) => `
-      <li><button type="button" class="net-item ${n.id === S.netId ? 'on' : ''}" data-open="${esc(n.id)}">
-        <span class="net-em" aria-hidden="true">${emblemSVG(n.emblem, 30)}</span>
-        <span class="net-nm">${esc(n.name)}</span>
-        <span class="net-sub">gen ${esc(n.generation ?? 0)}${n.stats && Number.isFinite(n.stats.games) ? ` · ${n.stats.games} partidas` : ''}${n.isQueen ? ' · reina' : ''}${n.training ? ' · entrenando' : ''}</span>
-      </button></li>`).join('')}</ul>` : '<p class="empty">Aún no tienes redes. Crea la primera desde una plantilla.</p>';
-    const tpls = [BLANK, ...S.templates].map((t) => `
-      <li class="tpl ${S.tplOpen === t.key ? 'open' : ''}">
-        <button type="button" class="tpl-head" data-tpl="${esc(t.key)}" aria-expanded="${S.tplOpen === t.key}"><span>${esc(t.name)}</span><small>${t.paramCount ? `${t.paramCount.toLocaleString('es-ES')} pesos` : 'sin bloques'}</small></button>
-        <p>${esc(t.why)}</p>
-        ${S.tplOpen === t.key ? `<form class="tpl-form" data-create="${esc(t.key)}"><label>Nombre <input name="name" value="${esc(t.key === 'blank' ? 'Mi red' : t.name.replace(/^\S+\s/, ''))}" maxlength="32" required></label><button class="primary" type="submit">Crear red</button></form>` : ''}
-      </li>`).join('');
-    r.innerHTML = `${tabs}
-      <h3>Tus redes <small>${S.nets.length}</small></h3>${nets}
-      <h3>Crear desde una plantilla</h3><ul class="tpls">${tpls}</ul>
-      <label class="btn file">Importar un genoma (.json)<input type="file" accept=".json,application/json" data-import hidden></label>`;
+    patch($('edRail'), `<h3>Plantillas <small>para empezar</small></h3><ul class="tpls2">${tpls}</ul>${pal}`);
+  }
+
+  // barra del lienzo: nivel de vista, datos, estado (con lo que le falta), leyenda y zoom
+  function renderTools() {
+    const lv = M.LEVELS.map((l) => `<button type="button" data-level="${l}" aria-pressed="${S.level === l}">${M.LEVEL_NAMES[l]}</button>`).join('');
+    if (!S.genome) { patch($('edTools'), `<div class="ed-levels" role="group" aria-label="Nivel de vista">${lv}</div>`); return; }
+    const g = S.genome, st = statusOf(), gen = g.lineage && Number.isInteger(g.lineage.generation) ? g.lineage.generation : 0;
+    const net = S.nets.find((n) => n.id === S.netId);
+    patch($('edTools'), `<div class="ed-levels" role="group" aria-label="Nivel de vista: cuánto se ve (nada se bloquea)">${lv}</div>
+      <p class="ed-facts" title="${esc(g.id)}"><span>gen ${gen}</span><span>${g.blocks.length} bloques</span><span>${S.params === null ? 'pesos: —' : `${S.params.toLocaleString('es-ES')} pesos`}</span>${net && net.stats && Number.isFinite(net.stats.games) ? `<span>${net.stats.games} partidas</span>` : ''}${net && net.isQueen ? '<span class="tag queen">reina</span>' : ''}${net && net.training ? '<span class="tag busy">entrenando</span>' : ''}</p>
+      <button type="button" class="ed-status ${st.cls}" data-ptab="avisos" title="Ver qué le falta y los avisos">${esc(st.text)}</button>
+      ${S.dirty ? '<span class="dirty" title="Guarda para que juegue así">cambios sin guardar</span>' : ''}
+      <span class="zoom" role="group" aria-label="Zoom"><button type="button" data-zoom="-1" aria-label="Alejar">−</button><span class="mono" id="edZoom">${Math.round(S.zoom * 100)} %</span><button type="button" data-zoom="1" aria-label="Acercar">+</button><button type="button" data-zoom="fit" aria-pressed="${S.fit}" title="Que el ancho de la red quepa en el lienzo">Encajar</button><button type="button" data-act="tidy" title="Vuelve a colocar los bloques por columnas">Ordenar</button></span>`);
   }
 
   // ---------- lienzo ----------
+  // colocación de model.js (columnas por profundidad, filas por baricentro) con tarjetas más grandes
+  function layout() {
+    const L = M.layout(S.genome, catalog, {});
+    const nodes = {};
+    for (const [id, p] of Object.entries(L.nodes)) nodes[id] = { x: PAD.x + p.col * COL_W, y: Math.round(PAD.y + (p.y - 64) * ROW_K), col: p.col };
+    for (const [id, p] of Object.entries(S.pos || {})) if (nodes[id] && p && Number.isFinite(p.x) && Number.isFinite(p.y)) nodes[id] = { ...nodes[id], x: p.x, y: p.y };
+    const cols = L.cols.map((_, c) => ({ x: PAD.x + c * COL_W, c }));
+    const xs = Object.values(nodes).map((n) => n.x + CARD.w), ys = Object.values(nodes).map((n) => n.y + CARD.h);
+    return { nodes, cols, width: Math.max(PAD.x * 2 + (cols.length - 1) * COL_W + CARD.w, ...xs.map((x) => x + PAD.x)), height: Math.max(PAD.y + 3 * 92, ...ys.map((y) => y + 40)) };
+  }
+  function colTitle(L, c) {
+    const ids = Object.entries(L.nodes).filter(([, p]) => p.col === c).map(([id]) => id);
+    const groups = new Set(ids.map((id) => (M.entryOf(catalog, S.genome.blocks.find((b) => b.id === id).type) || {}).group));
+    if (c === 0) return { key: 'eyes', t: COLTITLE.eyes };
+    const out = groups.has('hands') || groups.has('feet'), ins = groups.has('instinct'), mem = groups.has('memory');
+    if (out && !ins && !mem) return { key: 'out', t: COLTITLE.out };
+    const parts = [ins && 'instinct', mem && 'memory', out && 'out'].filter(Boolean);
+    if (!parts.length) return { key: 'instinct', t: ['', ''] };
+    if (parts.length === 1) return { key: parts[0], t: COLTITLE[parts[0]] };
+    return { key: parts[0], t: [parts.map((p) => COLTITLE[p][0]).join(' y '), parts.map((p) => COLTITLE[p][1]).join(' ')] };
+  }
   function renderBoard() {
     const b = $('edBoard');
     if (!S.genome) {
-      b.innerHTML = '<div class="board-empty"><p>Abre una red de la lista o crea una desde una plantilla.</p><p class="dim">Aquí verás sus bloques unidos por cables, de los ojos a las manos.</p></div>';
+      patch(b, `<div class="board-empty"><h2>Elige una red o crea una</h2><p>A la izquierda tienes las plantillas: <b>Desde cero</b> si quieres montarla tú, bloque a bloque, o una ya montada para cambiarla.</p><p class="dim">Aquí verás sus bloques unidos por cables, de los ojos (lo que ve) a las manos (lo que hace).</p></div>`);
       return;
     }
+    if (!S.genome.blocks.length) { patch(b, startHTML()); return; }
     const keep = { left: b.scrollLeft, top: b.scrollTop };
-    const L = M.layout(S.genome, catalog, S.pos);
-    // encajar: el ancho de la red cabe en el lienzo (entre 55 % y 100 %); con +/− manda la persona
-    if (S.fit) S.zoom = Math.max(0.55, Math.min(1, (b.clientWidth - 16) / (L.width + 24)));
+    const L = layout();
+    // encajar: el ancho de la red cabe en el lienzo (entre 60 % y 100 %); lo alto se recorre con la rueda
+    if (S.fit) S.zoom = Math.max(0.6, Math.min(1, (b.clientWidth - 16) / (L.width + 12)));
     const z = S.zoom;
-    const ask = { 0: 'lo que ve' };
-    const heads = L.cols.map((c, i) => `<div class="colhead" style="left:${c.x}px">${esc(c.label)}${i === 0 ? `<small>${ask[0]}</small>` : i === L.cols.length - 1 ? '<small>lo que hace</small>' : ''}</div>`).join('');
+    const zl = $('edTools').querySelector('#edZoom');
+    if (zl) zl.textContent = `${Math.round(z * 100)} %`;
+    const heads = L.cols.map((c) => { const t = colTitle(L, c.c); return `<div class="colhead g-${t.key}" data-key="h:${c.c}" style="left:${c.x}px"><b>${esc(t.t[0])}</b><small>${esc(t.t[1])}</small></div>`; }).join('');
     const nodes = S.genome.blocks.map((blk) => nodeHTML(blk, L.nodes[blk.id])).join('');
     const flags = S.genome.blocks.map((blk) => flagHTML(blk, L.nodes[blk.id])).join('');
-    b.innerHTML = `
-      <div class="board-inner" style="width:${L.width + 240}px;height:${L.height + 120}px;zoom:${z}">
+    const missing = Hn.readiness(S.genome, catalog).filter((x) => x.required && !x.ok);
+    patch(b, `<div class="board-inner" data-key="inner" style="width:${L.width}px;height:${L.height}px;zoom:${z}">
         ${heads}
-        <svg class="wires" width="${L.width + 240}" height="${L.height + 120}" aria-hidden="true">${wiresSVG(L)}<path id="edTmpWire" class="wire tmp" d=""/></svg>
+        <svg class="wires" data-key="svg" width="${L.width}" height="${L.height}" aria-hidden="true">${wiresSVG(L)}<path id="edTmpWire" data-key="tmp" class="wire tmp" d=""/></svg>
         ${nodes}${flags}
       </div>
-      <p class="legend"><span class="lg s-ctx">contexto</span> una vez por soldado <span class="lg s-cand">candidatos</span> una vez por tiro imaginado <span class="lg s-move">destinos</span> una vez por sitio adonde moverse<span class="zoom" role="group" aria-label="Zoom"><button type="button" data-zoom="-1" aria-label="Alejar">−</button><span class="mono">${Math.round(z * 100)} %</span><button type="button" data-zoom="1" aria-label="Acercar">+</button><button type="button" data-zoom="fit" aria-pressed="${S.fit}">Encajar</button></span><button type="button" data-act="tidy" title="Vuelve a colocar los bloques por columnas">Ordenar</button></p>`;
+      ${missing.length ? `<aside class="needs" data-key="needs" aria-label="Lo que le falta para poder jugar"><b>Para poder jugar le falta:</b><ul>${missing.map((x) => `<li>${esc(x.need)} ${readyButtons(x)}</li>`).join('')}</ul></aside>` : ''}`);
     b.scrollLeft = keep.left; b.scrollTop = keep.top;
+  }
+  function readyButtons(x) {
+    return `${(x.add || []).map((t) => `<button type="button" class="mini" data-add="${esc(t)}">Añadir ${esc((M.entryOf(catalog, t) || { name: t }).name)}</button>`).join(' ')}${x.wire ? ` <button type="button" class="mini" data-wireup="${esc(x.wire[0])}|${esc(x.wire[1])}">Unir ${esc(x.wire[0])} → ${esc(x.wire[1])}</button>` : ''}`;
+  }
+  // red sin bloques: por dónde empezar, explicado
+  function startHTML() {
+    const r = Hn.readiness(S.genome, catalog);
+    return `<div class="board-start" data-key="start">
+      <h2>Tu red está vacía: empieza por aquí</h2>
+      <p>Una red va de izquierda a derecha, como la señal: <b class="c-eyes">Ojos</b> (qué ve) → <b class="c-instinct">Instinto</b> y <b class="c-memory">Memoria</b> (cómo piensa y qué recuerda) → <b class="c-hands">Manos</b> y <b class="c-feet">Pies</b> (qué hace). Para poder jugar necesita, como mínimo, estas tres cosas:</p>
+      <ol>${r.filter((x) => x.required).map((x) => `<li class="${x.ok ? 'ok' : ''}"><b>${esc(x.text)}</b><span>${esc(x.need)}</span>${x.ok ? '<i>hecho</i>' : readyButtons(x)}</li>`).join('')}</ol>
+      <p class="dim">También puedes añadir cualquier bloque desde la lista de la izquierda y unirlo arrastrando desde su punto de salida (el círculo de la derecha) hasta otro bloque.</p></div>`;
   }
   function nodeHTML(blk, p) {
     const e = M.entryOf(catalog, blk.type) || { name: blk.type, icon: '?', group: 'instinct', params: [] };
     const iss = (S.issues.byBlock[blk.id] || []);
     const err = iss.some((x) => x.kind === 'error'), warn = !err && iss.length;
     const main = (e.params || []).find((q) => q.type === 'int' || q.type === 'enum');
-    const val = main && blk.params && blk.params[main.key] !== undefined ? ` ${num(blk.params[main.key])}` : '';
-    const d = S.dims && S.dims[blk.id];
-    const meta = d ? `${STREAM[d.stream]} ${d.dim}` : STREAM[S.streams[blk.id]] || '';
+    const val = main && blk.params && blk.params[main.key] !== undefined ? ` · ${num(blk.params[main.key])}` : '';
     const sel = S.sel && S.sel.kind === 'block' && S.sel.id === blk.id;
     const frozen = Array.isArray(S.genome.frozen) && S.genome.frozen.includes(blk.id);
-    return `<button type="button" class="node g-${e.group}${sel ? ' sel' : ''}${err ? ' err' : ''}${warn ? ' warn' : ''}" data-node="${esc(blk.id)}" style="left:${p.x}px;top:${p.y}px" aria-label="${esc(e.name)} ${esc(blk.id)}${err ? ', con error' : warn ? ', con aviso' : ''}">
+    const role = Hn.roleOf(catalog, S.genome, blk, S.dims);
+    const lk = S.link ? (S.link.from === blk.id ? ' link-from' : S.link.ok.has(blk.id) ? ' link-ok' : ' link-no') : '';
+    const lkWhy = S.link && S.link.why.get(blk.id);
+    return `<button type="button" class="node g-${e.group}${sel ? ' sel' : ''}${err ? ' err' : ''}${warn ? ' warn' : ''}${lk}" data-key="n:${esc(blk.id)}" data-node="${esc(blk.id)}" style="left:${p.x}px;top:${p.y}px" aria-label="${esc(e.name)} ${esc(blk.id)}: ${esc(role)}${err ? ', con error' : warn ? ', con aviso' : ''}" ${lkWhy ? `title="${esc(lkWhy)}"` : ''}>
       ${e.group === 'eyes' ? '' : '<span class="port in" aria-hidden="true"></span>'}
       <span class="ico" aria-hidden="true">${esc(e.icon)}</span>
-      <span class="nm">${esc(e.name)}${esc(val)}</span>
-      <span class="meta"><span class="mono">${esc(blk.id)}</span> ${esc(meta)}${frozen ? ' · congelado' : ''}</span>
+      <span class="nm">${esc(e.name)}${esc(val)} <span class="mono id">${esc(blk.id)}</span>${frozen ? ' <span class="frz" title="Congelado: no aprende">❄</span>' : ''}</span>
+      <span class="role">${esc(role)}</span>
+      <span class="dots" aria-hidden="true">${dotsHTML(blk.id)}</span>
       ${e.group === 'hands' || e.group === 'feet' ? '' : `<span class="port out" data-port="${esc(blk.id)}" title="Arrastra hasta otro bloque para unirlos"></span>`}
     </button>`;
+  }
+  // neuronas del bloque: un punto por neurona (hasta 16), encendido según su valor en la escena del banco
+  function dotsHTML(id) {
+    const s = S.bench.sig && S.bench.sig[id];
+    if (!s || !s.sample.length) return '<i class="off"></i>'.repeat(8);
+    const vals = s.sample.slice(0, 16), m = Math.max(1e-9, ...vals.map((v) => Math.abs(v)));
+    return vals.map((v) => `<i style="opacity:${(0.18 + 0.82 * Math.abs(v) / m).toFixed(2)}" class="${v < 0 ? 'neg' : 'pos'}"></i>`).join('') + (s.sample.length > 16 ? '<em>+</em>' : '');
   }
   function flagHTML(blk, p) {
     const errs = (S.issues.byBlock[blk.id] || []).filter((x) => x.kind === 'error');
     if (!errs.length) return '';
     const x = errs[0];
-    return `<div class="flag" style="left:${p.x}px;top:${p.y + M.NODE.h + 6}px" role="note">${esc(x.message)}${x.example ? `<span class="eg">${esc(x.example)}</span>` : ''}${errs.length > 1 ? `<span class="more">y ${errs.length - 1} más en Avisos</span>` : ''}</div>`;
+    const hint = Hn.hintFor(S.genome, catalog, x);
+    const fx = Hn.fixes(S.genome, catalog, S.check).filter((f) => f.key.endsWith(`:${blk.id}`) || (Number.isInteger(x.wire) && f.key.endsWith(`:${x.wire}`)));
+    return `<div class="flag" data-key="f:${esc(blk.id)}" style="left:${p.x}px;top:${p.y + CARD.h + 6}px" role="note">${esc(x.message)}${hint ? `<span class="hintline">👉 ${esc(hint)}</span>` : ''}${fx.map((f, i) => `<button type="button" class="mini fix" data-fix="${esc(f.key)}">${esc(f.label)}</button>`).join('')}${errs.length > 1 ? `<span class="more">y ${errs.length - 1} más en Avisos</span>` : ''}</div>`;
   }
   function wirePath(a, b) {
-    const x1 = a.x + M.NODE.w, y1 = a.y + M.NODE.h / 2, x2 = b.x, y2 = b.y + M.NODE.h / 2;
+    const x1 = a.x + CARD.w, y1 = a.y + CARD.h / 2, x2 = b.x, y2 = b.y + CARD.h / 2;
     const dx = Math.max(48, Math.abs(x2 - x1) / 2);
     return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
   }
@@ -298,18 +413,20 @@ export function mountEditor(root, { catalog, toast }) {
       const d = wirePath(a, b);
       const bad = (S.issues.byWire[i] || []).length;
       const sel = S.sel && S.sel.kind === 'wire' && S.sel.index === i;
-      return `<path class="wire g-${groupOf(w.from)} s-${S.streams[w.from] || 'ctx'}${sel ? ' sel' : ''}${bad ? ' bad' : ''}" d="${d}"/><path class="hit" data-wire="${i}" d="${d}"><title>${esc(w.from)} → ${esc(w.to)}</title></path>`;
+      // nervios: la señal real del bloque de salida en la escena del banco (más señal, pulso más vivo y más rápido)
+      const s = S.bench.sig && S.bench.sig[w.from];
+      const nerve = s && !bad ? `<path class="nerve" data-key="nv:${i}" d="${d}" style="--lv:${s.level.toFixed(2)};animation-duration:${(2.6 - 1.9 * s.level).toFixed(2)}s"/>` : '';
+      return `<path data-key="w:${i}" class="wire g-${groupOf(w.from)} s-${S.streams[w.from] || 'ctx'}${sel ? ' sel' : ''}${bad ? ' bad' : ''}" d="${d}"/>${nerve}<path data-key="hw:${i}" class="hit" data-wire="${i}" d="${d}"><title>${esc(w.from)} → ${esc(w.to)}: lleva ${esc(STREAM[S.streams[w.from]] || '—')}${s ? ` · señal ${pct(s.level)} del bloque más activo` : ''}</title></path>`;
     }).join('');
   }
   function redrawWires() {
     const svg = $('edBoard').querySelector('svg.wires');
     if (!svg) return;
-    const L = M.layout(S.genome, catalog, S.pos);
-    svg.innerHTML = `${wiresSVG(L)}<path id="edTmpWire" class="wire tmp" d=""/>`;
+    patch(svg, `${wiresSVG(layout())}<path id="edTmpWire" data-key="tmp" class="wire tmp" d=""/>`);
   }
 
-  // ---------- panel de ajustes ----------
-  function control(param, value, attrs) {
+  // ---------- panel de abajo: la capa elegida, los genes, lo que ve, versiones y avisos ----------
+  function control(param, value, attrs, compact = false) {
     const id = `c-${attrs.replace(/[^a-z0-9]/gi, '-')}`;
     let input;
     switch (param.type) {
@@ -333,48 +450,77 @@ export function mountEditor(root, { catalog, toast }) {
         input = `<span class="mono">${esc(JSON.stringify(value))}</span>`;
     }
     const opt = param.type === 'enum' && (param.options || []).find((o) => String(o.value) === String(value));
-    return `<div class="ctl"><label for="${id}">${esc(param.name)}</label><div class="ctl-in">${input}</div>
+    return `<div class="ctl${compact ? ' compact' : ''}"><label for="${id}">${esc(param.name)}</label><div class="ctl-in">${input}</div>
       <p class="explain">${esc(param.explain || '')}${opt && opt.explain ? ` <b>${esc(opt.name)}</b>: ${esc(opt.explain)}.` : ''}${param.personality ? ` <i>${esc(param.personality)}</i>` : ''}${param.example ? `<span class="eg">${esc(param.example)}</span>` : ''}</p></div>`;
   }
   function hiddenNote(all, shown) {
     const n = all.length - shown.length;
     return n > 0 ? `<p class="hint">${n} ${n === 1 ? 'ajuste más' : 'ajustes más'} en ${S.level === 'aprendiz' ? 'Artesano o Científico' : 'Científico'}: nada se bloquea, cambia el nivel de vista para verlos.</p>` : '';
   }
-  function issueList(items) {
-    return `<ul class="issues">${items.map((x) => `<li class="${x.kind}"><b>${x.kind === 'error' ? 'Error' : 'Aviso'}</b> ${esc(x.message)}${x.example ? `<span class="eg">${esc(x.example)}</span>` : ''}${x.blockId && S.genome.blocks.some((b) => b.id === x.blockId) ? ` <button type="button" class="link" data-goto="${esc(x.blockId)}">ir al bloque ${esc(x.blockId)}</button>` : ''}${Number.isInteger(x.wire) && S.genome.wires[x.wire] ? ` <button type="button" class="link" data-gowire="${x.wire}">ver el cable</button>` : ''}</li>`).join('')}</ul>`;
+  function issueRow(x) {
+    const hint = Hn.hintFor(S.genome, catalog, x);
+    return `<li class="${x.kind}"><b>${x.kind === 'error' ? 'Error' : 'Aviso'}</b> ${esc(x.message)}${hint ? `<span class="hintline">👉 ${esc(hint)}</span>` : x.example ? `<span class="eg">${esc(x.example)}</span>` : ''}${x.blockId && S.genome.blocks.some((b) => b.id === x.blockId) ? ` <button type="button" class="link" data-goto="${esc(x.blockId)}">ir al bloque ${esc(x.blockId)}</button>` : ''}${Number.isInteger(x.wire) && S.genome.wires[x.wire] ? ` <button type="button" class="link" data-gowire="${x.wire}">ver el cable</button>` : ''}</li>`;
   }
-  function blockTab() {
+  // Capa: "Configuración de la capa seleccionada" · "¿Qué hace esta capa?" · sus pesos
+  function capaTab() {
     if (S.sel && S.sel.kind === 'wire') {
       const w = S.genome.wires[S.sel.index];
       if (!w) return '<p class="empty">Ese cable ya no existe.</p>';
       const d = S.dims && S.dims[w.from];
-      return `<div class="ph"><h2>Cable ${esc(w.from)} → ${esc(w.to)}</h2><button type="button" data-act="unwire" data-index="${S.sel.index}">Quitar cable</button></div>
-        <p>Lleva ${esc(d ? `${STREAM[d.stream]} (${d.dim} números)` : STREAM[S.streams[w.from]] || '—')} de <button type="button" class="link" data-goto="${esc(w.from)}">${esc(w.from)}</button> a <button type="button" class="link" data-goto="${esc(w.to)}">${esc(w.to)}</button>. Si un bloque recibe varios cables, los junta en el orden en que se conectaron.</p>
-        ${issueList(S.issues.byWire[S.sel.index] || [])}`;
+      const s = S.bench.sig && S.bench.sig[w.from];
+      return `<div class="capa"><section><h3>Cable ${esc(w.from)} → ${esc(w.to)}</h3>
+        <p>Lleva ${esc(d ? `${STREAM[d.stream]} (${d.dim} números${d.stream === 'cand' ? ' por cada tiro imaginado' : d.stream === 'move' ? ' por cada sitio adonde moverse' : ''})` : STREAM[S.streams[w.from]] || '—')} de <button type="button" class="link" data-goto="${esc(w.from)}">${esc(w.from)}</button> a <button type="button" class="link" data-goto="${esc(w.to)}">${esc(w.to)}</button>. Si un bloque recibe varios cables, los junta en el orden en que se conectaron.</p>
+        ${s ? `<p class="dim">En la escena del banco pasa una señal del ${pct(s.level)} de la del bloque más activo: por eso late ${s.level > 0.6 ? 'deprisa' : s.level > 0.25 ? 'a ritmo normal' : 'despacio'}.</p>` : ''}
+        <ul class="issues">${(S.issues.byWire[S.sel.index] || []).map(issueRow).join('')}</ul>
+        <button type="button" data-act="unwire" data-index="${S.sel.index}">Quitar cable</button></section></div>`;
     }
     const blk = S.sel && S.sel.kind === 'block' && S.genome.blocks.find((b) => b.id === S.sel.id);
-    if (!blk) return '<p class="empty">Elige un bloque del lienzo para ver qué hace y ajustarlo, o añade uno desde la lista de la izquierda.</p>';
+    if (!blk) return netSummary();
     const e = M.entryOf(catalog, blk.type);
     const shown = M.paramsAt(e, S.level);
     const ins = S.genome.wires.map((w, i) => ({ ...w, i })).filter((w) => w.to === blk.id);
     const outs = S.genome.wires.map((w, i) => ({ ...w, i })).filter((w) => w.from === blk.id);
     const d = S.dims && S.dims[blk.id];
-    const sources = S.genome.blocks.filter((b) => b.id !== blk.id && !ins.some((w) => w.from === b.id) && !['hands', 'feet'].includes((M.entryOf(catalog, b.type) || {}).group));
     const isEyeBlk = e.group === 'eyes';
-    return `<div class="ph"><h2><span aria-hidden="true">${esc(e.icon)}</span> ${esc(e.name)} <span class="mono dim">${esc(blk.id)}</span></h2><button type="button" data-act="remove" data-id="${esc(blk.id)}">Quitar bloque</button></div>
-      <div class="cols2">
-        <div>
-          <p class="explain big">${esc(e.explain)}${e.example ? `<span class="eg">${esc(e.example)}</span>` : ''}</p>
-          <p class="flow">${isEyeBlk ? 'Mira el tablero' : `Recibe ${ins.length ? ins.map((w) => `<button type="button" class="link" data-goto="${esc(w.from)}">${esc(w.from)}</button>`).join(', ') : 'nada todavía'}`} y da ${esc(d ? `${STREAM[d.stream]} (${d.dim} números)` : STREAM[S.streams[blk.id]] || '—')}${outs.length ? ` a ${outs.map((w) => `<button type="button" class="link" data-goto="${esc(w.to)}">${esc(w.to)}</button>`).join(', ')}` : ''}.</p>
-          ${issueList(S.issues.byBlock[blk.id] || [])}
-        </div>
-        <div>
-          ${shown.map((p) => control(p, (blk.params || {})[p.key], `data-bparam="${esc(p.key)}" data-block="${esc(blk.id)}"`)).join('') || '<p class="hint">Este bloque no tiene ajustes.</p>'}
-          ${hiddenNote(e.params || [], shown)}
-          ${isEyeBlk ? '' : `<div class="wiring"><h3>Entradas</h3>${ins.length ? `<ul>${ins.map((w) => `<li><span class="mono">${esc(w.from)}</span> <button type="button" class="link" data-act="unwire" data-index="${w.i}">quitar</button></li>`).join('')}</ul>` : ''}
-            ${sources.length ? `<label>Conectar desde <select data-connect="${esc(blk.id)}"><option value="">elige un bloque…</option>${sources.map((b) => `<option value="${esc(b.id)}">${esc(b.id)} (${esc((M.entryOf(catalog, b.type) || {}).name || b.type)})</option>`).join('')}</select></label>` : ''}</div>`}
-        </div>
-      </div>`;
+    const same = catalog.blocks.filter((x) => x.group === e.group && x.type !== blk.type && M.atLevel(x.level, S.level) && !String(x.type).startsWith('eye.') && !['hands', 'feet'].includes(x.group));
+    const opts = Hn.connectOptions(S.genome, catalog, blk.id);
+    const okFrom = opts.from.filter((o) => o.ok), noFrom = opts.from.filter((o) => !o.ok && !ins.some((w) => w.from === o.id));
+    const s = S.bench.sig && S.bench.sig[blk.id];
+    const H = Hn.weightHistogram(S.genome, blk.id);
+    const maxN = Math.max(1, ...H.bins.map((x) => x.n));
+    const nm = (id) => { const b = S.genome.blocks.find((x) => x.id === id); return b ? `${(M.entryOf(catalog, b.type) || {}).name || b.type} ${id}` : id; };
+    return `<div class="capa">
+      <section class="capa-cfg"><h3>Configuración de la capa seleccionada</h3>
+        <p class="capa-id"><span class="ico" aria-hidden="true">${esc(e.icon)}</span> <b>${esc(e.name)}</b> <span class="mono dim">${esc(blk.id)}</span>
+          ${same.length ? `<label class="swap">Tipo <select data-swap="${esc(blk.id)}"><option value="${esc(blk.type)}" selected>${esc(e.name)}</option>${same.map((x) => `<option value="${esc(x.type)}">${esc(x.name)}</option>`).join('')}</select></label>` : ''}</p>
+        <div class="capa-ctls">${shown.map((p) => control(p, (blk.params || {})[p.key], `data-bparam="${esc(p.key)}" data-block="${esc(blk.id)}"`, true)).join('') || '<p class="hint">Este bloque no tiene ajustes: lo que hace depende solo de lo que le llega.</p>'}</div>
+        ${hiddenNote(e.params || [], shown)}
+        ${isEyeBlk ? '' : `<div class="wiring"><h4>Recibe de</h4>${ins.length ? `<ul>${ins.map((w) => `<li><button type="button" class="link" data-goto="${esc(w.from)}">${esc(nm(w.from))}</button> <button type="button" class="link" data-act="unwire" data-index="${w.i}">quitar</button></li>`).join('')}</ul>` : '<p class="hint">Nada todavía: sin entradas no hace nada.</p>'}
+          ${okFrom.length ? `<label>Unir desde <select data-connect="${esc(blk.id)}"><option value="">elige un bloque…</option>${okFrom.map((o) => `<option value="${esc(o.id)}">${esc(nm(o.id))}</option>`).join('')}</select></label>` : ''}
+          ${noFrom.length ? `<details class="cant"><summary>${noFrom.length} bloque${noFrom.length === 1 ? '' : 's'} no pueden unirse aquí (por qué)</summary><ul>${noFrom.map((o) => `<li><b>${esc(nm(o.id))}</b>: ${esc(o.why)}${o.hint ? ` <span class="eg">${esc(o.hint)}</span>` : ''}</li>`).join('')}</ul></details>` : ''}</div>`}
+        <div class="capa-acts"><button type="button" data-act="remove" data-id="${esc(blk.id)}">Quitar bloque</button></div>
+      </section>
+      <section class="capa-what"><h3>¿Qué hace esta capa?</h3>
+        <p class="explain big">${esc(e.explain)}</p>${e.example ? `<p class="eg">${esc(e.example)}</p>` : ''}
+        <p class="flow">${isEyeBlk ? 'Mira el tablero' : `Recibe ${ins.length ? ins.map((w) => `<button type="button" class="link" data-goto="${esc(w.from)}">${esc(w.from)}</button>`).join(', ') : 'nada todavía'}`} y da ${esc(d ? `${STREAM[d.stream]} (${d.dim} números${d.stream === 'cand' ? ' por tiro imaginado' : d.stream === 'move' ? ' por sitio' : ''})` : STREAM[S.streams[blk.id]] || '—')}${outs.length ? ` a ${outs.map((w) => `<button type="button" class="link" data-goto="${esc(w.to)}">${esc(w.to)}</button>`).join(', ')}` : ' a nadie todavía'}.</p>
+        <p class="role-big">En corto: <b>${esc(Hn.roleOf(catalog, S.genome, blk, S.dims))}</b>.</p>
+        ${s ? `<p class="dim">En la escena del banco («${esc(benchScene().name)}») se activa al <b>${pct(s.level)}</b> del bloque más activo (media |valor| ${f2(s.mean)}).</p>` : ''}
+        <ul class="issues">${(S.issues.byBlock[blk.id] || []).map(issueRow).join('')}</ul>
+      </section>
+      <section class="capa-w"><h3>Sus pesos</h3>
+        ${H.total ? `<svg class="histo" viewBox="0 0 ${H.bins.length * 10} 60" role="img" aria-label="Reparto de sus ${H.total} pesos">${H.bins.map((x, i) => `<rect x="${i * 10 + 1}" y="${60 - Math.max(x.n ? 2 : 0, (54 * x.n) / maxN)}" width="8" height="${Math.max(x.n ? 2 : 0, (54 * x.n) / maxN)}" class="${i === (H.bins.length - 1) / 2 ? 'zero' : x.hi <= 0 ? 'neg' : 'pos'}"><title>${f2(x.lo)} a ${f2(x.hi)}: ${x.n}</title></rect>`).join('')}</svg>
+          <p class="dim histo-axis"><span>−${f2(H.maxAbs)}</span><span>0</span><span>+${f2(H.maxAbs)}</span></p>
+          <p class="dim">${H.total.toLocaleString('es-ES')} pesos${H.zeros ? `, <b class="zero-t">${H.zeros} a cero</b>` : ''}. Barras naranjas: negativos; cian: positivos; la del medio, los que están cerca de 0.</p>
+          <button type="button" data-ficha="${esc(S.netId)}" data-ficha-tab="quirofano" title="Abre la ficha en el Quirófano (con los pesos guardados)">Abrir en el Quirófano</button>` : '<p class="hint">Este bloque no tiene pesos: no aprende nada por sí mismo.</p>'}
+      </section></div>`;
+  }
+  // sin bloque elegido: qué es esta red, qué le falta y qué le recomendamos
+  function netSummary() {
+    const r = Hn.readiness(S.genome, catalog);
+    return `<div class="capa"><section class="capa-cfg"><h3>Tu red, en una lista</h3>
+      <ul class="ready">${r.map((x) => `<li class="${x.ok ? 'ok' : x.required ? 'bad' : 'meh'}"><b>${x.ok ? '✔' : x.required ? '✘' : '·'} ${esc(x.text)}</b>${x.ok ? '' : `<span>${esc(x.need)}</span> ${readyButtons(x)}`}</li>`).join('')}</ul></section>
+      <section class="capa-what"><h3>¿Qué hace cada capa?</h3><p class="explain big">Pulsa un bloque del lienzo: aquí verás qué hace, con un ejemplo, qué recibe y a quién se lo da, y abajo a la izquierda podrás ajustarlo.</p>
+        <p class="dim">Con el teclado: Tab hasta un bloque, Intro para elegirlo, flechas para moverlo (Mayús: más lejos), Supr para quitarlo, Ctrl+Z para deshacer.</p></section></div>`;
   }
   const genomeControls = (list, root0, extra = '') => {
     const shown = list.filter((p) => M.atLevel(p.level, S.level));
@@ -389,8 +535,7 @@ export function mountEditor(root, { catalog, toast }) {
       if (!shown.length) return '';
       // gradient.* cuenta con gradient o both; evolution.* con evolution o both; both.* solo con both; el sueño, siempre
       const active = !pre || pre === 'sleep.' || (pre === 'gradient.' && method !== 'evolution') || (pre === 'evolution.' && method !== 'gradient') || (pre === 'both.' && method === 'both');
-      const idle = !active;
-      return `<fieldset class="${idle ? 'idle' : ''}"><legend>${esc(title)}${idle ? ' <small>no se usa con el método elegido</small>' : ''}</legend>${shown.map((p) => control(p, M.getPath(S.genome, `learning.${p.key}`), `data-gpath="learning.${esc(p.key)}"`)).join('')}</fieldset>`;
+      return `<fieldset class="${active ? '' : 'idle'}"><legend>${esc(title)}${active ? '' : ' <small>no se usa con el método elegido</small>'}</legend>${shown.map((p) => control(p, M.getPath(S.genome, `learning.${p.key}`), `data-gpath="learning.${esc(p.key)}"`)).join('')}</fieldset>`;
     }).join('') + hiddenNote(catalog.learning, catalog.learning.filter((p) => M.atLevel(p.level, S.level)));
   }
   function imaginationTab() {
@@ -404,77 +549,259 @@ export function mountEditor(root, { catalog, toast }) {
     }).join('');
     return `${genomeControls(im, 'imagination')}<h3>Familias de tiros</h3><div class="fams">${fams}</div>`;
   }
-  function issuesTab() {
-    const all = [...S.check.errors.map((x) => ({ ...x, kind: 'error' })), ...S.check.warnings.map((x) => ({ ...x, kind: 'warning' }))];
-    if (!S.forPlay.ok && S.check.ok) all.push(...S.forPlay.errors.map((x) => ({ ...x, kind: 'warning' })).filter((x) => !all.some((y) => y.code === x.code)));
-    const fresh = freshBlocks();
-    const server = S.server && S.server.error ? `<h3>El servidor no la guardó</h3><p class="bad">${esc(S.server.error)}</p>${issueList((S.server.errors || []).map((x) => ({ ...x, kind: 'error' })))}` : '';
-    return `${server}${all.length ? issueList(all) : '<p class="empty good">Sin errores ni avisos.</p>'}
-      ${fresh.length ? `<h3>Pesos nuevos al guardar</h3><p>Estos bloques cambiaron de forma y empezarán con pesos nuevos: lo que habían aprendido se pierde. ${fresh.map((b) => `<button type="button" class="link" data-goto="${esc(b.id)}">${esc(b.id)}</button>`).join(', ')}.</p>` : ''}`;
-  }
-  // ---------- ¿qué pasaría si…? (plan2 ronda 4; spec/08 §9.1): la guardada frente a la que editas, en una escena fija ----------
-  let wiTimer = null;
-  function scheduleWhatif() { clearTimeout(wiTimer); wiTimer = setTimeout(runWhatif, 350); }
-  async function runWhatif() {
-    if (!S.genome || !S.netId) return;
-    const sc = W.SCENES.find((x) => x.key === S.wi.scene) || W.SCENES[0];
-    const seed = Number.isInteger(Number(S.wi.seed)) && Number(S.wi.seed) >= 0 ? Number(S.wi.seed) : 1;
-    S.wi.busy = true;
-    const url = `/api/lab/nets/${encodeURIComponent(S.netId)}/whatif`;
-    const before = await api(url, 'POST', W.whatifBody(sc, 'shoot', seed));
-    let after = before, note = null;
-    if (S.dirty) {
-      if (S.forPlay && S.forPlay.ok) after = await api(url, 'POST', W.whatifBody(sc, 'shoot', seed, S.genome));
-      else { after = null; note = `Con tus cambios la red aún no puede jugar: ${(S.forPlay && S.forPlay.errors[0] && S.forPlay.errors[0].message) || 'revisa los avisos'}`; }
-    }
-    S.wi.busy = false;
-    S.wi.res = { sc, before: before.ok ? before.body.decision : null, after: after && after.ok ? after.body.decision : null, error: !before.ok ? reasonOf(before) : after && !after.ok ? reasonOf(after) : null };
-    S.wi.note = note;
-    if (S.panelTab === 'whatif') renderPanel();
-  }
-  function sceneSVG(sc, d) {
-    const X = (x) => (x + 25) * 10, Y = (y) => (15 - y) * 10;
-    const r1 = (v) => Math.round(v * 10) / 10;
-    const obs = sc.scene.obstacles.map((o) => `<rect x="${X(o.x)}" y="${Y(o.y + o.h)}" width="${o.w * 10}" height="${o.h * 10}" class="wi-obs"/>`).join('');
-    const sol = sc.scene.soldiers.map((x) => `<circle cx="${X(x.x)}" cy="${Y(x.y)}" r="${x.id === sc.scene.soldierId ? 7 : 5}" class="wi-s ${x.team}"/>`).join('');
-    const line = (pts) => pts.map((p, i) => `${i ? 'L' : 'M'}${r1(X(p[0]))},${r1(Y(p[1]))}`).join('');
-    const cands = d && Array.isArray(d.candidates) ? d.candidates.filter((c) => Array.isArray(c.points) && c.points.length) : [];
-    const maxP = Math.max(1e-9, ...cands.map((c) => c.p || 0));
-    const faint = cands.filter((c) => c.i !== d.chosen).sort((a, b) => a.p - b.p).map((c) => `<path d="${line(c.points)}" class="wi-c" style="opacity:${(0.08 + 0.45 * (c.p || 0) / maxP).toFixed(2)}"/>`).join('');
-    const ch = cands.find((c) => c.i === d.chosen);
-    return `<svg viewBox="0 0 500 300" class="wi-svg" role="img" aria-label="Escena: ${esc(sc.name)}"><rect x="0" y="0" width="500" height="300" class="wi-plane"/><line x1="250" y1="0" x2="250" y2="300" class="wi-axis"/><line x1="0" y1="150" x2="500" y2="150" class="wi-axis"/>${obs}${faint}${ch ? `<path d="${line(ch.points)}" class="wi-ch"/>` : ''}${sol}</svg>`;
-  }
-  function whatifTab() {
-    if (!S.wi.res && !S.wi.busy) scheduleWhatif();
-    const r = S.wi.res;
-    const cmp = r ? W.compare(r.before, r.after) : null;
-    const f2 = (v) => (Math.round(v * 100) / 100).toFixed(2);
-    const side = (label, x) => (x ? `<p><b>${label}</b>: elegiría la <span class="mono">#${x.i}</span> (${esc(FAMILY_ES[x.family] || x.family)}, <span class="mono">${esc(x.expr)}</span>) con probabilidad <span class="mono">${f2(x.p)}</span> y certeza <span class="mono">${f2(x.certainty)}</span></p>` : `<p><b>${label}</b>: —</p>`);
-    const verdict = cmp && S.dirty && cmp.after ? `<p class="${cmp.same ? 'dim' : 'good'}">${cmp.same ? 'Con tus cambios elige el mismo tiro.' : 'Con tus cambios elige otro tiro.'}</p>` : '';
-    return `<div class="wi"><div>
-        <p class="hint">Una escena congelada: cambia un ajuste o un cable y mira si cambia el tiro que elegiría. No guarda nada ni juega partidas.</p>
-        <div class="seg" role="radiogroup" aria-label="Escena">${W.SCENES.map((x) => `<label><input type="radio" name="wiScene" value="${x.key}" data-wi="scene" ${S.wi.scene === x.key ? 'checked' : ''}><b>${esc(x.name)}</b><small>${esc(x.explain)}</small></label>`).join('')}</div>
-        <div class="ctl"><label for="wiSeed">Semilla</label><div class="ctl-in"><input id="wiSeed" class="numin mono" type="number" min="0" step="1" value="${esc(S.wi.seed)}" data-wi="seed"></div><p class="explain">La misma semilla sortea igual: si la elección cambia, es por tus cambios.</p></div>
-        ${r && r.error ? `<p class="bad">${esc(r.error)}</p>` : ''}${S.wi.note ? `<p class="warn-text">${esc(S.wi.note)}</p>` : ''}
-        ${cmp ? `${side('Guardada', cmp.before)}${S.dirty ? `${side('Con tus cambios', cmp.after)}${verdict}` : '<p class="dim">No hay cambios sin guardar: es la misma red.</p>'}` : '<p class="dim">Calculando…</p>'}
-      </div><div>${r ? sceneSVG(r.sc, r.after || r.before) : ''}<p class="hint">Curvas tenues: los tiros que imagina ${S.dirty ? 'la red con tus cambios' : 'la red'}; en blanco, el elegido.</p></div></div>`;
-  }
-
-  function renderPanel() {
-    const p = $('edPanel');
-    if (!S.genome) { p.innerHTML = ''; return; }
-    const nIss = S.check.errors.length + S.check.warnings.length;
-    const tabs = [['block', 'Bloque'], ['traits', 'Carácter'], ['reward', 'Recompensa'], ['learning', 'Aprendizaje'], ['imagination', 'Imaginación'], ['whatif', '¿Qué pasaría si…?'], ['issues', `Avisos${nIss ? ` (${nIss})` : ''}`]];
+  function genesTab() {
     const body = {
-      block: blockTab,
-      traits: () => genomeControls(catalog.traits, 'traits'),
+      traits: () => `<p class="hint">El carácter decide cómo usa lo que sabe: la temperatura, por ejemplo, dice cuánto se arriesga al escoger entre tiros parecidos.</p>${genomeControls(catalog.traits, 'traits')}`,
       reward: () => `<p class="hint">Qué premia y qué castiga al aprender. Cada término cambia su carácter; por ejemplo, premiar sobrevivir la vuelve cauta.</p>${genomeControls(catalog.rewardTerms, 'reward')}`,
       learning: learningTab,
       imagination: imaginationTab,
-      issues: issuesTab,
-      whatif: whatifTab,
-    }[S.panelTab]();
-    p.innerHTML = `<div class="tabs" role="tablist">${tabs.map(([k, t]) => `<button role="tab" type="button" data-ptab="${k}" aria-selected="${S.panelTab === k}" class="${k === 'issues' && S.check.errors.length ? 'has-err' : ''}">${esc(t)}</button>`).join('')}</div><div class="panel-body">${body}</div>`;
+    }[S.genesTab]();
+    return `<div class="subtabs" role="tablist" aria-label="Genes">${GENES.map(([k, t]) => `<button type="button" role="tab" data-genes="${k}" aria-selected="${S.genesTab === k}">${esc(t)}</button>`).join('')}</div><div class="genes">${body}</div>`;
+  }
+  // lo que ve cada ojo en la escena del banco, número a número y con su nombre
+  function veTab() {
+    const now = S.bench.now;
+    if (!now || !now.ok) return `<p class="empty">${esc(now && now.error ? `El banco no puede calcularlo: ${now.error}` : 'Cuando tu red pueda jugar, aquí verás los números exactos que ve cada ojo en la escena del banco de pruebas (a la derecha).')}</p>`;
+    const eyes = Bn.eyesView(S.genome, now.obs);
+    if (!eyes.length) return '<p class="empty">Tu red no tiene ojos: no ve nada.</p>';
+    const chosen = S.bench.pick && S.bench.pick.kind === 'shot' ? S.bench.pick.i : S.bench.pick ? S.bench.pick.i : null;
+    return `<p class="hint">Escena «${esc(benchScene().name)}»: esto es lo que entra en tu red antes de decidir, ya escalado (casi todo entre −1 y 1). Cambia la escena en el banco y mira cómo cambian los números.</p>
+      <div class="ve">${eyes.map((ey) => {
+        const e = M.entryOf(catalog, ey.type);
+        if (ey.type === 'eye.map') return veMap(ey, e);
+        if (ey.stream === 'ctx') {
+          const row = ey.rows[0] || [];
+          return `<section><h4>${esc(e.icon)} ${esc(e.name)} <span class="mono dim">${esc(ey.blockId)}</span> <small>${row.length} números, una vez por turno</small></h4><ul class="vbars">${row.map((v, i) => `<li><span class="vn">${esc(ey.names[i] || `#${i}`)}</span><span class="vb"><i style="${v < 0 ? `right:50%;width:${Math.min(50, Math.abs(v) * 50)}%` : `left:50%;width:${Math.min(50, v * 50)}%`}" class="${v < 0 ? 'neg' : 'pos'}"></i></span><span class="vv mono">${f2(v)}</span></li>`).join('')}</ul></section>`;
+        }
+        const rows = ey.rows.slice(0, 8);
+        return `<section><h4>${esc(e.icon)} ${esc(e.name)} <span class="mono dim">${esc(ey.blockId)}</span> <small>${ey.rows.length} filas (${ey.stream === 'cand' ? 'una por tiro imaginado' : 'una por sitio adonde moverse'}) × ${ey.names.length} números</small></h4>
+          <div class="vtable-wrap"><table class="vtable"><thead><tr><th>#</th>${ey.names.map((n) => `<th title="${esc(n)}">${esc(n.length > 14 ? `${n.slice(0, 13)}…` : n)}</th>`).join('')}</tr></thead><tbody>${rows.map((r, i) => `<tr class="${i === chosen ? 'chosen' : ''}"><th>${i}${i === chosen ? ' ✔' : ''}</th>${r.map((v) => `<td class="mono">${f2(v)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>
+          ${ey.rows.length > 8 ? `<p class="dim">y ${ey.rows.length - 8} filas más, iguales en forma.</p>` : ''}</section>`;
+      }).join('')}</div>`;
+  }
+  function veMap(ey, e) {
+    const b = S.genome.blocks.find((x) => x.id === ey.blockId);
+    const cell = (b.params && b.params.cell) || 2, W = Math.round(50 / cell), Hh = Math.round(30 / cell);
+    const row = ey.rows[0] || [];
+    const chans = (b.params && b.params.channels) || [];
+    const CH = { obstacles: 'muros', enemies: 'enemigos', allies: 'aliados', self: 'yo', trails: 'estelas' };
+    return `<section><h4>${esc(e.icon)} ${esc(e.name)} <span class="mono dim">${esc(ey.blockId)}</span> <small>${chans.length} capas de ${W}×${Hh} celdas</small></h4><div class="vmaps">${chans.map((ch, k) => `<figure><svg viewBox="0 0 ${W} ${Hh}" class="vmap">${Array.from({ length: W * Hh }, (_, i) => { const v = row[k * W * Hh + i] || 0; return v ? `<rect x="${i % W}" y="${Math.floor(i / W)}" width="1" height="1" style="opacity:${Math.min(1, v).toFixed(2)}"/>` : ''; }).join('')}</svg><figcaption>${esc(CH[ch] || ch)}</figcaption></figure>`).join('')}</div></section>`;
+  }
+  // versiones: lo de esta sesión (deshacer) y lo guardado en el servidor, con sus diferencias reales
+  async function loadVersions() {
+    if (!S.netId || S.versions.busy) return;
+    S.versions.busy = true;
+    const r = await api(`/api/lab/nets/${encodeURIComponent(S.netId)}/versions`);
+    S.versions.busy = false;
+    S.versions.list = r.ok ? r.body.versions : [];
+    if (S.panelTab === 'versiones') renderPanel();
+  }
+  async function openVersion(n) {
+    const [d, v] = await Promise.all([api(`/api/lab/nets/${encodeURIComponent(S.netId)}/versions/${n}/diff`), api(`/api/lab/nets/${encodeURIComponent(S.netId)}/versions/${n}`)]);
+    if (!d.ok) { toast(reasonOf(d), 'error'); return; }
+    S.versions.open = n; S.versions.diff = d.body; S.versions.ver = v.ok ? v.body : null;
+    renderPanel();
+  }
+  function versionesTab() {
+    const tl = Hi.timeline(S.hist);
+    const V = S.versions;
+    if (V.list === null && !V.busy) loadVersions();
+    const vlist = V.list === null ? '<p class="dim">Cargando…</p>' : V.list.length ? `<ul class="vers">${V.list.map((v) => `<li data-key="v:${v.n}" class="${V.open === v.n ? 'on' : ''}"><b>versión ${v.n}</b> <span class="dim">${esc(when(v.ts))}</span><span>${esc(v.reason || '')}</span>${Number.isInteger(v.paramCount) ? `<span class="dim">${v.paramCount.toLocaleString('es-ES')} pesos</span>` : ''}
+        <button type="button" class="mini" data-vdiff="${v.n}">Diferencias con la de ahora</button> <button type="button" class="mini" data-vback="${v.n}">Volver a esta…</button></li>`).join('')}</ul>` : '<p class="empty">Aún no hay versiones guardadas. Cada vez que guardas, la de antes queda aquí; y antes de cada entreno, también.</p>';
+    return `<div class="vcols"><section><h3>Cambios de esta sesión <small>(guardados o no; Ctrl+Z los deshace)</small></h3>
+        ${tl.length ? `<ol class="tl">${tl.map((x) => `<li><button type="button" class="link" data-jump="${x.steps}" title="Deshacer hasta aquí (${x.steps} paso${x.steps === 1 ? '' : 's'})">${esc(x.label)}</button></li>`).join('')}</ol><p class="dim">Pulsa uno para volver a como estaba antes de ese cambio (se puede rehacer).</p>` : '<p class="empty">Nada todavía: cada cambio que hagas aparecerá aquí.</p>'}</section>
+      <section><h3>Versiones guardadas <small>en el servidor</small></h3>${vlist}${V.diff ? diffHTML(V.diff, V.ver) : ''}</section></div>`;
+  }
+  function diffHTML(d, ver) {
+    const ST = { added: ['＋', 'añadido'], removed: ['－', 'quitado'], changed: ['～', 'cambiado'], same: ['＝', 'igual'] };
+    const changed = d.blocks.filter((b) => b.status !== 'same');
+    const tr = Object.keys({ ...(d.traits.before || {}), ...(d.traits.after || {}) }).filter((k) => JSON.stringify(d.traits.before[k]) !== JSON.stringify(d.traits.after[k]));
+    const cmp = (top) => (ver && ver.genome ? Object.keys({ ...(ver.genome[top] || {}), ...(S.saved[top] || {}) }).filter((k) => JSON.stringify((ver.genome[top] || {})[k]) !== JSON.stringify((S.saved[top] || {})[k])) : []);
+    const rw = cmp('reward'), ln = cmp('learning');
+    return `<div class="vdiff"><h4>Versión ${S.versions.open} → la guardada ahora</h4>
+      ${changed.length ? `<ul>${changed.map((b) => `<li class="st-${b.status}"><b>${ST[b.status][0]} ${esc(b.name)}</b> ${ST[b.status][1]}${b.status === 'changed' && b.relChange ? ` · pesos movidos un ${pct(Math.min(1, b.relChange))}` : ''}</li>`).join('')}</ul>` : '<p>Mismos bloques con los mismos pesos.</p>'}
+      ${d.wires.added.length || d.wires.removed.length ? `<p>Cables: ${d.wires.added.map((w) => `<span class="st-added">＋ ${esc(w.from)} → ${esc(w.to)}</span>`).join(' ')} ${d.wires.removed.map((w) => `<span class="st-removed">－ ${esc(w.from)} → ${esc(w.to)}</span>`).join(' ')}</p>` : ''}
+      ${tr.length ? `<p>Carácter: ${tr.map((k) => `${esc(k)} ${esc(num(d.traits.before[k]))} → ${esc(num(d.traits.after[k]))}`).join(' · ')}</p>` : ''}
+      ${rw.length ? `<p>Recompensa: ${rw.map((k) => `${esc(k)} ${esc(JSON.stringify(ver.genome.reward[k]))} → ${esc(JSON.stringify(S.saved.reward[k]))}`).join(' · ')}</p>` : ''}
+      ${ln.length ? `<p>Aprendizaje: ${ln.map((k) => esc(k)).join(', ')} cambiados</p>` : ''}
+      ${JSON.stringify(d.imagination.before) !== JSON.stringify(d.imagination.after) ? '<p>Imaginación cambiada.</p>' : ''}
+      ${d.text && d.text.length ? `<p class="dim">Mutaciones: ${d.text.map(esc).join(' · ')}</p>` : ''}</div>`;
+  }
+  function avisosTab() {
+    const all = [...S.check.errors.map((x) => ({ ...x, kind: 'error' })), ...S.check.warnings.map((x) => ({ ...x, kind: 'warning' }))];
+    if (!S.forPlay.ok && S.check.ok) all.push(...S.forPlay.errors.map((x) => ({ ...x, kind: 'warning' })).filter((x) => !all.some((y) => y.code === x.code)));
+    const fx = Hn.fixes(S.genome, catalog, S.check);
+    const fresh = freshBlocks();
+    const r = Hn.readiness(S.genome, catalog);
+    const server = S.server && S.server.error ? `<h3>El servidor no la guardó</h3><p class="bad">${esc(S.server.error)}</p><ul class="issues">${(S.server.errors || []).map((x) => issueRow({ ...x, kind: 'error' })).join('')}</ul>` : '';
+    return `<div class="vcols"><section><h3>¿Puede jugar?</h3><ul class="ready">${r.map((x) => `<li class="${x.ok ? 'ok' : x.required ? 'bad' : 'meh'}"><b>${x.ok ? '✔' : x.required ? '✘' : '·'} ${esc(x.text)}</b>${x.ok ? '' : `<span>${esc(x.need)}</span> ${readyButtons(x)}`}</li>`).join('')}</ul></section>
+      <section>${server}<h3>Errores y avisos</h3>${fx.length ? `<div class="fixes"><b>Arreglar con un clic</b> <small class="dim">(solo cuando hay una única forma de arreglarlo)</small>${fx.map((f) => `<button type="button" class="mini fix" data-fix="${esc(f.key)}">${esc(f.label)}</button>`).join('')}</div>` : ''}
+        ${all.length ? `<ul class="issues">${all.map(issueRow).join('')}</ul>` : '<p class="empty good">Sin errores ni avisos.</p>'}
+        ${fresh.length ? `<h3>Pesos nuevos al guardar</h3><p>Estos bloques cambiaron de forma y empezarán con pesos nuevos: lo que habían aprendido se pierde. ${fresh.map((b) => `<button type="button" class="link" data-goto="${esc(b.id)}">${esc(b.id)}</button>`).join(', ')}.</p>` : ''}</section></div>`;
+  }
+  function renderPanel() {
+    const p = $('edPanel');
+    if (!S.genome) { patch(p, ''); return; }
+    const nIss = S.check.errors.length + S.check.warnings.length + (S.forPlay.ok ? 0 : 1);
+    const body = S.folded ? '' : { capa: capaTab, genes: genesTab, ve: veTab, versiones: versionesTab, avisos: avisosTab }[S.panelTab]();
+    patch(p, `<div class="tabs" role="tablist" data-key="tabs">${PTABS.map(([k, t]) => `<button role="tab" type="button" data-ptab="${k}" aria-selected="${!S.folded && S.panelTab === k}" class="${k === 'avisos' && S.check.errors.length ? 'has-err' : ''}">${esc(k === 'avisos' && nIss ? `${t} (${nIss})` : t)}</button>`).join('')}<p class="legend2" data-key="legend" aria-label="Qué lleva cada cable"><span class="lg s-ctx" title="Una vez por soldado y turno">contexto</span><span class="lg s-cand" title="Una fila por cada tiro imaginado">candidatos</span><span class="lg s-move" title="Una fila por cada sitio adonde moverse">destinos</span>${S.bench.sig ? '<span class="lg nv" title="Un pulso corre por cada cable: más vivo cuanta más señal pasa en la escena del banco">señal real</span>' : ''}</p><button type="button" class="fold" data-act="fold" aria-expanded="${!S.folded}" title="${S.folded ? 'Abre el panel' : 'Pliega el panel para dar todo el sitio al lienzo'}">${S.folded ? '▴ Abrir' : '▾ Plegar'}</button></div>${S.folded ? '' : `<div class="panel-body" data-key="body-${S.panelTab}">${body}</div>`}`);
+  }
+
+  // ---------- banco de pruebas (a la derecha, abajo): la red decide aquí mismo ----------
+  const benchScene = () => (S.bench.scene === 'mia' && S.bench.custom ? { key: 'mia', name: 'Tu escena', explain: 'Arrastra soldados y rocas; doble clic en el plano añade una roca; rueda sobre una roca, más grande o más pequeña.', scene: S.bench.custom } : Bn.BENCH_SCENES.find((x) => x.key === S.bench.scene) || Bn.BENCH_SCENES[0]);
+  function scheduleBench(ms = 140) { clearTimeout(benchTimer); benchTimer = setTimeout(runBench, ms); }
+  function runBench() {
+    if (!S.genome) return;
+    const sc = benchScene(), opt = { phase: S.bench.phase, seed: Number(S.bench.seed) || 0 };
+    const key = `${sc.key}|${JSON.stringify(sc.scene)}|${opt.phase}|${opt.seed}`;
+    S.bench.now = Bn.decide(S.genome, sc.scene, opt);
+    if (S.bench.savedKey !== key) { S.bench.saved = S.saved && S.saved.blocks.length ? Bn.decide(S.saved, sc.scene, opt) : null; S.bench.savedKey = key; }
+    S.bench.sig = S.bench.now.ok ? Bn.signal(S.genome, S.bench.now.decision, S.bench.now.obs) : null;
+    S.bench.pick = S.bench.now.ok ? Bn.pick(S.bench.now.decision) : null;
+    renderBench(); renderBoard();
+    if (S.panelTab === 've' || (S.panelTab === 'capa' && S.sel)) renderPanel();
+  }
+  const X = (x) => (x + 25) * 10, Y = (y) => (15 - y) * 10;
+  function benchSVG(sc, res) {
+    const r1 = (v) => Math.round(v * 10) / 10;
+    const d = res && res.ok ? res.decision : null;
+    const obs = sc.scene.obstacles.map((o, i) => (o.kind === 'circle' ? `<circle data-key="o:${i}" cx="${X(o.x)}" cy="${Y(o.y)}" r="${o.r * 10}" class="b-obs" data-rock="${i}"/>` : `<rect data-key="o:${i}" x="${X(o.x)}" y="${Y(o.y + o.h)}" width="${o.w * 10}" height="${o.h * 10}" class="b-obs"/>`)).join('');
+    const line = (pts) => pts.map((p, i) => `${i ? 'L' : 'M'}${r1(X(p[0]))},${r1(Y(p[1]))}`).join('');
+    let lines = '';
+    if (d && d.phase === 'shoot') {
+      const cands = (d.candidates || []).filter((c) => Array.isArray(c.points) && c.points.length);
+      const maxP = Math.max(1e-9, ...cands.map((c) => c.p || 0));
+      lines = cands.filter((c) => c.i !== d.chosen).sort((a, b) => a.p - b.p).map((c) => `<path d="${line(c.points)}" class="b-c" style="opacity:${(0.08 + 0.45 * (c.p || 0) / maxP).toFixed(2)}"><title>#${c.i} ${esc(FAMILY_ES[c.family] || c.family)} · p ${f2(c.p)}</title></path>`).join('');
+      const ch = cands.find((c) => c.i === d.chosen);
+      if (ch) lines += `<path d="${line(ch.points)}" class="b-ch"/>`;
+    } else if (d && d.phase === 'move' && Array.isArray(d.moves)) {
+      lines = d.moves.map((m) => `<circle cx="${X(m.to.x)}" cy="${Y(m.to.y)}" r="${3 + 9 * Math.min(1, m.p * 2)}" class="b-mv${m.i === d.chosenMove ? ' on' : ''}${m.impossible ? ' no' : ''}"><title>${m.stay ? 'quedarse' : `ir a (${f2(m.to.x)}, ${f2(m.to.y)})`} · p ${f2(m.p)}${m.impossible ? ` · imposible (${esc(m.why)})` : ''}</title></circle>`).join('');
+    }
+    const sol = sc.scene.soldiers.map((x) => `<g data-key="s:${esc(x.id)}" class="b-s ${x.team}${x.id === sc.scene.soldierId ? ' me' : ''}" data-soldier="${esc(x.id)}"><circle cx="${X(x.x)}" cy="${Y(x.y)}" r="${x.id === sc.scene.soldierId ? 8 : 6}"/><text x="${X(x.x)}" y="${Y(x.y) - 11}">${esc(x.id === sc.scene.soldierId ? 'tu red' : x.id)}</text></g>`).join('');
+    return `<svg viewBox="0 0 500 300" class="bench-svg${sc.key === 'mia' ? ' editable' : ''}" id="benchSvg" role="img" aria-label="Escena: ${esc(sc.name)}"><rect x="0" y="0" width="500" height="300" class="b-plane"/><line x1="250" y1="0" x2="250" y2="300" class="b-axis"/><line x1="0" y1="150" x2="500" y2="150" class="b-axis"/>${obs}${lines}${sol}</svg>`;
+  }
+  function renderBench() {
+    const el = $('edBench');
+    if (!S.genome) { patch(el, '<p class="empty">Aquí probarás tu red en escenas fijas: verás qué tiro escoge y por qué, al momento, mientras cambias cosas.</p>'); return; }
+    const sc = benchScene(), B = S.bench;
+    const now = B.now, sv = B.saved;
+    const a = now && now.ok ? Bn.pick(now.decision) : null, b = sv && sv.ok ? Bn.pick(sv.decision) : null;
+    const same = now && now.ok && sv && sv.ok ? Bn.sameChoice(sv.decision, now.decision) : null;
+    const desc = (x) => (!x ? '—' : x.kind === 'move' ? `${x.stay ? 'quedarse quieta' : `moverse a (${f2(x.to.x)}, ${f2(x.to.y)})`} · probabilidad <b class="mono">${f2(x.p)}</b>` : `el tiro <span class="mono">#${x.i}</span>, una ${esc(FAMILY_ES[x.family] || x.family)} <span class="mono">${esc(x.mode === 'ode2' ? `y'' = ${x.expr}` : x.expr)}</span> · probabilidad <b class="mono">${f2(x.p)}</b>, certeza <b class="mono">${f2(x.certainty)}</b>`);
+    const att = now && now.ok && now.decision.attribution ? now.decision.attribution.filter((r) => r.share >= 0.005).sort((x, y) => y.share - x.share) : [];
+    const tools = sc.key === 'mia' ? `<div class="b-tools" role="group" aria-label="Editar tu escena"><button type="button" class="mini" data-bench="enemy">+ enemigo</button><button type="button" class="mini" data-bench="ally">+ aliada</button><button type="button" class="mini" data-bench="rock">+ roca</button>${B.picked ? `<button type="button" class="mini danger" data-bench="del">Quitar ${esc(B.picked.kind === 'rock' ? 'la roca' : B.picked.id)}</button>` : ''}</div>` : '';
+    patch(el, `<header><h3>Banco de pruebas</h3><button type="button" class="primary mini" data-act="probe" title="Una partida de verdad (x10) contra otra red, aquí mismo">Probar ya</button></header>
+      <div class="b-scenes" role="radiogroup" aria-label="Escena">${[...Bn.BENCH_SCENES, { key: 'mia', name: 'Tu escena' }].map((x) => `<button type="button" role="radio" aria-checked="${B.scene === x.key}" data-scene="${x.key}" title="${esc(x.explain || 'Tu propia escena: empieza como la que tengas elegida y la cambias arrastrando.')}">${esc(x.name)}</button>`).join('')}</div>
+      <p class="b-explain">${esc(sc.explain)}</p>
+      ${benchSVG(sc, now)}${tools}
+      <div class="b-row"><span class="seg2" role="radiogroup" aria-label="Qué decide"><button type="button" role="radio" data-phase="shoot" aria-checked="${B.phase === 'shoot'}">Disparar</button><button type="button" role="radio" data-phase="move" aria-checked="${B.phase === 'move'}">Moverse</button></span>
+        <label class="seed">Semilla <input class="numin mono" type="number" min="0" step="1" value="${esc(B.seed)}" data-bseed title="La misma semilla sortea igual: si la elección cambia, es por tus cambios"></label></div>
+      <div class="b-out" aria-live="polite">${!now ? '<p class="dim">Calculando…</p>' : !now.ok ? `<p class="warn-text">${esc(now.error)}</p>` : `
+        <p><b>${S.dirty && b ? 'Con tus cambios' : 'Tu red'}</b>: ${desc(a)}</p>
+        ${S.dirty && b ? `<p class="dim"><b>La guardada</b>: ${desc(b)}</p><p class="${same ? 'dim' : 'good'}">${same ? 'Tus cambios no cambian lo que escoge aquí.' : '¡Tus cambios cambian lo que escoge aquí!'}</p>` : ''}
+        ${att.length ? `<div class="attr"><span class="dim">Se fijó sobre todo en:</span>${att.slice(0, 4).map((r) => `<span class="ab"><i style="width:${Math.round(r.share * 100)}%"></i><b>${esc(r.name)}</b> ${pct(r.share)}</span>`).join('')}</div>` : ''}
+        <p class="dim small">Sin entrenar, una red escoge casi al azar: la certeza lo dice (cerca de 0 = duda). Curvas tenues: los tiros que imagina; en blanco, el escogido.</p>`}</div>`);
+  }
+  // editar tu escena: arrastrar soldados y rocas, doble clic para una roca, rueda para su tamaño
+  const benchPoint = (ev) => { const svg = $('benchSvg'); const r = svg.getBoundingClientRect(); return { x: ((ev.clientX - r.left) / r.width) * 50 - 25, y: 15 - ((ev.clientY - r.top) / r.height) * 30 }; };
+  function useCustom() { if (!S.bench.custom) S.bench.custom = Bn.copyScene((Bn.BENCH_SCENES.find((x) => x.key === S.bench.scene) || Bn.BENCH_SCENES[0]).scene); }
+  let bdrag = null;
+  root.addEventListener('pointerdown', (ev) => {
+    const svg = ev.target.closest && ev.target.closest('#benchSvg.editable');
+    if (!svg || ev.button !== 0) return;
+    const s = ev.target.closest('[data-soldier]'), rk = ev.target.closest('[data-rock]');
+    if (!s && !rk) return;
+    ev.preventDefault();
+    bdrag = s ? { kind: 'soldier', id: s.dataset.soldier } : { kind: 'rock', i: Number(rk.dataset.rock) };
+    S.bench.picked = s ? { kind: 'soldier', id: s.dataset.soldier } : { kind: 'rock', i: Number(rk.dataset.rock) };
+    svg.setPointerCapture(ev.pointerId);
+  });
+  root.addEventListener('pointermove', (ev) => {
+    if (!bdrag) return;
+    const p = benchPoint(ev);
+    S.bench.custom = bdrag.kind === 'soldier' ? Bn.moveSoldier(S.bench.custom, bdrag.id, p.x, p.y) : Bn.moveObstacle(S.bench.custom, bdrag.i, p.x, p.y);
+    scheduleBench(30);
+  });
+  root.addEventListener('pointerup', () => { if (bdrag) { bdrag = null; renderBench(); } });
+  root.addEventListener('dblclick', (ev) => {
+    const svg = ev.target.closest && ev.target.closest('#benchSvg.editable');
+    if (!svg || ev.target.closest('[data-soldier],[data-rock]')) return;
+    const p = benchPoint(ev);
+    S.bench.custom = Bn.addRock(S.bench.custom, p.x, p.y); scheduleBench(0);
+  });
+  root.addEventListener('wheel', (ev) => {
+    const rk = ev.target.closest && ev.target.closest('#benchSvg.editable [data-rock]');
+    if (!rk) return;
+    ev.preventDefault();
+    const i = Number(rk.dataset.rock);
+    S.bench.custom = Bn.resizeRock(S.bench.custom, i, S.bench.custom.obstacles[i].r + (ev.deltaY < 0 ? 0.3 : -0.3)); scheduleBench(30);
+  }, { passive: false });
+
+  // ---------- probar ya: una partida de verdad (x10) contra otra red, aquí mismo ----------
+  function renderProbe() {
+    const el = $('edProbe'), P = S.probe;
+    if (!P) { el.hidden = true; return; }
+    el.hidden = false;
+    const rivals = S.nets.filter((n) => n.id !== S.netId);
+    const nameOf = (id) => (S.nets.find((n) => n.id === id) || {}).name || id;
+    if (!P.duelId) {
+      patch(el, `<div class="pr-box"><header><h3>Probar ya</h3><button type="button" data-act="probe-close" aria-label="Cerrar">✕</button></header>
+        ${S.dirty ? '<p class="warn-text">Se prueba la red <b>guardada</b>: tus cambios sin guardar no juegan. Guarda antes si quieres probarlos.</p>' : ''}
+        ${!S.forPlay.ok ? '<p class="warn-text">Tu red aún no puede jugar: mira en Avisos qué le falta.</p>' : ''}
+        ${rivals.length ? `<label class="field">Contra <select data-prival>${rivals.map((n) => `<option value="${esc(n.id)}"${n.id === P.rival ? ' selected' : ''}>${esc(n.name)}${n.isQueen ? ' (reina)' : ''}</option>`).join('')}</select></label>
+          <p class="dim">6 partidas (3 mapas × 2 lados) a x10, sin aprender (congeladas): así ves cómo juega hoy, sin cambiarla.</p>
+          <div class="row">${S.dirty ? '<button type="button" class="primary" data-act="probe-save-go">Guardar y probar</button>' : ''}<button type="button" class="${S.dirty ? '' : 'primary'}" data-act="probe-go" ${S.forPlay.ok || !S.dirty ? '' : 'disabled'}>Empezar${S.dirty ? ' con la guardada' : ''}</button></div>` : '<p class="empty">Hace falta otra red en este mundo. Crea otra desde una plantilla.</p>'}</div>`);
+      return;
+    }
+    const d = P.duel;
+    const res = d && d.status !== 'running' ? `<p><b>${esc(nameOf(d.a))} ${d.wins[d.a] ?? 0} – ${d.wins[d.b] ?? 0} ${esc(nameOf(d.b))}</b> · ${d.tie ? 'empate' : d.winner === S.netId ? '¡gana tu red!' : 'gana la rival'}</p>` : '';
+    if (!el.querySelector('#prCanvas')) {
+      el.innerHTML = `<div class="pr-live"><header><h3>Probar ya: <span id="prWho"></span></h3><span class="dim" id="prScore"></span><button type="button" data-act="probe-close" aria-label="Cerrar">✕</button></header>
+        <canvas id="prCanvas" aria-label="Plano de la partida"></canvas><div class="fnbar" id="prFn"><span class="dim">Aquí sale la función de cada tiro.</span></div><div id="prEnd"></div></div>`;
+      initRender(el.querySelector('#prCanvas'));
+      R.onLanded = (shot) => { const p = R.state && R.state.players.find((q) => q.id === shot.playerId); patch(el.querySelector('#prFn'), `<b class="fn-who" style="color:${TEAM_COLOR[shot.shooterTeam]};border-color:${TEAM_COLOR[shot.shooterTeam]}">${esc(p ? p.name : '?')}</b><span class="fn-expr mono" style="color:${TEAM_COLOR[shot.shooterTeam]}">${esc(fnText(shot))}</span>`); };
+    }
+    patch(el.querySelector('#prWho'), `${esc(nameOf(d ? d.a : S.netId))} contra ${esc(nameOf(d ? d.b : P.rival))}`);
+    patch(el.querySelector('#prScore'), d ? `${d.games.length}/6 partidas · ${d.wins[d.a] ?? 0} – ${d.wins[d.b] ?? 0}` : 'empezando…');
+    patch(el.querySelector('#prEnd'), res ? `<div class="pr-end">${res}<p class="dim">Para ver cada decisión con calma, abre la moviola de su ficha:</p><button type="button" data-ficha="${esc(S.netId)}" data-ficha-tab="historia">Moviola de ${esc(nameOf(S.netId))}</button> <button type="button" data-act="probe-again">Otra vez</button></div>` : '');
+  }
+  let probeOff = [], probePoll = null;
+  function probeWatch(code) {
+    for (const off of probeOff) off();
+    resetRoom();
+    const url = `/api/rooms/${code}/events`;
+    probeOff = [
+      hub.on(url, 'hello', (st) => { if (st && st.soldiers) R.state = st; }), hub.on(url, 'state', (st) => { if (st && st.soldiers) R.state = st; }),
+      hub.on(url, 'shot', (d) => startShot(d.shot)),
+      hub.on(url, 'decision', (d) => { if (d.decision && d.decision.phase === 'shoot') expect(d.decision.soldierId); }),
+      hub.on(url, 'chat', (d) => { for (const c of (d.chat || []).slice(-3)) if (c.kind === 'say' && c.soldierId && !probeSeen.has(`${c.t}|${c.text}`)) { probeSeen.add(`${c.t}|${c.text}`); const cut = c.text.indexOf(': '); say({ soldierId: c.soldierId, text: cut >= 0 && cut < 40 ? c.text.slice(cut + 2) : c.text, level: c.level || null }); } }),
+    ];
+    api(`/api/rooms/${code}/state`).then((r) => { if (r.ok) R.state = r.body; });
+  }
+  const probeSeen = new Set();
+  async function probeStart() {
+    const P = S.probe;
+    const r = await api('/api/lab/duels', 'POST', { a: S.netId, b: P.rival, speed: 'x10', learning: 'frozen', soldiers: 'random' });
+    if (!r.ok) { toast(reasonOf(r), 'error'); return; }
+    P.duelId = r.body.id; P.room = null;
+    renderProbe();
+    clearInterval(probePoll);
+    probePoll = setInterval(async () => {
+      if (!S.probe || S.probe.duelId !== P.duelId) { clearInterval(probePoll); return; }
+      const d = await api(`/api/lab/duels/${encodeURIComponent(P.duelId)}`);
+      if (!d.ok) return;
+      P.duel = d.body;
+      if (d.body.liveRoom && d.body.liveRoom !== P.room) { P.room = d.body.liveRoom; probeWatch(P.room); }
+      if (d.body.status !== 'running') { clearInterval(probePoll); loadNets().then(() => renderTools()); }
+      renderProbe();
+    }, 700);
+  }
+  function probeClose() {
+    clearInterval(probePoll);
+    for (const off of probeOff) off();
+    probeOff = [];
+    if (S.probe && S.probe.duelId && S.probe.duel && S.probe.duel.status === 'running') api(`/api/lab/duels/${encodeURIComponent(S.probe.duelId)}/stop`, 'POST', {});
+    S.probe = null; $('edProbe').innerHTML = ''; renderProbe();
   }
 
   // ---------- diálogo propio (sin confirm del navegador) ----------
@@ -485,33 +812,54 @@ export function mountEditor(root, { catalog, toast }) {
     else if (S.confirm && S.confirm.kind === 'import') html = `<p>${esc(S.confirm.text)}</p><div class="row"><button type="button" class="primary" data-modal="import-rename">Importar con otro id</button><button type="button" data-modal="cancel">Cancelar</button></div>`;
     else if (S.confirm && S.confirm.kind === 'delete') html = `<p>¿Borrar «${esc(S.genome.name)}»? Se borra su genoma; sus partidas guardadas y lo que dejó en el registro se conservan.</p><div class="row"><button type="button" class="danger" data-modal="delete">Borrar la red</button><button type="button" data-modal="cancel">Cancelar</button></div>`;
     else if (S.confirm && S.confirm.kind === 'force') html = `<p>${esc(S.confirm.text)}</p><div class="row"><button type="button" class="danger" data-modal="delete-force">Borrarla igualmente</button><button type="button" data-modal="cancel">Cancelar</button></div>`;
+    else if (S.confirm && S.confirm.kind === 'restore') html = `<p>¿Volver a la versión ${S.confirm.n}? La red recupera sus bloques, cables, pesos y genes de entonces; lo vivido (partidas, estadísticas, linaje) se queda. La de ahora se guarda antes como otra versión: se puede deshacer.${S.dirty ? ' <b>Tus cambios sin guardar se pierden.</b>' : ''}</p><div class="row"><button type="button" class="primary" data-modal="restore">Volver a la versión ${S.confirm.n}</button><button type="button" data-modal="cancel">Cancelar</button></div>`;
     m.innerHTML = `<div class="dlg" role="dialog" aria-modal="true">${html}</div>`;
     m.hidden = false;
     const first = m.querySelector('button');
     if (first) first.focus();
   }
   function closeModal() { $('edModal').hidden = true; S.pending = null; S.confirm = null; }
+  async function restoreVersion(n) {
+    const r = await api(`/api/lab/nets/${encodeURIComponent(S.netId)}/versions/${n}/restore`, 'POST', {});
+    if (!r.ok) { toast(reasonOf(r), 'error'); return; }
+    await open(S.netId, { force: true });
+    S.panelTab = 'versiones'; S.versions.list = null; renderPanel();
+    toast(`Vuelta a la versión ${n}. La de antes quedó guardada como versión ${r.body.savedAs}.`);
+  }
 
   // ---------- eventos ----------
   const blockOf = (id) => S.genome.blocks.find((b) => b.id === id);
-  function select(sel) { S.sel = sel; S.panelTab = 'block'; renderBoard(); renderPanel(); }
+  function select(sel) { S.sel = sel; S.panelTab = 'capa'; renderBoard(); if (sel && S.folded) fold(false); else renderPanel(); }
   function focusNode(id) { const n = $('edBoard').querySelector(`[data-node="${CSS.escape(id)}"]`); if (n) { n.focus(); n.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } }
+  function addBlock(type) {
+    const a = Hn.advice(S.genome, catalog, type);
+    if (!a.can) { toast(a.why, 'error'); return; }
+    const r = M.addBlock(S.genome, type, catalog);
+    commit(r.genome, { select: { kind: 'block', id: r.id } });
+    focusNode(r.id);
+    popIn($('edBoard').querySelector(`[data-node="${CSS.escape(r.id)}"]`));
+    toast(`${(M.entryOf(catalog, type) || {}).name} (${r.id}) añadido. ${a.why}`);
+  }
 
-  root.addEventListener('click', async (ev) => {
+  root.addEventListener('mouseover', (ev) => { const t = ev.target.closest && ev.target.closest('[data-add]'); if (t && root.querySelector('#edRail').contains(t) && S.palHover !== t.dataset.add) { S.palHover = t.dataset.add; renderRail(); } });
+  root.addEventListener('focusin', (ev) => { const t = ev.target.closest && ev.target.closest('.pal [data-add]'); if (t && S.palHover !== t.dataset.add) { S.palHover = t.dataset.add; renderRail(); } });
+
+  // la cabecera vive en la de la etapa (fuera de root): sus eventos llegan por el mismo camino (ver slot())
+  const mine = (el) => !!el && (root.contains(el) || (S.slotEl && S.slotEl.contains(el)));
+  document.addEventListener('click', (ev) => { if (S.menu && !(ev.target.closest && ev.target.closest('.edh-more'))) { S.menu = false; renderHead(); } }, true);
+  const onClick = async (ev) => {
     const t = ev.target.closest('button, a, [data-wire]');
-    if (!t || !root.contains(t)) return;
+    if (!t || !mine(t)) return;
+    if (t.dataset.ficha) { S.menu = false; renderHead(); return; } // lo abre la ficha (main.js escucha data-ficha en todo el documento)
     if (t.dataset.level) { S.level = t.dataset.level; store.set(LS.level, S.level); render(); return; }
-    if (t.dataset.zoom) { if (t.dataset.zoom === 'fit') S.fit = true; else { S.fit = false; S.zoom = Math.max(0.4, Math.min(1.5, Math.round((S.zoom + 0.1 * Number(t.dataset.zoom)) * 10) / 10)); } renderBoard(); return; }
-    if (t.dataset.rail) { S.railTab = t.dataset.rail; renderRail(); return; }
-    if (t.dataset.ptab) { S.panelTab = t.dataset.ptab; renderPanel(); return; }
-    if (t.dataset.open) { open(t.dataset.open); return; }
+    if (t.dataset.zoom) { if (t.dataset.zoom === 'fit') S.fit = true; else { S.fit = false; S.zoom = Math.max(0.4, Math.min(1.5, Math.round((S.zoom + 0.1 * Number(t.dataset.zoom)) * 10) / 10)); } renderTools(); renderBoard(); return; }
+    if (t.dataset.ptab) { S.panelTab = t.dataset.ptab; S.menu = false; renderHead(); if (S.folded) fold(false); else renderPanel(); return; }
+    if (t.dataset.genes) { S.genesTab = t.dataset.genes; renderPanel(); return; }
+    if (t.dataset.open) { S.menu = false; open(t.dataset.open); return; }
     if (t.dataset.tpl) { S.tplOpen = S.tplOpen === t.dataset.tpl ? null : t.dataset.tpl; renderRail(); const f = root.querySelector('.tpl-form input'); if (f) f.select(); return; }
-    if (t.dataset.add) {
-      const r = M.addBlock(S.genome, t.dataset.add, catalog);
-      commit(r.genome, { select: { kind: 'block', id: r.id } });
-      focusNode(r.id);
-      return;
-    }
+    if (t.dataset.add) { if (!S.genome) return; addBlock(t.dataset.add); return; }
+    if (t.dataset.wireup) { const [a, b] = t.dataset.wireup.split('|'); const r = M.connect(S.genome, a, b); if (r.error) { toast(r.error, 'error'); return; } commit(r.genome); return; }
+    if (t.dataset.fix) { const f = Hn.fixes(S.genome, catalog, S.check).find((x) => x.key === t.dataset.fix); if (f) { commit(f.apply(S.genome), { label: f.label }); toast(`Arreglado: ${f.label}.`); } return; }
     if (t.dataset.node) {
       if (suppressClick) { suppressClick = false; return; }
       select({ kind: 'block', id: t.dataset.node });
@@ -520,6 +868,22 @@ export function mountEditor(root, { catalog, toast }) {
     if (t.dataset.wire !== undefined) { select({ kind: 'wire', index: Number(t.dataset.wire) }); return; }
     if (t.dataset.goto) { select({ kind: 'block', id: t.dataset.goto }); focusNode(t.dataset.goto); return; }
     if (t.dataset.gowire !== undefined) { select({ kind: 'wire', index: Number(t.dataset.gowire) }); return; }
+    if (t.dataset.jump) { S.hist = Hi.jump(S.hist, Number(t.dataset.jump)); S.genome = S.hist.present; afterChange(); return; }
+    if (t.dataset.vdiff) { openVersion(Number(t.dataset.vdiff)); return; }
+    if (t.dataset.vback) { S.confirm = { kind: 'restore', n: Number(t.dataset.vback) }; showModal(); return; }
+    if (t.dataset.scene) {
+      if (t.dataset.scene === 'mia') useCustom();
+      S.bench.scene = t.dataset.scene; S.bench.picked = null; scheduleBench(0); renderBench(); return;
+    }
+    if (t.dataset.phase) { S.bench.phase = t.dataset.phase; scheduleBench(0); return; }
+    if (t.dataset.bench) {
+      const b = S.bench;
+      if (t.dataset.bench === 'enemy') b.custom = Bn.addSoldier(b.custom, 'right');
+      else if (t.dataset.bench === 'ally') b.custom = Bn.addSoldier(b.custom, 'left');
+      else if (t.dataset.bench === 'rock') b.custom = Bn.addRock(b.custom, 0, 0);
+      else if (t.dataset.bench === 'del' && b.picked) { b.custom = b.picked.kind === 'rock' ? Bn.removeRock(b.custom, b.picked.i) : Bn.removeSoldier(b.custom, b.picked.id); b.picked = null; }
+      scheduleBench(0); return;
+    }
     if (t.dataset.modal) {
       const kind = t.dataset.modal, pending = S.pending, conf = S.confirm;
       closeModal();
@@ -528,17 +892,28 @@ export function mountEditor(root, { catalog, toast }) {
       else if (kind === 'import-rename') importFile(conf.file, true);
       else if (kind === 'delete') removeNet(false);
       else if (kind === 'delete-force') removeNet(true);
+      else if (kind === 'restore') restoreVersion(conf.n);
       return;
     }
     switch (t.dataset.act) {
       case 'save': save(); break;
-      case 'delete': S.confirm = { kind: 'delete' }; showModal(); break;
+      case 'undo': undo(); break;
+      case 'redo': redo(); break;
+      case 'menu': S.menu = !S.menu; renderHead(); break;
+      case 'fold': fold(!S.folded); break;
+      case 'delete': S.menu = false; renderHead(); S.confirm = { kind: 'delete' }; showModal(); break;
       case 'tidy': S.pos = {}; store.del(LS.pos(S.netId)); renderBoard(); break;
       case 'remove': { const id = t.dataset.id; commit(M.removeBlock(S.genome, id), { select: null }); break; }
       case 'unwire': commit(M.disconnect(S.genome, Number(t.dataset.index)), { select: null }); break;
+      case 'probe': { const rivals = S.nets.filter((n) => n.id !== S.netId); const q = rivals.find((n) => n.isQueen) || rivals.find((n) => n.id === 'vidente-1') || rivals[0]; S.probe = { rival: q ? q.id : null, duelId: null }; renderProbe(); break; }
+      case 'probe-close': probeClose(); break;
+      case 'probe-go': probeStart(); break;
+      case 'probe-save-go': await save(); if (!S.dirty) probeStart(); break;
+      case 'probe-again': { const rival = S.probe.rival; probeClose(); S.probe = { rival, duelId: null }; renderProbe(); break; }
       default: break;
     }
-  });
+  };
+  root.addEventListener('click', onClick);
 
   root.addEventListener('submit', (ev) => {
     const f = ev.target.closest('form[data-create]');
@@ -550,15 +925,18 @@ export function mountEditor(root, { catalog, toast }) {
   // cambios de los controles: 'input' repinta solo el lienzo y la cabecera (el deslizador no se corta); 'change', todo
   const onControl = (ev, partial) => {
     const el = ev.target;
-    if (!S.genome || !root.contains(el)) return;
-    if (el.id === 'edName') { commit({ ...S.genome, name: el.value }, { partial: true }); return; }
+    if (!S.genome || !mine(el)) return;
+    if (el.id === 'edName') { commit({ ...S.genome, name: el.value }, { partial: true, key: 'name', label: `Nombre: ${el.value}` }); return; }
     if (el.dataset.bparam) {
       const blk = blockOf(el.dataset.block), e = blk && M.entryOf(catalog, blk.type);
       const param = e && e.params.find((p) => p.key === el.dataset.bparam);
       if (!param) return;
       let raw = el.type === 'checkbox' && param.type === 'bool' ? el.checked : el.value;
       if (param.type === 'set') raw = [...root.querySelectorAll(`[data-bparam="${CSS.escape(param.key)}"][data-block="${CSS.escape(blk.id)}"]`)].filter((x) => x.checked).map((x) => x.dataset.opt);
-      commit(M.setParam(S.genome, blk.id, param, raw), { partial });
+      const before = (blk.params || {})[param.key];
+      const next = M.setParam(S.genome, blk.id, param, raw);
+      const after = next.blocks.find((b) => b.id === blk.id).params[param.key];
+      commit(next, { partial, key: `${blk.id}.${param.key}`, label: `${param.name} de ${blk.id}: ${num(before)} → ${num(after)}` });
       syncTwins(el);
       return;
     }
@@ -568,7 +946,7 @@ export function mountEditor(root, { catalog, toast }) {
       const cur = M.getPath(S.genome, path);
       const raw = el.type === 'checkbox' ? el.checked : el.value;
       const v = param ? M.coerce(param, raw, cur) : raw;
-      commit(M.setPath(S.genome, path, v), { partial });
+      commit(M.setPath(S.genome, path, v), { partial, key: path, label: `${param && param.name ? param.name : path}: ${num(cur)} → ${num(v)}` });
       syncTwins(el);
       return;
     }
@@ -597,26 +975,43 @@ export function mountEditor(root, { catalog, toast }) {
     }
     return null;
   }
-  root.addEventListener('input', (ev) => { if (ev.target.type === 'range' || ev.target.id === 'edName') onControl(ev, true); });
-  root.addEventListener('change', (ev) => {
-    if (ev.target.dataset.wi) { S.wi[ev.target.dataset.wi] = ev.target.value; scheduleWhatif(); return; }
-    if (ev.target.dataset.import !== undefined && ev.target.files && ev.target.files[0]) { importFile(ev.target.files[0]); ev.target.value = ''; return; }
-    if (ev.target.dataset.connect) {
-      const r = M.connect(S.genome, ev.target.value, ev.target.dataset.connect);
+  const onInput = (ev) => { if (ev.target.type === 'range' || ev.target.id === 'edName') onControl(ev, true); };
+  root.addEventListener('input', onInput);
+  const onChange = (ev) => {
+    const el = ev.target;
+    if (el.dataset.bseed !== undefined) { S.bench.seed = Math.max(0, Math.round(Number(el.value) || 0)); scheduleBench(0); return; }
+    if (el.dataset.prival !== undefined) { S.probe.rival = el.value; return; }
+    if (el.dataset.import !== undefined && el.files && el.files[0]) { S.menu = false; importFile(el.files[0]); el.value = ''; return; }
+    if (el.dataset.connect) {
+      const r = M.connect(S.genome, el.value, el.dataset.connect);
       if (r.error) { toast(r.error, 'error'); renderPanel(); return; }
       commit(r.genome);
       return;
     }
-    if (ev.target.id === 'edName') { renderRail(); return; }
+    if (el.dataset.swap) {
+      // cambiar el tipo de un bloque (p. ej. Eco → GRU): conserva su id y sus cables; sus ajustes vuelven a los de fábrica
+      const blk = blockOf(el.dataset.swap), e = M.entryOf(catalog, el.value);
+      if (!blk || !e) return;
+      const params = Object.fromEntries((e.params || []).map((p) => [p.key, clone(p.default)]));
+      commit({ ...S.genome, blocks: S.genome.blocks.map((b) => (b.id === blk.id ? { ...b, type: e.type, params } : b)) }, { label: `${blk.id}: ${(M.entryOf(catalog, blk.type) || {}).name} → ${e.name}` });
+      return;
+    }
+    if (el.id === 'edName') { renderRail(); return; }
     onControl(ev, false);
-  });
+  };
+  root.addEventListener('change', onChange);
 
-  // teclado en el lienzo: Supr quita, flechas mueven (Mayús: más lejos), Esc suelta la selección
-  root.addEventListener('keydown', (ev) => {
+  // teclado: Ctrl+Z / Ctrl+Y deshacer y rehacer; en el lienzo, Supr quita, flechas mueven (Mayús: más lejos), Esc suelta
+  const onKey = (ev) => {
     if (!$('edModal').hidden && ev.key === 'Escape') { closeModal(); return; }
-    const node = ev.target.closest && ev.target.closest('[data-node]');
-    if (ev.key === 'Escape' && S.sel) { select(null); return; }
+    const typing = /INPUT|SELECT|TEXTAREA/.test(ev.target.tagName);
+    if ((ev.ctrlKey || ev.metaKey) && !typing && ev.key.toLowerCase() === 'z') { ev.preventDefault(); if (ev.shiftKey) redo(); else undo(); return; }
+    if ((ev.ctrlKey || ev.metaKey) && !typing && ev.key.toLowerCase() === 'y') { ev.preventDefault(); redo(); return; }
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's' && S.genome) { ev.preventDefault(); save(); return; }
+    if (ev.key === 'Escape' && S.menu) { S.menu = false; renderHead(); return; }
+    if (ev.key === 'Escape' && S.sel) { select(null); return; }
+    if (S.sel && S.sel.kind === 'wire' && (ev.key === 'Delete' || ev.key === 'Backspace') && !typing) { ev.preventDefault(); commit(M.disconnect(S.genome, S.sel.index), { select: null }); return; }
+    const node = ev.target.closest && ev.target.closest('[data-node]');
     if (!node || !S.genome) return;
     const id = node.dataset.node;
     if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); commit(M.removeBlock(S.genome, id), { select: null }); return; }
@@ -624,61 +1019,70 @@ export function mountEditor(root, { catalog, toast }) {
     const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[ev.key];
     if (d) {
       ev.preventDefault();
-      const cur = M.layout(S.genome, catalog, S.pos).nodes[id];
-      S.pos = { ...S.pos, [id]: { x: Math.max(0, cur.x + d[0]), y: Math.max(40, cur.y + d[1]) } };
+      const cur = layout().nodes[id];
+      S.pos = { ...S.pos, [id]: { x: Math.max(0, cur.x + d[0]), y: Math.max(56, cur.y + d[1]) } };
       store.set(LS.pos(S.netId), S.pos);
       renderBoard(); focusNode(id);
     }
-  });
-  root.addEventListener('keydown', (ev) => {
-    if (S.sel && S.sel.kind === 'wire' && (ev.key === 'Delete' || ev.key === 'Backspace') && !/INPUT|SELECT|TEXTAREA/.test(ev.target.tagName)) {
-      ev.preventDefault(); commit(M.disconnect(S.genome, S.sel.index), { select: null });
-    }
-  });
+  };
+  root.addEventListener('keydown', onKey);
 
-  // arrastrar: desde el punto de salida hace un cable; desde el bloque, lo mueve
+  // arrastrar: desde el punto de salida hace un cable (y marca dónde vale y dónde no, con el porqué); desde el bloque,
+  // lo mueve; la raya entre el lienzo y el panel cambia su altura
   const boardPoint = (ev) => { const inner = $('edBoard').querySelector('.board-inner').getBoundingClientRect(); return { x: (ev.clientX - inner.left) / S.zoom, y: (ev.clientY - inner.top) / S.zoom }; };
+  let split = null;
   root.addEventListener('pointerdown', (ev) => {
+    if (ev.target.id === 'edSplit') { if (S.folded) { S.folded = false; store.set('gw.ed.folded', false); renderPanel(); } split = { y: ev.clientY, h: parseFloat(getComputedStyle(root).getPropertyValue('--ed-bottom')) || 262 }; ev.target.setPointerCapture(ev.pointerId); return; }
     if (!S.genome || ev.button !== 0) return;
     const port = ev.target.closest('[data-port]');
     const node = ev.target.closest('[data-node]');
     if (port) {
       ev.preventDefault(); ev.stopPropagation();
-      link = { from: port.dataset.port };
+      const o = Hn.connectOptions(S.genome, catalog, port.dataset.port);
+      S.link = { from: port.dataset.port, ok: new Set(o.to.filter((x) => x.ok).map((x) => x.id)), why: new Map(o.to.filter((x) => !x.ok).map((x) => [x.id, x.why])) };
+      renderBoard();
       $('edBoard').setPointerCapture(ev.pointerId);
       return;
     }
     if (node) {
-      const p = M.layout(S.genome, catalog, S.pos).nodes[node.dataset.node];
+      const p = layout().nodes[node.dataset.node];
       drag = { id: node.dataset.node, sx: ev.clientX, sy: ev.clientY, ox: p.x, oy: p.y, moved: false, el: node };
       node.setPointerCapture(ev.pointerId);
     }
   });
   root.addEventListener('pointermove', (ev) => {
-    if (link) {
-      const L = M.layout(S.genome, catalog, S.pos), a = L.nodes[link.from], p = boardPoint(ev);
+    if (split) { const h = Math.max(180, Math.min(620, split.h - (ev.clientY - split.y))); root.style.setProperty('--ed-bottom', `${h}px`); return; }
+    if (S.link) {
+      const L = layout(), a = L.nodes[S.link.from], p = boardPoint(ev);
       const tmp = $('edBoard').querySelector('#edTmpWire');
-      if (tmp && a) tmp.setAttribute('d', `M${a.x + M.NODE.w},${a.y + M.NODE.h / 2} C${a.x + M.NODE.w + 60},${a.y + M.NODE.h / 2} ${p.x - 60},${p.y} ${p.x},${p.y}`);
+      if (tmp && a) tmp.setAttribute('d', `M${a.x + CARD.w},${a.y + CARD.h / 2} C${a.x + CARD.w + 60},${a.y + CARD.h / 2} ${p.x - 60},${p.y} ${p.x},${p.y}`);
       return;
     }
     if (!drag) return;
     const dx = (ev.clientX - drag.sx) / S.zoom, dy = (ev.clientY - drag.sy) / S.zoom;
     if (!drag.moved && Math.hypot(dx, dy) < 4) return;
     drag.moved = true;
-    const x = Math.max(0, drag.ox + dx), y = Math.max(40, drag.oy + dy);
+    const x = Math.max(0, drag.ox + dx), y = Math.max(56, drag.oy + dy);
     S.pos = { ...S.pos, [drag.id]: { x, y } };
     drag.el.style.left = `${x}px`; drag.el.style.top = `${y}px`;
     redrawWires();
   });
   root.addEventListener('pointerup', (ev) => {
-    if (link) {
-      const from = link.from;
-      link = null;
+    if (split) { split = null; store.set(LS.bottom, parseFloat(root.style.getPropertyValue('--ed-bottom'))); S.fit && renderBoard(); return; }
+    if (S.link) {
+      const L = S.link;
+      S.link = null;
       const under = document.elementFromPoint(ev.clientX, ev.clientY);
       const target = under && under.closest && under.closest('[data-node]');
-      if (!target) { redrawWires(); return; }
-      const r = M.connect(S.genome, from, target.dataset.node);
-      if (r.error) { toast(r.error, 'error'); redrawWires(); return; }
+      if (!target || target.dataset.node === L.from) { renderBoard(); return; }
+      const why = L.why.get(target.dataset.node);
+      if (why) {
+        // no se une: dice por qué y qué haría falta
+        const o = Hn.connectOptions(S.genome, catalog, L.from).to.find((x) => x.id === target.dataset.node);
+        toast(`${why}${o && o.hint ? ` ${o.hint}` : ''}`, 'error'); renderBoard(); return;
+      }
+      const r = M.connect(S.genome, L.from, target.dataset.node);
+      if (r.error) { toast(r.error, 'error'); renderBoard(); return; }
       commit(r.genome, { select: { kind: 'block', id: target.dataset.node } });
       return;
     }
@@ -688,6 +1092,7 @@ export function mountEditor(root, { catalog, toast }) {
     }
   });
   window.addEventListener('beforeunload', (ev) => { if (S.dirty) { ev.preventDefault(); ev.returnValue = ''; } });
+  window.addEventListener('resize', () => { if (S.fit && S.genome && !root.closest('[hidden]')) renderBoard(); });
 
   return {
     async start(netId) {
@@ -698,6 +1103,12 @@ export function mountEditor(root, { catalog, toast }) {
       else render();
     },
     open,
+    // la etapa le presta su cabecera (a la derecha del título, como en el mockup) para el nombre y los botones
+    slot(el) {
+      if (S.slotEl !== el && el) { el.addEventListener('click', onClick); el.addEventListener('input', onInput); el.addEventListener('change', onChange); el.addEventListener('keydown', onKey); }
+      S.slotEl = el; renderHead();
+    },
+    stop() { if (S.probe) probeClose(); },
     get state() { return S; },
   };
 }

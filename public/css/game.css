@@ -42,7 +42,10 @@ body.game.reduce * { animation: none !important; transition: none !important; }
 .g-motto { color: #2f4470; letter-spacing: .3em; font-size: 11px; text-transform: uppercase; align-self: start; padding-top: 8px; }
 
 /* ---------- cuerpo: aquí viven las vistas del laboratorio ---------- */
-.g-body { height: calc(100vh - var(--top) - var(--head)); position: relative; }
+/* la cabecera mide lo que mida (título, pestañas y lo que ponga la vista): el cuerpo ocupa justo lo que queda */
+#game:not([hidden]) { height: 100vh; display: flex; flex-direction: column; }
+#game > .g-top, #game > .g-head { flex: none; }
+.g-body { flex: 1; min-height: 0; position: relative; }
 .g-body > [data-view] { height: 100%; }
 body.game .lab-ed, body.game .lab-home, body.game .lab-tr, body.game .lab-thr, body.game .lab-tv, body.game .lab-sg { height: 100%; }
 body.game .lab-nav { display: none; }

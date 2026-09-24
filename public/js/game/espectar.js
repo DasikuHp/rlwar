@@ -39,7 +39,7 @@ export function mountDuel(root, { toast, settings }) {
     </aside>
   </div>`;
   const $ = (id) => root.querySelector(`#${id}`);
-  let rendered = false, offRoom = [], room = null, follow = null, poll = null, nets = [], duels = [];
+  let offRoom = [], room = null, follow = null, poll = null, nets = [], duels = [];
   const nameOf = (id) => (nets.find((n) => n.id === id) || {}).name || id;
 
   // ---- lanzar ----
@@ -177,7 +177,7 @@ export function mountDuel(root, { toast, settings }) {
     fnBar(shot, false);
     logSoon();
   }
-  R.onLanded = (shot) => { if (!root.isConnected) return; held = null; fnBar(shot, true); renderLog(); };
+  const onLanded = (shot) => { if (!root.isConnected) return; held = null; fnBar(shot, true); renderLog(); };
 
   // ---- bocadillos: lo que dice cada red sale sobre su soldado, después de su función (ui/bubbles.js) ----
   const seenSay = new Set();
@@ -214,7 +214,11 @@ export function mountDuel(root, { toast, settings }) {
 
   return {
     async start(code = null) {
-      if (!rendered) { initRender($('dCanvas')); rendered = true; }
+      // el plano es uno para todo el juego: si lo estaba usando "Probar ya" del editor, vuelve aquí y se repinta la sala
+      const took = R.canvas !== $('dCanvas');
+      initRender($('dCanvas'));
+      R.onLanded = onLanded;
+      if (took && room) { const c = room; room = null; watchRoom(c); }
       await loadDuels();
       renderForm();
       if (code && code !== room) watchRoom(code);

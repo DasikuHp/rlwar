@@ -700,8 +700,13 @@ export async function labApi(req, res, parts, url) {
         if (!g || g.id !== id) return bad(400, `El id del genoma (${JSON.stringify(g && g.id)}) no coincide con la ruta (${id}).`);
         const val = validate(g);
         if (!val.ok) return json(res, 400, { error: 'Genoma inválido', errors: val.errors, warnings: val.warnings });
+        // P6: la de antes queda como versión (Versiones del editor: diferencias y volver), si de verdad cambia algo
+        const BODY = ['blocks', 'wires', 'weights', 'traits', 'reward', 'learning', 'imagination', 'frozen', 'names'];
+        const ng = normalize(g);
+        const changed = BODY.some((k) => JSON.stringify(genome[k] ?? null) !== JSON.stringify(ng[k] ?? null));
+        const version = changed ? saveVersion(genome, { reason: 'antes de guardar en el editor' }) : null;
         saveNet(g);
-        return json(res, 200, { ok: true, warnings: val.warnings });
+        return json(res, 200, { ok: true, warnings: val.warnings, version });
       }
       return bad(405, 'Método no permitido');
     }

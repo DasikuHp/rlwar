@@ -30,9 +30,15 @@ const lowFx = () => R.fx.quality === 'baja' || R.fx.reduce;
 // Ajustes: calidad Baja quita brillos y chispas; "reducir movimiento" quita también la sacudida (las curvas se trazan igual)
 export function setFx(fx) { R.fx = { ...R.fx, ...fx }; }
 
+// el plano pinta en un lienzo cada vez (el del duelo o el de "Probar ya" del editor): llamarla otra vez lo cambia de
+// lienzo sin arrancar otro bucle
+let looping = false;
 export function initRender(canvas) {
+  if (R.canvas === canvas && looping) return;
   R.canvas = canvas; R.ctx = canvas.getContext('2d');
-  R.canvas.width = 0; R.canvas.height = 0; R._cw = -1; R._ch = -1; // forzar (re)encaje
+  R.canvas.width = 0; R.canvas.height = 0; R._cw = -1; R._ch = -1; R.terrain = null; // forzar (re)encaje
+  if (looping) return;
+  looping = true;
   const fit = () => {
     R.dpr = window.devicePixelRatio || 1;
     // clientWidth es 0 mientras #game está oculto (display:none): reintentar luego

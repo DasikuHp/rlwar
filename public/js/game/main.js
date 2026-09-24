@@ -223,7 +223,7 @@ const MOUNT = {
   'trono/dinastias': (el) => mountDynasties(el, { toast }),
   'trono/cronica': (el) => mountTruth(el, { catalog, toast, bare: true, tabs: ['cronica'] }),
 };
-const CLASS = { 'crear/editor': 'lab-ed', 'crear/redes': 'lab-home', 'entrenar/entrenamiento': 'lab-tr', 'entrenar/evolucion': 'lab-tr', 'trono/trono': 'lab-thr', 'trono/dinastias': 'lab-thr', 'trono/cronica': 'lab-tv' };
+const CLASS = { 'crear/editor': 'lab-ed ed2', 'crear/redes': 'lab-home', 'entrenar/entrenamiento': 'lab-tr', 'entrenar/evolucion': 'lab-tr', 'trono/trono': 'lab-thr', 'trono/dinastias': 'lab-thr', 'trono/cronica': 'lab-tv' };
 let editorStarted = false, shownKey = null;
 async function showStage(r) {
   if (!activeWorld()) { toast('Abre o crea una partida primero.', 'error'); location.hash = '#portada'; return; }
@@ -236,7 +236,7 @@ async function showStage(r) {
   $('worldChip').innerHTML = `${esc(w.name)} <i>· ranura ${w.n}</i>`;
   $('stageHead').innerHTML = `<div class="g-num" data-stage="${st.key}">${st.n}.</div>
     <div class="g-title"><h1>${st.key === 'trono' ? 'Resultados, <em>trono</em> y análisis' : esc(st.title)}</h1><p>${esc(st.sub)}</p></div>
-    <div class="g-motto">Functions shape victory</div>
+    <div class="g-side"><div class="g-motto">Functions shape victory</div><div class="g-slot" id="stageSlot"></div></div>
     <nav class="g-tabs" aria-label="Pestañas de la etapa">${st.tabs.length > 1 ? st.tabs.map((t) => `<a href="${hrefOf({ stage: st.key, tab: t.key })}"${t.key === r.tab ? ' aria-current="page"' : ''}>${esc(t.name)}</a>`).join('') : ''}</nav>`;
   const key = `${r.stage}/${r.tab}`;
   for (const el of $('view').children) el.hidden = el.dataset.view !== key;
@@ -248,6 +248,7 @@ async function showStage(r) {
   if (!views[key]) views[key] = MOUNT[key](el);
   document.title = `${st.n} · ${st.short} · Graphwar`;
   const v = views[key];
+  if (v && v.slot) v.slot($('stageSlot')); // la vista pone en la cabecera lo suyo (el editor: nombre, deshacer, Guardar)
   if (key === 'crear/editor') {
     if (!editorStarted) { editorStarted = true; await v.start(r.id); }
     else if (r.id && r.id !== v.state.netId) v.open(r.id);

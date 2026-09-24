@@ -82,6 +82,13 @@ export async function springButtons(selector) {
     return () => M.animate(el, { scale: 1 }, { type: 'spring', stiffness: 500, damping: 18 });
   });
 }
+// un bloque recién añadido al lienzo: aparece con un muelle pequeño (así se ve dónde ha caído)
+export async function popIn(el) {
+  if (!el || reduced()) return;
+  const M = await lib('motion', 'Motion');
+  if (!M) return;
+  M.animate(el, { scale: [0.6, 1], opacity: [0, 1] }, { type: 'spring', stiffness: 420, damping: 22 });
+}
 // la ficha: entra y sale con un muelle. `open` = true (entra desde la derecha) o false (se retrae)
 export async function slide(el, open) {
   if (!el) return;

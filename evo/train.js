@@ -451,6 +451,7 @@ export function playOne({ seed, left, right, soldiers }) {
 
 // ---------- entrenador ----------
 let trainerSeq = null; // se inicia detrás de los entrenos guardados: tras reiniciar no se repiten (M9)
+export function resetTrainerSeq() { trainerSeq = null; } // otro mundo (spec/09 §4): sigue detrás de lo guardado en él
 // {netId: genoma} de las redes de una partida, tal como jugaron (M2); si comparten id, la que aprende
 const genomesOf = (spec) => { const out = {}; for (const s of [spec.left, spec.right].sort((a, b) => (a && a.learn ? 1 : 0) - (b && b.learn ? 1 : 0))) if (s && s.type === 'net' && s.genome && s.genome.id) out[s.genome.id] = s.genome; return out; };
 export function createTrainer(opts = {}) {

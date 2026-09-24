@@ -5,8 +5,8 @@ import { eyeLayout } from '../shared/percept.js';
 import { TEMPLATES } from '../shared/templates.js';
 import { listNets, loadNet, saveNet, deleteNet, entryOf, saveRecord, loadRecord, listRecords, nextRecordSeq, loadSnapshot, saveVersion, loadVersion, listVersions } from './store.js';
 import { validateRecipe } from './recipe.js';
-import { createTrainer, makeLearner, feedbackTarget, feedbackFromGame, settleFeedback } from './train.js';
-import { heldBy, holdNet, releaseNet } from './busy.js';
+import { createTrainer, makeLearner, feedbackTarget, feedbackFromGame, settleFeedback, resetTrainerSeq } from './train.js';
+import { heldBy, holdNet, releaseNet, anyHeld } from './busy.js';
 import { runDuel, newDuelId, LEARNING_MODES, SPEEDS } from './duel.js';
 import { challenge, throneView, foundDynasties, runGeneration, readThroneFull, writeThrone, recordDuelInLeague, genealogyView, registerBirth, vacateNet } from './throne.js';
 import { loadGame, appendLog, readLog, loadLogEntry, listGames, saveGame, loadGameNets, readFeedback, writeFeedback, readApplied, appendApplied, readCurves, saveGameKept, netsDir } from './store.js';
@@ -66,6 +66,20 @@ function startChildrenJob({ genome, n, mutation, games, opponent, soldiers, seed
 const sseClients = new Set();
 function pushEvent(ev, data) { for (const res of sseClients) { try { res.write(`event: ${ev}\ndata: ${JSON.stringify(data)}\n\n`); } catch { /* ignorar */ } } }
 const activeTraining = (netId) => [...trainings.values()].find((t) => t.netId === netId && ['queued', 'running', 'paused'].includes(t.status)) || null;
+export const pushLabEvent = (ev, data) => pushEvent(ev, data);
+// algo en marcha impide cambiar de mundo (spec/09 §4) → el motivo, o null
+export function labBusyReason() {
+  const until = 'antes de cambiar de mundo';
+  // un entreno parado sigue ocupado hasta que acaba de verdad (cierra su partida y guarda red y curva): endedAt
+  for (const t of trainings.values()) if (['queued', 'running', 'paused'].includes(t.status) || (t.startedAt && !t.endedAt)) return `Hay un entreno en marcha (${t.id}): páralo o espera a que acabe ${until}.`;
+  for (const d of duels.values()) if (d.rec && d.rec.status === 'running') return `Hay un duelo en curso (${d.id}): espera a que acabe ${until}.`;
+  for (const j of jobs.values()) if (j.status === 'running') return `Hay un trabajo en curso (${j.kind} ${j.id}): espera a que acabe ${until}.`;
+  const h = anyHeld();
+  if (h) return h.kind === 'duel' ? `Hay un duelo en curso (${h.id}): espera a que acabe ${until}.` : `Una red está aprendiendo de la exhibición ${h.id}: espera a que acabe ${until}.`;
+  return null;
+}
+// otro mundo: nada de lo de antes sigue en memoria y los contadores de ids siguen detrás de lo guardado en el nuevo
+export function resetLab() { trainings.clear(); duels.clear(); jobs.clear(); jobSeq = null; resetTrainerSeq(); }
 // ocupada en un duelo o aprendiendo de una exhibición (spec/04 §10.5) → el motivo, o null; `what` completa la frase
 function heldText(netId, what, who = null) {
   const h = heldBy(netId);

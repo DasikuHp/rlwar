@@ -9,11 +9,14 @@ import { listAgents } from '../agents/registry.js';
 import { labApi, onExhibitionOver } from '../evo/api.js';
 import { useThreads } from '../evo/threads.js';
 import { availableParallelism } from 'node:os';
+import { worldsRoute, startWorlds } from './worlds.js';
 import * as C from '../shared/constants.js';
 
 // las partidas sin pantalla (duelos turbo, boletín, pre-torneo, entrenos turbo de 1 hilo) se juegan en hilos: el servidor
 // solo coordina y aprende, y sigue contestando mientras tanto (auditoría s3)
 useThreads(Math.max(2, Math.min(4, availableParallelism() - 1)));
+// mundos (spec/09): lo de antes se archiva una vez (solo en la carpeta real) y se sigue en el último mundo abierto
+startWorlds();
 
 const PORT = Number(process.env.PORT) || 8787;
 const ROOT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -74,6 +77,13 @@ async function api(req, res, parts, url) {
   if (parts[1] === 'health') return json(res, 200, { ok: true, rooms: rooms.size });
   if (parts[1] === 'agents') return json(res, 200, { agents: listAgents() });
   if (parts[1] === 'lab') return labApi(req, res, parts, url); // laboratorio (spec/08), cuerpos hasta 48 MB
+  if (parts[1] === 'worlds') { // mundos (spec/09)
+    const b = method === 'GET' ? {} : await readBody(req);
+    if (b === CUT) return; // nadie espera la respuesta
+    if (b === OVER) return tooBig(res);
+    const r = worldsRoute(method, parts.slice(2), b);
+    return json(res, r.status, r.body);
+  }
 
   if (parts[1] !== 'rooms') return json(res, 404, { error: 'Ruta desconocida' });
 

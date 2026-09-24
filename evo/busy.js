@@ -15,6 +15,11 @@ export function releaseNet(netId, holder) {
   if (i >= 0) list.splice(i, 1);
   if (!list.length) held.delete(netId);
 }
+// alguna red ocupada ({netId, kind, id}) o null (spec/09 §4: no se cambia de mundo)
+export function anyHeld() {
+  for (const [netId, list] of held) if (list.length) return { netId, ...list[0] };
+  return null;
+}
 // quién la tiene ({kind: 'duel'|'exhibition', id}) o null si está libre
 export function heldBy(netId) {
   const list = held.get(netId);

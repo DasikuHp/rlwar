@@ -9,7 +9,7 @@ import { validate, normalize, countParams } from '../shared/genome.js';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 export function netsDir() {
-  const base = process.env.GW_EVO_DIR ? join(process.env.GW_EVO_DIR, 'nets') : join(ROOT, 'evo', 'nets');
+  const base = join(evoDir(), 'nets');
   if (!existsSync(base)) mkdirSync(base, { recursive: true });
   return base;
 }
@@ -71,9 +71,14 @@ export function deleteNet(id) {
   return true;
 }
 
-// Carpeta del laboratorio (evo/ o GW_EVO_DIR) y lectura del trono (spec/06 §2; F5 solo lo lee para elegir rival)
-export function evoDir() {
+// Carpeta de datos de siempre (evo/ o GW_EVO_DIR) y la del laboratorio: la del mundo activo si hay uno (spec/09 §1)
+export function baseDir() {
   return process.env.GW_EVO_DIR ? process.env.GW_EVO_DIR : join(ROOT, 'evo');
+}
+let activeDir = null;
+export function setActiveDir(dir) { activeDir = dir; logSeq = null; }
+export function evoDir() {
+  return activeDir || baseDir();
 }
 export function readThrone() {
   const file = join(evoDir(), 'throne.json');

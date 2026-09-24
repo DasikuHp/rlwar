@@ -2,7 +2,7 @@
 // atribución "tapar y comparar", registro `decision` para el overlay y el aprendizaje.
 import { gaussFrom, makeRng } from './rng.js';
 import { normalize, BLOCKS } from './genome.js';
-import { observe, generateCandidates, applyAdjust, adjustScales, simulateCandidate, toLocal, toWorld } from './percept.js';
+import { observeNormalized, generateCandidates, applyAdjust, adjustScales, simulateCandidate, toLocal, toWorld } from './percept.js';
 import { slideMove } from './geometry.js';
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
@@ -70,7 +70,7 @@ export function decideShot({ net, genome, state, soldierId, memory, team = null,
   const soldier = state.soldiers.find((s) => s.id === soldierId);
   const cands = generateCandidates(state, soldier, g.imagination, makeRng(candSeed(state, soldierId)));
   const ctx = { soldiers: state.soldiers, obstacles: state.obstacles, bites: state.bites || [], soldier, team: soldier.team };
-  const obs = withTeam(observe(state, soldierId, g, { phase: 'shoot', cands, sims }), team);
+  const obs = withTeam(observeNormalized(state, soldierId, g, { phase: 'shoot', cands, sims }), team);
   const out = net.forward(obs, memory);
   if (!out.outputs.choose) throw new Error('la red no tiene el bloque Elegir');
   const scores = out.outputs.choose.scores;
@@ -109,7 +109,7 @@ export function decideMove({ net, genome, state, soldierId, memory, team = null,
   const t0 = performance.now();
   const g = normalize(genome); const T = g.traits.temperature, pulse = Math.max(1e-6, g.traits.pulse);
   const soldier = state.soldiers.find((s) => s.id === soldierId);
-  const obs = withTeam(observe(state, soldierId, g, { phase: 'move' }), team);
+  const obs = withTeam(observeNormalized(state, soldierId, g, { phase: 'move' }), team);
   const out = net.forward(obs, memory);
   const decision = {
     soldierId, turn: (state.stats && state.stats.shots) || 0, phase: 'move', netId: g.id, ms: 0,

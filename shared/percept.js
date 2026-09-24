@@ -211,7 +211,7 @@ export function simulateCandidate(cand, ctx, fine = false) {
   const team = ctx.team || ctx.soldier.team;
   const r = tryCompile(cand.expr);
   const start = { x: ctx.soldier.x, y: ctx.soldier.y };
-  if (!r.ok) return { type: 'invalid', minDist: 30, endX: toLocal(start, team).x, endY: start.y, points: 1, victimId: null, polyline: [[toLocal(start, team).x, start.y], [toLocal(start, team).x, start.y]] };
+  if (!r.ok) return { type: 'invalid', end: 'invalid', minDist: 30, endX: toLocal(start, team).x, endY: start.y, points: 1, victimId: null, hitIds: [], enemiesHit: 0, alliesHit: 0, polyline: [[toLocal(start, team).x, start.y], [toLocal(start, team).x, start.y]] };
   const shot = simulateShot({ mode: cand.mode, f: r.f, start, dir: team === 'right' ? -1 : 1, angle: (cand.angle || 0) * Math.PI / 180,
     soldiers: ctx.soldiers, obstacles: ctx.obstacles, bites: ctx.bites || [], shooterId: ctx.soldier.id, ds: fine ? 0.01 : 0.05, maxSteps: fine ? 20000 : 2500 });
   // con impactos, lo que ve la red llega hasta el primero (dónde golpea primero y lo cerca que pasó hasta ahí), como cuando
@@ -230,11 +230,8 @@ export function simulateCandidate(cand, ctx, fine = false) {
 // lo mismo que antes del tiro que atraviesa (spec/01 §10.5)
 export function simulatorFeatures(sim, ctx) {
   const { enemies } = ctxLocal(ctx);
-  const t = sim.type;
-  const hitE = Number.isInteger(sim.enemiesHit) ? sim.enemiesHit : t === 'kill' ? 1 : 0;
-  const hitA = Number.isInteger(sim.alliesHit) ? sim.alliesHit : t === 'suicide' ? 1 : 0;
-  const end = sim.end || t, noHit = !hitE && !hitA;
-  const nearest = enemies[0] ? (Array.isArray(sim.hitIds) ? sim.hitIds.includes(enemies[0].id) : t === 'kill' && sim.victimId === enemies[0].id) : false;
+  const hitE = sim.enemiesHit, hitA = sim.alliesHit, end = sim.end, noHit = !hitE && !hitA;
+  const nearest = !!enemies[0] && sim.hitIds.includes(enemies[0].id);
   return Float64Array.from([Math.min(4, hitE), Math.min(4, hitA), noHit && end === 'obstacle' ? 1 : 0, noHit && end === 'wall' ? 1 : 0,
     noHit && !['obstacle', 'wall'].includes(end) ? 1 : 0, Math.min(1, sim.minDist / 10), sim.endX / 25, sim.endY / 15, Math.min(1, sim.points / 200),
     nearest ? 1 : 0]);
@@ -398,8 +395,11 @@ function eyeMap(state, soldier, lc, params) {
 }
 
 // ---------- observación ----------
-export function observe(state, soldierId, genome, { phase = 'shoot', cands = null, moves = null, sims = null, rng = Math.random } = {}) {
-  const g = normalize(genome);
+export function observe(state, soldierId, genome, opts = {}) {
+  return observeNormalized(state, soldierId, normalize(genome), opts);
+}
+// igual, con el genoma ya normalizado (quien decide ya lo normalizó: una copia del genoma menos por decisión); no lo toca
+export function observeNormalized(state, soldierId, g, { phase = 'shoot', cands = null, moves = null, sims = null, rng = Math.random } = {}) {
   const soldier = state.soldiers.find((s) => s.id === soldierId);
   if (!soldier) throw new Error(`soldado ${soldierId} no está en el estado`);
   const lc = localCtx(state, soldier);

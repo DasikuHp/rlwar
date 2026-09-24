@@ -44,6 +44,7 @@
   "test/motor.spec.mjs": "8faffed61698bf31fc2e9bc03b239d83a92de8caa61e0b7e0f82d940c05b6fd7",
   "test/moves.spec.mjs": "90b9bb5721deabe830d54fd4d32d15ddbbae602339fdd158b54954b2031394e0",
   "test/moviola-antigua.spec.mjs": "91e2736805cfed1b519ab38a4e39b15822fd2368176c2f2bf0a898f6dd96db87",
+  "test/mundos.spec.mjs": "60ead428174f4fbe7a65881f50e3cdc8f3c25b2d8a68a9d97b5ee797f53cbf41",
   "test/nombres-p0.spec.mjs": "f69552302e5b477d012244b3e48e98c24f3fda1ee3323575b443c9abe45a9295",
   "test/normalize.spec.mjs": "4d002e8126bd3d7e6bc3747e0979ae77c67ccda21843b3769f3020ffad32d818",
   "test/parser.spec.mjs": "780fdae97a48dc8b8281406105c95b4ac88a86cf28e48373d8b2a3f529bbcf0b",

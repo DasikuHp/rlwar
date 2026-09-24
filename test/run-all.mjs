@@ -136,6 +136,7 @@ try {
   results.push(await run('auditoría s3: el bocado solo si toca', [join(ROOT, 'test', 'terreno-extra-c.spec.mjs')]));
   results.push(await run('auditoría s3: hilos para las partidas sin pantalla del servidor', [join(ROOT, 'test', 'hilos.spec.mjs')]));
   results.push(await run('auditoría s3: normalize idempotente y decisiones que no tocan el genoma', [join(ROOT, 'test', 'normalize.spec.mjs')]));
+  results.push(await run('mundos (P2): 3 ranuras, aislados, meta, papelera, arranque y migración', [join(ROOT, 'test', 'mundos.spec.mjs')]));
 } finally {
   server.kill();
 }

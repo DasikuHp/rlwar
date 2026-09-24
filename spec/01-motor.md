@@ -221,6 +221,11 @@ de mapa" y "como el original: atraviesa". Escala del original: el plano de 50 u 
   círculos de radio ≤ 4: haría falta tapar la mitad entera).
 - Fortaleza: los 2 o 3 círculos grandes salen a partes iguales (la mitad de las fortalezas tiene 3).
   (Detalles que ya fijaba `terreno-extra-b` y faltaban aquí; auditoría s3.)
+- Fortaleza, altura: el círculo grande `i` (0, 1, 2, de abajo arriba) tiene el centro en `y = −9 + 7·i ± 1` (al azar
+  en ese margen): unos −9, −2 y 5, apilados en vertical. Ejemplo: con 3 grandes, uno cerca de y = −9, otro de −2 y otro de
+  5. (Lo hacía el código y no lo decía la spec; huecos de los mutantes de la auditoría s3.)
+- El tope de 400 intentos es exacto: si el intento 401 cabría, no se usa; se pasa a la rejilla. La rejilla recorre
+  x = −23, −22,5 … −6 (izquierda) o 6 … 23 (derecha) e y = −13 … 13, los extremos incluidos.
 
 ### 10.3 El tiro atraviesa
 - `simulateShot` registra **todos** los soldados vivos (menos el que dispara) a `HIT_RADIUS` o menos del recorrido,

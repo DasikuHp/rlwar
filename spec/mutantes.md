@@ -550,3 +550,41 @@ Equivalentes que quedan en `threadNote`: `Math.max(1, …)` → 0/−1 y `Math.m
 ciclos o poblaciones por debajo de esos mínimos; un valor vacío cae en el de `DEFAULT_LEARNING`). En `train.js:604`,
 `% 20` → `% -20` (en JS el signo lo pone el dividendo), `rivalId || null` (no lo lee nadie, P0-B8) y
 `genomes || null` (lo caza `arreglos-almacen`, M2).
+
+## Auditoría de la sesión 3 (2026-09-24): huecos de la tanda A
+Tanda A sobre 281c60b (relevo `spec/relevo-2026-09-24-s3.md`). Se repitió cada fichero **contra todos los tests que lo
+usan** (la tanda A usaba menos, y varios "huecos" ya estaban cubiertos) y lo que seguía vivo se cerró con
+test/huecos-s3.spec.mjs` (en proceso) y `test/huecos-s3-api.spec.mjs` (con servidor), escritos después del código y
+congelados. Cada caso es la spec, no el código.
+
+| fichero:líneas | contra | cazados | lo que queda |
+|---|---|---|---|
+| `shared/reward.js:46–47` (roce en el radio, aliado a 1,5 u) | `aprendizaje-extra` y los de siempre | 12/12 | nada: el hueco era de la tanda A (sin `aprendizaje-extra`); no hace falta test |
+| `agents/lib.js:20–31` | `angulo`, `moves`, `percepcion*`, `politica`, `rooms` + `huecos-s3` | 9/9 | — (ode2 sin ángulo = 0°; `sim` con bocados) |
+| `shared/geometry.js:16, 53–57, 83–92` | `geometry`, `moves`, `politica`, `terreno*` + `huecos-s3` | 43/48 | 16 `\|\|`→`&&` ×3: **equivalentes** (la caja es un atajo; con `&&` se llega al `hypot`, mismo resultado). 55–56 (`stay`/`invalid` de `slideMove`), 68 y 74 (la rejilla): **los cubre la fase "moverse solo donde se puede"**, que reescribe `slideMove` (decisión del usuario del 2026-09-24, plan2) |
+| `shared/percept.js` (211–362, líneas del relevo) | `angulo`, `normalize`, `percepcion*`, `politica`, `terreno*` + `huecos-s3` | 218/226 | **equivalentes**: 221 `0→1` (el primer punto va repetido), 224 y 258 `<`→`<=` (empates), 259 (`los` de un destino sin enemigos: con la partida en curso siempre hay enemigos), 362 `30→31` (tope: `min(1, 3,1) = min(1, 3)`). 263 `slid ? 1 : 0` ×3: **fase de movimiento** (la entrada pasa a "imposible") |
+| `server/mapgen.js` entero | `terreno*` + `huecos-s3` (rng trucado) | 206/209 | 11 ×3: **equivalentes** (`cos` es par: `2π·v` → `−2π·v`; el tope `1e-12` solo cuenta si el rng da exactamente 0) |
+| `server/rooms.js:224, 324, 391–392, 403, 405, 436, 438` | `rooms`, `moves`, `angulo`, `terreno*`, `politica`, `normalize` + `huecos-s3` | 33/33 | — (`moveOptionsFor` no lo cazaba `moves.spec`: ahora sí) |
+| `evo/api.js:465` (cuerpo cortado) | `cuerpos` + `huecos-s3-api` | `ok: false → true` cazado (la ruta de hijas arrancaría un trabajo con `{}`) | `return null` y los códigos: **equivalentes** (nadie lee la respuesta de una conexión cerrada) |
+| `server/server.js:124–127` (rutas de sala) | `cuerpos` + `huecos-s3-api` | 6/6 | — (405 y cuerpo cortado en `join`) |
+
+`huecos-s3` corre sin modo rápido (`GW_FAST=0`): con él la partida acaba a los 40 tiros y el tope de 40 del registro de
+tiros no se puede pasar.
+
+## P2 — mundos (2026-09-24)
+Primera tanda solo con `test/mundos.spec.mjs` (congelado antes del código); lo que sobrevivió lo cubre
+`test/mundos-b.spec.mjs` (escrito después, congelado) y se repitió cada línea con los dos.
+
+| fichero:líneas | contra | cazados | lo que queda |
+|---|---|---|---|
+| `server/worlds.js` entero | `mundos` | 148/191 | — |
+| `server/worlds.js` (las 21 líneas con supervivientes) | `mundos` + `mundos-b` | 79/80 (41 y 56, con dos casos más de `mundos-b`: 10/10) | 81 `recursive: true → false` al crear el archivo: **equivalente** (solo se crea si hay algo suelto en `<base>`, así que `<base>` existe y el archivo cuelga de él) |
+| `evo/api.js:69–82` (`labBusyReason`, `resetLab`) | `mundos` → + `mundos-b` | 2/10 → 10/10 | — (duelo, trabajo, red ocupada por una exhibición y entreno parado que aún guarda) |
+| `evo/busy.js:18–22` (`anyHeld`) | `mundos` → + `mundos-b` | 0/2 → 2/2 | — |
+| `evo/store.js:12, 74–82` | `mundos` | 3/3 | — |
+| `server/server.js:19, 80–86` | `mundos` → + `mundos-b` | 11/12 → 12/12 | — (cuerpo demasiado grande → 413) |
+
+Lo que no genera mutantes (llamadas sin operadores) lo prueba `mundos-b` igual: el aviso `world` por SSE
+(`pushLabEvent`), `lastPlayedAt` que pasa a ahora y lo que no pasa de un mundo a otro (entrenos, duelos). **Hueco
+pequeño anotado**: `resetTrainerSeq` (en el mundo nuevo, los ids de entreno siguen detrás de los guardados en él) no
+tiene test propio.

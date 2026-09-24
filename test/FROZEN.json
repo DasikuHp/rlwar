@@ -44,6 +44,7 @@
   "test/huecos-s3-api.spec.mjs": "a1250ba3c931fa8105fd42dce0622011236e7f0e47d655f811ec4cd49dc5a803",
   "test/huecos-s3.spec.mjs": "1a53b1eb8b48326cebefa77e47aeaf5fa59cdc3245e25e488c0501ecd328fd7f",
   "test/motor.spec.mjs": "8faffed61698bf31fc2e9bc03b239d83a92de8caa61e0b7e0f82d940c05b6fd7",
+  "test/moverse.spec.mjs": "87c96a9e8495e04bf11e4e27fb4c9bc3581aece2442696fa992abd7a544c08ca",
   "test/moves.spec.mjs": "90b9bb5721deabe830d54fd4d32d15ddbbae602339fdd158b54954b2031394e0",
   "test/moviola-antigua.spec.mjs": "91e2736805cfed1b519ab38a4e39b15822fd2368176c2f2bf0a898f6dd96db87",
   "test/mundos-b.spec.mjs": "57429a471a2fdaabf99e1fc68e1a8adb78f1137937603f0452df8f8ab2a8822f",

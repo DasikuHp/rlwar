@@ -140,6 +140,7 @@ try {
   results.push(await run('mundos (P2): huecos de los mutantes (rutas, límites, lo que impide cambiar de mundo, papelera)', [join(ROOT, 'test', 'mundos-b.spec.mjs')]));
   results.push(await run('auditoría s3: huecos de los mutantes (mapas, lib, geometría, percepción, sala)', [join(ROOT, 'test', 'huecos-s3.spec.mjs')]));
   results.push(await run('auditoría s3: huecos de los mutantes por la API (cuerpos cortados, 405 de sala)', [join(ROOT, 'test', 'huecos-s3-api.spec.mjs')]));
+  results.push(await run('moverse (P1b): solo donde se puede, castigo y destinos a 1,5 u', [join(ROOT, 'test', 'moverse.spec.mjs')]));
 } finally {
   server.kill();
 }

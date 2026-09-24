@@ -7,7 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { rooms, getRoom, createRoom } from './rooms.js';
 import { listAgents } from '../agents/registry.js';
 import { labApi, onExhibitionOver } from '../evo/api.js';
+import { useThreads } from '../evo/threads.js';
+import { availableParallelism } from 'node:os';
 import * as C from '../shared/constants.js';
+
+// las partidas sin pantalla (duelos turbo, boletín, pre-torneo, entrenos turbo de 1 hilo) se juegan en hilos: el servidor
+// solo coordina y aprende, y sigue contestando mientras tanto (auditoría s3)
+useThreads(Math.max(2, Math.min(4, availableParallelism() - 1)));
 
 const PORT = Number(process.env.PORT) || 8787;
 const ROOT_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -33,13 +39,15 @@ const json = (res, code, obj) => {
 // pasado el tope deja de guardar y lee hasta el final sin guardar, para poder responder 413 (M10); más de 4× el tope, corta
 const BODY_LIMIT = 1e5;
 const OVER = Symbol('cuerpo demasiado grande');
+const CUT = Symbol('cuerpo cortado'); // la conexión se cerró antes del final del cuerpo: la ruta no se ejecuta
 // el tope es de bytes y el cuerpo se decodifica entero al final: una letra partida entre dos trozos llega intacta
 // (spec/08 §10.6)
 const readBody = (req) => new Promise((resolve) => {
   const parts = []; let bytes = 0, over = false, done = false;
-  const finish = () => {
+  const finish = (complete) => {
     if (done) return;
     done = true;
+    if (!complete) return resolve(CUT);
     if (over) return resolve(OVER);
     const d = Buffer.concat(parts).toString('utf8');
     try { resolve(d ? JSON.parse(d) : {}); } catch { resolve({}); }
@@ -50,8 +58,8 @@ const readBody = (req) => new Promise((resolve) => {
     if (bytes > BODY_LIMIT) { over = true; parts.length = 0; return; }
     parts.push(c);
   });
-  req.on('end', finish);
-  req.on('close', finish);
+  req.on('end', () => finish(true));
+  req.on('close', () => finish(false));
 });
 const tooBig = (res) => json(res, 413, { error: `El cuerpo supera ${BODY_LIMIT} bytes.` });
 
@@ -74,6 +82,7 @@ async function api(req, res, parts, url) {
     if (method === 'GET') return json(res, 200, { rooms: roomList() });
     if (method === 'POST') {
       const b = await readBody(req);
+      if (b === CUT) return; // nadie espera la respuesta
       if (b === OVER) return tooBig(res);
       const room = createRoom(b.name, { soldiersPerPlayer: b.soldiers, seed: b.seed, speed: b.speed });
       room.onGameOver = onExhibitionOver; // exhibición: cuenta, se guarda y, con learn:true, enseña (spec/04 §10.3)
@@ -105,6 +114,7 @@ async function api(req, res, parts, url) {
 
   if (method !== 'POST') return json(res, 405, { error: 'Método no permitido' });
   const body = await readBody(req);
+  if (body === CUT) return; // nadie espera la respuesta
   if (body === OVER) return tooBig(res);
   const pid = body.playerId;
 

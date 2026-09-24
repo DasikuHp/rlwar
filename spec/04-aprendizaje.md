@@ -84,6 +84,21 @@ p. ej. `survive` alto → "cobarde: se esconde tras los muros y dispara poco".
 - Determinismo: partida = f(semilla, genomas); actualización = f(lote ordenado por semilla).
   Test: mismo entreno con la misma semilla → mismos pesos bit a bit.
 
+### 5.1 Hilos del servidor (auditoría de la sesión 3, 2026-09-24; decisión del usuario "hilos para todo")
+- Una partida sin pantalla en el hilo del servidor lo deja sin contestar mientras dura (con el terreno de P1, hasta
+  1,4 s en un duelo turbo). El servidor crea al arrancar un grupo de hilos (`evo/threads.js`, `useThreads`, entre 2 y 4
+  según los núcleos) y ahí se juegan: los entrenos turbo de **1 hilo** (con más, el entreno usa su propio grupo, como
+  antes), las partidas de los duelos turbo (y de los retos al trono), el pre-torneo de hijas y el boletín entero (también
+  los exámenes de antes y después de un entreno). El hilo del duelo devuelve además la partida ya empaquetada para
+  guardarla (`packGame`: meta con huellas y JSON comprimido): el hilo principal solo escribe el fichero.
+- El hilo principal coordina y **aprende** (sueños, repasos): eso sigue en él (un repaso de 6 partidas ≈ 0,2 s).
+- Mensajes nuevos de `evo/worker.js`: `{type:'duel', row, left, right, save}`, `{type:'pre', spec}` y
+  `{type:'bulletin', subject}` (este manda avisos `{type:'progress', args}` por escena). Un hilo que revienta se sustituye.
+- Sin el grupo (tests, arena, `runDuel`/`runBulletin`/`runPretournament` llamados en el proceso) todo se juega en el
+  proceso: es el mismo código, así que misma semilla da mismo resultado. Test: `test/hilos.spec.mjs` (el servidor
+  contesta en menos de 0,5 s con redes lentas a propósito, y duelo, boletín, pre-torneo y entreno de 1 hilo dan lo mismo
+  que en el proceso).
+
 ## 6. Entreno (`POST /api/lab/trainings`)
 ```json
 { "netId": "hydra-7",
@@ -402,7 +417,10 @@ de §9.4 (sustituye al `learn` interno, que solo pisaba el gradiente).
 - Valor con el avance `p ∈ [0, 1]`: `constant` = from · `linear` = from + (to − from)·p · `cosine` = to + (from −
   to)·(1 + cos(π·p))/2.
 - Avance: con `duration.games = N`, `p = partidas jugadas / N` al **empezar** el lote (o el paso de evolución); con
-  `duration.minutes`, el tiempo transcurrido entre el total. Con `plateau` no se sabe cuánto dura: un programa con
+  `duration.minutes`, el tiempo **entrenado** entre el total. El reloj del entreno empieza tras el examen de antes y no
+  cuenta las pausas (el tiempo que el bucle pasa esperando a que se reanude); con él se decide también cuándo se acaban
+  los minutos (A1, auditoría de la sesión 2; antes, con carga, un entreno de 12 s entrenaba 3 s). `startedAt` y
+  `elapsedMs` siguen siendo la duración total (§9.8). Con `plateau` no se sabe cuánto dura: un programa con
   meseta es un **400** ("los programas necesitan saber cuánto dura el entreno: usa partidas o minutos").
 - Cuándo se aplica: la temperatura se fija al empezar cada lote de gradiente y vale para todas sus partidas y para su
   sueño (así cada lote aprende de las probabilidades con las que de verdad jugó); la copia de sí misma contra la que
@@ -448,7 +466,9 @@ de §9.4 (sustituye al `learn` interno, que solo pisaba el gradiente).
   after}` (`{aim, cover, survival, adaptation}`); eventos `exam {netId, trainingId, when: before | after, …}`, líneas
   `exam` en el registro con `trainingId`, y el de después pasa a ser el boletín de la red. Mientras examina, `phase`
   es `exam-before` o `exam-after` (entrenando, `training`; al acabar, `done`, `stopped` o `error`). Si se para el
-  entreno, no hay examen de después (`exam.after` falta): parar es parar.
+  entreno, no hay examen de después (`exam.after` falta): parar es parar. También si se para **durante** el examen de
+  después: ese examen no cuenta (ni `exam.after`, ni evento, ni línea en el registro, ni boletín nuevo) y el entreno
+  acaba `stopped` (auditoría s3; antes acababa `done` y con el examen).
 
 ### 11.7 Versión antes del entreno (siempre)
 - Antes de la primera partida se guarda una **versión** de la red tal como estaba: `evo/nets/<id>/versions/<n>.json`
@@ -460,7 +480,10 @@ de §9.4 (sustituye al `learn` interno, que solo pisaba el gradiente).
   de esa versión a la red de ahora (misma forma que spec/05 §5) · `POST …/versions/:n/restore` → la red vuelve a esa
   versión: pesos, bloques, cables, aprendizaje, recompensa, rasgos, congelados, Imaginación y los nombres de sus
   neuronas (van con su cuerpo); conserva su id, su nombre, sus estadísticas, su memoria y su linaje (lo vivido no se
-  borra). El estado de Adam no se versiona: si la estructura cambió, se reinicia solo al cargarse. Antes de volver, la red de ahora se guarda
+  borra). El estado de Adam no se versiona: si la estructura cambió, se reinicia solo al cargarse (`optim.json` guarda la
+  disposición de los parámetros: bloque, clave y tamaño, en orden; si no coincide con la de la red, o el fichero es
+  antiguo y no la trae, Adam empieza de cero; antes solo se miraba cuántos parámetros había, y los mismos bloques en otro
+  orden heredaban los momentos de otros pesos; auditoría s3). Antes de volver, la red de ahora se guarda
   como otra versión (se puede deshacer). 404 si no existe; 409 si la red está ocupada (entrena, duelo, exhibición).
 
 ### 11.8 Quedarse con la mejor (`keepBest: true`)

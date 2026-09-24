@@ -3,6 +3,7 @@
 import { makeRng } from '../shared/rng.js';
 import { playGame } from '../server/headless.js';
 import { gameSummary } from './train.js';
+import { threads } from './threads.js';
 
 export function rankChildren(rows) {
   return rows.slice().sort((a, b) => (b.wins - a.wins) || (b.killDiff - a.killDiff) || (b.kills - a.kills) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -38,8 +39,11 @@ export function runPretournament({ children, opponent, games = 4, seed = 0, sold
   return { ranking: rankChildren(rows), seeds: plan.seeds, soldiers: plan.soldiers };
 }
 
+// en el servidor, cada partida del pre-torneo se juega en un hilo (evo/threads.js); si no, aquí mismo
+const threadedPlay = (spec) => { const T = threads(); return T ? T.run({ type: 'pre', spec }).then((m) => m.value) : defaultPlay(spec); };
+
 // igual, cediendo el bucle de eventos entre partidas y avisando del progreso
-export async function runPretournamentAsync({ children, opponent, games = 4, seed = 0, soldiers = 'random', play = defaultPlay, onGame = null, shouldStop = null }) {
+export async function runPretournamentAsync({ children, opponent, games = 4, seed = 0, soldiers = 'random', play = threadedPlay, onGame = null, shouldStop = null }) {
   const plan = pretournamentPlan({ games, seed, soldiers });
   const rows = children.map(emptyRow);
   const total = children.length * plan.seeds.length;

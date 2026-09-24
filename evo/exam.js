@@ -2,6 +2,7 @@
 import { Room } from '../server/rooms.js';
 import { playGame } from '../server/headless.js';
 import { normalize, validate } from '../shared/genome.js';
+import { threads } from './threads.js';
 
 export const EXAM_SEEDS = { aim: 9001, cover: 9002, survival: 9003, adaptation: 9004 };
 // blanco inofensivo (spec/07 §13.1): su disparo explota en el primer punto y nunca alcanza a nadie.
@@ -48,6 +49,9 @@ function scene(subject, seed, { untilMove = false } = {}) {
 export async function runBulletin(subject, { onScene = null } = {}) {
   const subj = isGenome(subject) ? normalize(subject) : subject;
   if (isGenome(subj) && !validate(subj, { forPlay: true }).ok) throw Object.assign(new Error('la red no puede jugar (falta Elegir)'), { status: 400 });
+  // en el servidor, el examen entero se hace en un hilo (evo/threads.js): mismo código, mismo resultado
+  const T = threads();
+  if (T) return (await T.run({ type: 'bulletin', subject: subj }, (p) => { if (onScene) onScene(...p.args); })).value;
   const details = { aim: [], cover: [], survival: [], adaptation: {} };
   const yieldNow = () => new Promise((r) => setImmediate(r));
   // puntería: 40 escenas

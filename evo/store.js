@@ -90,20 +90,27 @@ export function gamesDir() {
 const GAME_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 // los vectores de observación son Float64Array: en JSON van como listas normales
 const plain = (k, v) => (v && ArrayBuffer.isView(v) ? Array.from(v) : v);
-// `genomes` = {netId: genoma tal como jugó}: se guarda una copia por huella y la meta la cita en `snaps` (M2)
-export function saveGame(meta, events, trajectories = null, { genomes = null } = {}) {
+// el fichero de una partida, sin escribir nada (lo puede hacer el hilo que la jugó, auditoría s3): la meta con la huella
+// de cada genoma (`snaps`, M2) y el gzip del JSON {meta, events, trajectories?} (M15)
+export function packGame(meta, events, trajectories = null, genomes = null) {
+  const m = genomes ? { ...meta, snaps: Object.fromEntries(Object.entries(genomes).filter(([, g]) => g).map(([id, g]) => [id, snapshotSha(g)])) } : meta;
+  return { meta: m, gz: gzipSync(JSON.stringify(trajectories ? { meta: m, events, trajectories } : { meta: m, events }, plain)) };
+}
+// `genomes` = {netId: genoma tal como jugó}: se guarda una copia por huella y la meta la cita en `snaps` (M2);
+// `packed` = lo que devolvió packGame para esta misma partida (no se vuelve a empaquetar)
+export function saveGame(meta, events, trajectories = null, { genomes = null, packed = null } = {}) {
   if (!meta || !GAME_ID_RE.test(String(meta.gameId))) return { ok: false, error: 'gameId inválido' };
-  if (genomes) meta = { ...meta, snaps: Object.fromEntries(Object.entries(genomes).filter(([, g]) => g).map(([id, g]) => [id, saveSnapshot(g)])) };
-  // comprimida (M15): <id>.json.gz = gzip del JSON {meta, events, trajectories?}
-  const file = join(gamesDir(), `${meta.gameId}.json.gz`);
+  if (genomes) for (const g of Object.values(genomes)) if (g) saveSnapshot(g);
+  const p = packed || packGame(meta, events, trajectories, genomes);
+  const file = join(gamesDir(), `${p.meta.gameId}.json.gz`);
   const tmp = file + '.tmp';
-  writeFileSync(tmp, gzipSync(JSON.stringify(trajectories ? { meta, events, trajectories } : { meta, events }, plain)));
+  writeFileSync(tmp, p.gz);
   renameSync(tmp, file);
   // su meta al lado (spec/08 §9.1) y en el índice (M15)
-  const mfile = join(gamesDir(), `${meta.gameId}.meta.json`), mtmp = mfile + '.tmp';
-  writeFileSync(mtmp, JSON.stringify(meta)); renameSync(mtmp, mfile);
-  indexAppend({ a: meta });
-  return { ok: true, id: meta.gameId, file };
+  const mfile = join(gamesDir(), `${p.meta.gameId}.meta.json`), mtmp = mfile + '.tmp';
+  writeFileSync(mtmp, JSON.stringify(p.meta)); renameSync(mtmp, mfile);
+  indexAppend({ a: p.meta });
+  return { ok: true, id: p.meta.gameId, file };
 }
 // guarda y aplica la retención de 200 partidas a cada red de la partida (spec/07 §12.1, spec/08 §9.2);
 // la usan quienes guardan partidas nuevas: entrenos, duelos y exhibiciones
@@ -178,9 +185,12 @@ export function loadGame(id) {
 // copias de las redes tal como jugaron (M2): snapshots/<huella>.json.gz, una por genoma distinto
 const snapshotsDir = () => { const d = join(evoDir(), 'snapshots'); if (!existsSync(d)) mkdirSync(d, { recursive: true }); return d; };
 const SHA_RE = /^[0-9a-f]{20}$/;
+const shaOf = (json) => createHash('sha256').update(json).digest('hex').slice(0, 20);
+// la huella con la que saveSnapshot guarda un genoma, sin escribir nada
+export const snapshotSha = (genome) => shaOf(JSON.stringify(genome, plain));
 export function saveSnapshot(genome) {
   const json = JSON.stringify(genome, plain);
-  const sha = createHash('sha256').update(json).digest('hex').slice(0, 20);
+  const sha = shaOf(json);
   const file = join(snapshotsDir(), `${sha}.json.gz`);
   if (!existsSync(file)) { const tmp = file + '.tmp'; writeFileSync(tmp, gzipSync(json)); renameSync(tmp, file); }
   return sha;

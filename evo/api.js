@@ -295,17 +295,22 @@ const json = (res, code, obj, headers = {}) => {
 };
 // pasado el tope deja de guardar y lee hasta el final sin guardar, para poder responder 413 (M10); más de 4× el tope, corta
 // el tope es de bytes y el texto se decodifica entero al final: una letra partida entre dos trozos llega intacta (§10.6)
+// si la conexión se cierra antes del final del cuerpo, `cut` y la ruta no se ejecuta (auditoría s3)
 const readText = (req, limit) => new Promise((resolve) => {
-  const parts = []; let bytes = 0, over = false;
-  const done = () => resolve({ text: over ? '' : Buffer.concat(parts).toString('utf8'), over });
+  const parts = []; let bytes = 0, over = false, settled = false;
+  const done = (complete) => {
+    if (settled) return;
+    settled = true;
+    resolve({ text: over || !complete ? '' : Buffer.concat(parts).toString('utf8'), over, cut: !complete });
+  };
   req.on('data', (c) => {
     bytes += c.length;
     if (over) { if (bytes > 4 * limit) req.destroy(); return; }
     if (bytes > limit) { over = true; parts.length = 0; return; }
     parts.push(c);
   });
-  req.on('end', done);
-  req.on('close', done);
+  req.on('end', () => done(true));
+  req.on('close', () => done(false));
 });
 const ID_RE = /^[a-z0-9-]{3,32}$/;
 // soldados de un entreno: "random" o de 1 a 4 (B2); sin valor, "random"
@@ -442,7 +447,8 @@ export async function labApi(req, res, parts, url) {
   const seg = parts.slice(2);
   const bad = (code, message, extra = {}) => json(res, code, { error: message, ...extra });
   const body = async () => {
-    const { text, over } = await readText(req, LIMITS.genomeBytes);
+    const { text, over, cut } = await readText(req, LIMITS.genomeBytes);
+    if (cut) return { ok: false, status: 400, error: 'La conexión se cortó antes de que llegara todo el cuerpo.' };
     if (over) return { ok: false, status: 413, error: `El cuerpo supera ${LIMITS.genomeBytes} bytes.` };
     const p = parseBody(text);
     return p.ok ? { ok: true, value: p.value } : { ok: false, status: 400, error: `JSON inválido: ${p.error}` };

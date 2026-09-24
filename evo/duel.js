@@ -3,9 +3,10 @@
 import { hash32 } from '../shared/rng.js';
 import { playGame } from '../server/headless.js';
 import { createRoom } from '../server/rooms.js';
-import { loadNet, saveGameKept, saveGameNets, appendLog } from './store.js';
+import { loadNet, saveGameKept, saveGameNets, appendLog, packGame } from './store.js';
 import { makeLearner, settleFeedback } from './train.js';
 import { holdNet, releaseNet } from './busy.js';
+import { threads } from './threads.js';
 
 export const LEARNING_MODES = ['frozen', 'hot', 'mix'];
 export const SPEEDS = ['turbo', 'x1', 'x10'];
@@ -51,14 +52,24 @@ function summarize(room, row) {
   return { winner, kills, events: room.events, trajectories, playerIds, gameId: room.gameId, result: room.result };
 }
 
+const gameMeta = ({ duelId, throne }, row, out) => ({ gameId: out.gameId, kind: 'duel', duelId, throne: !!throne, seed: row.seed, soldiers: row.soldiers, left: row.left, right: row.right, nets: [row.left, row.right], winner: out.winner, kills: out.kills, ts: Date.now() });
+// una partida de duelo sin pantalla y su resumen (en el servidor se juega en un hilo: evo/threads.js); con `save`, sale
+// además empaquetada para guardarla (`packed`): así el hilo principal solo escribe el fichero
+export function playTurboGame(row, left, right, save = null) {
+  const r = playGame({ seed: row.seed, left, right, soldiers: row.soldiers });
+  const out = { ...summarize(r.room, row), roomCode: null };
+  if (save) out.packed = packGame(gameMeta(save, row, out), out.events, out.trajectories, { [row.left]: left.genome, [row.right]: right.genome });
+  return out;
+}
+
 export function makePlay({ speed = 'turbo', duelId = null, saveGames = true, genomes = {}, shouldStop = null, throne = false, onLive = null } = {}) {
   const genomeOf = (id) => genomes[id] || loadNet(id);
   return async (row) => {
     const left = netSpec(genomeOf(row.left)), right = netSpec(genomeOf(row.right));
     let out;
     if (speed === 'turbo') {
-      const r = playGame({ seed: row.seed, left, right, soldiers: row.soldiers });
-      out = { ...summarize(r.room, row), roomCode: null };
+      const T = threads();
+      out = T ? (await T.run({ type: 'duel', row, left, right, save: saveGames ? { duelId, throne } : null })).value : playTurboGame(row, left, right);
     } else {
       const room = createRoom(`duelo ${left.name} vs ${right.name}`, { soldiersPerPlayer: row.soldiers, seed: row.seed, speed: speed === 'x10' ? 10 : 1 });
       room.addAgent('net', { level: 3, team: 'left', genome: left.genome, learn: false });
@@ -71,7 +82,7 @@ export function makePlay({ speed = 'turbo', duelId = null, saveGames = true, gen
       out = { ...summarize(room, row), roomCode: room.code };
     }
     if (saveGames) {
-      saveGameKept({ gameId: out.gameId, kind: 'duel', duelId, throne: !!throne, seed: row.seed, soldiers: row.soldiers, left: row.left, right: row.right, nets: [row.left, row.right], winner: out.winner, kills: out.kills, ts: Date.now() }, out.events, out.trajectories, { genomes: { [row.left]: left.genome, [row.right]: right.genome } });
+      saveGameKept(gameMeta({ duelId, throne }, row, out), out.events, out.trajectories, { genomes: { [row.left]: left.genome, [row.right]: right.genome }, packed: out.packed || null });
       if (throne) saveGameNets(out.gameId, { [row.left]: left.genome, [row.right]: right.genome });
     }
     return out;

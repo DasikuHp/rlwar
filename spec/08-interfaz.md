@@ -108,7 +108,8 @@ Aprobados por el usuario ("arréglalo tú"; frases en el navegador "hazlo lo mej
   [{x, y, w, h}], soldierId, shots?, stats?}`; `genome` (opcional) sustituye a la red guardada y se valida para
   jugar. La decisión es la de `decideShot` (o `decideMove` si `phase: 'move'`) con memoria a cero, `rng =
   makeRng(seed)` y atribución. Errores 400 con motivo: soldado inexistente o muerto, coordenadas fuera del plano,
-  más de 32 soldados o 64 obstáculos, genoma inválido.
+  más de 32 soldados, 64 obstáculos o 256 bocados, obstáculo o bocado mal formado (círculo con `r` positivo, rectángulo
+  con `w` y `h` positivos, bocado `{x, y, r}` con `r` positivo; spec/01 §10), genoma inválido.
 - `GET /api/lab/nets/:id/curves` → `{netId, trainings: [{trainingId, points: [{game, reward, win, kills, deaths,
   loss?, entropy?, kind?, rival?, t}]}], reigns: [...]}`: los puntos de cada entreno quedan en disco
   (`evo/nets/<id>/curves.jsonl`, los 5 000 últimos) y sobreviven a un reinicio; `reigns` son los reinados de esa red
@@ -132,6 +133,10 @@ Aprobados por el usuario ("arréglalo tú"; frases en el navegador "hazlo lo mej
 - Si el cuerpo de una petición pasa del tope (48 MB en `/api/lab`, 100 kB en las rutas de sala), el servidor deja de
   guardarlo, lo lee hasta el final sin guardarlo y responde **413** `{error: "El cuerpo supera N bytes."}`; la
   conexión sigue sana. Si pasa de 4 veces el tope, corta la conexión sin responder (nadie legítimo manda tanto).
+  Justo el tope se lee entero y justo 4 veces el tope todavía responde 413.
+- Si la conexión se cierra antes de que llegue todo el cuerpo anunciado, la ruta **no se ejecuta** (nadie espera la
+  respuesta): antes, lo que había llegado se procesaba como si fuera el cuerpo entero y un `POST /api/rooms` cortado
+  creaba una sala (auditoría s3). Test: `test/cuerpos.spec.mjs`.
 ### 10.2 Soldados de un entreno (B2)
 - `POST /api/lab/trainings` y el `training` de `POST /api/lab/dynasties/generation`: `soldiers` tiene que ser
   `"random"` o un entero de 1 a 4; si no, **400** `soldiers tiene que ser "random" o un entero entre 1 y 4` (como en

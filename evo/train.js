@@ -2,8 +2,6 @@
 // evolución (ES antitética), aprendizaje desde partidas y el entrenador (turbo con hilos, x1/x10 en vivo).
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, renameSync } from 'node:fs';
 import { join, isAbsolute } from 'node:path';
-import { Worker } from 'node:worker_threads';
-import { fileURLToPath } from 'node:url';
 import { makeRng, gaussFrom } from '../shared/rng.js';
 import { compile } from '../shared/nn.js';
 import { normalize, validate, BLOCKS } from '../shared/genome.js';
@@ -15,6 +13,7 @@ import { readThroneFull, pickOpponent } from './league.js';
 import { adaptImagination } from './mutate.js';
 import { validateRecipe, scheduleValue, progressOf, mergeReward, rewardChanges, createCurriculum, createBestTracker } from './recipe.js';
 import { runBulletin } from './exam.js';
+import { Pool, threads } from './threads.js';
 import { playGame } from '../server/headless.js';
 import { heldBy } from './busy.js';
 import { createRoom } from '../server/rooms.js';
@@ -96,9 +95,12 @@ export function computeAdvantages(episodes, values, cfg = {}, meanState = null) 
 }
 
 // ---------- optimizador ----------
+// disposición de los parámetros (bloque, clave y tamaño, en orden): los momentos de Adam solo valen para la misma
+// (spec/04 §11.7)
+const layoutOf = (net) => net.paramList().map((p) => `${p.blockId}.${p.key}:${p.array.length}`);
 export function adamInit(net) {
   const n = net.paramCount();
-  return { m: new Float64Array(n), v: new Float64Array(n), t: 0, mean: { mean: 0, n: 0 } };
+  return { m: new Float64Array(n), v: new Float64Array(n), t: 0, mean: { mean: 0, n: 0 }, layout: layoutOf(net) };
 }
 export function applyUpdate(net, grads, optim, { lr = 0.003, clipNorm = 5, optimizer = 'adam', frozen = [] } = {}) {
   const list = net.paramList();
@@ -286,7 +288,9 @@ export function loadOptim(net, dir) {
   try {
     if (existsSync(file)) {
       const o = JSON.parse(readFileSync(file, 'utf8'));
-      if (o.m && o.m.length === optim.m.length) optim = { m: Float64Array.from(o.m), v: Float64Array.from(o.v), t: o.t || 0, mean: o.mean || { mean: 0, n: 0 } };
+      // si la estructura cambió (otra disposición, o un fichero antiguo que no la guardaba), Adam empieza de cero
+      const sameLayout = Array.isArray(o.layout) && o.layout.join('|') === optim.layout.join('|');
+      if (o.m && o.m.length === optim.m.length && sameLayout) optim = { m: Float64Array.from(o.m), v: Float64Array.from(o.v), t: o.t || 0, mean: o.mean || { mean: 0, n: 0 }, layout: optim.layout };
     }
   } catch { /* fichero roto: se empieza de cero */ }
   return optim;
@@ -294,7 +298,7 @@ export function loadOptim(net, dir) {
 export function saveOptim(optim, dir) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
   const file = join(dir, 'optim.json'), tmp = file + '.tmp';
-  writeFileSync(tmp, JSON.stringify({ m: Array.from(optim.m), v: Array.from(optim.v), t: optim.t, mean: optim.mean }));
+  writeFileSync(tmp, JSON.stringify({ m: Array.from(optim.m), v: Array.from(optim.v), t: optim.t, mean: optim.mean, layout: optim.layout }));
   renameSync(tmp, file);
 }
 // aplica a la red lo que learnFromGames decidió sobre la Imaginación por uso
@@ -444,22 +448,6 @@ export function playOne({ seed, left, right, soldiers }) {
   const me = r.room.players.find((p) => p.agentType === 'net' && p.learn);
   return { playerId: me ? me.id : null, ...gameSummary(r, me ? me.id : null) };
 }
-const WORKER_FILE = fileURLToPath(new URL('./worker.js', import.meta.url));
-class Pool {
-  constructor(n) { this.workers = Array.from({ length: n }, () => new Worker(WORKER_FILE)); this.free = this.workers.slice(); this.queue = []; }
-  run(msg) {
-    return new Promise((resolve, reject) => {
-      const go = (w) => {
-        const onMsg = (m) => { w.off('message', onMsg); w.off('error', onErr); this.free.push(w); this.pump(); if (m.type === 'error') reject(new Error(m.message)); else resolve(m); };
-        const onErr = (e) => { w.off('message', onMsg); w.off('error', onErr); this.free.push(w); this.pump(); reject(e); };
-        w.on('message', onMsg); w.on('error', onErr); w.postMessage(msg);
-      };
-      this.queue.push(go); this.pump();
-    });
-  }
-  pump() { while (this.free.length && this.queue.length) this.queue.shift()(this.free.pop()); }
-  close() { for (const w of this.workers) w.terminate(); }
-}
 
 // ---------- entrenador ----------
 let trainerSeq = null; // se inicia detrás de los entrenos guardados: tras reiniciar no se repiten (M9)
@@ -507,7 +495,9 @@ export function createTrainer(opts = {}) {
     let optim = loadOptim(net, dir);
     const lc = { ...R.learning.gradient };
     const batchSize = Math.max(1, lc.batchGames);
-    const pool = cfg.speed === 'turbo' && cfg.workers > 1 ? new Pool(cfg.workers) : null;
+    // turbo: las partidas en hilos; con 1 hilo, en el grupo del servidor si lo hay (auditoría s3), si no, aquí mismo
+    const own = cfg.speed === 'turbo' && cfg.workers > 1 ? new Pool(cfg.workers) : null;
+    const pool = own || (cfg.speed === 'turbo' ? threads() : null);
     t.status = 'running'; emit('training', t.info());
     await new Promise((r) => setImmediate(r));
     const rivals = { antagonist: null, self: null, hall: [] };
@@ -553,7 +543,11 @@ export function createTrainer(opts = {}) {
     };
     // la red tal como juega y aprende en este entreno
     const view = (T, li = null) => ({ ...g, learning: R.learning, traits: { ...g.traits, temperature: T }, reward: rewardFor(li), frozen: R.frozenAll });
-    const progress = () => progressOf(cfg.duration, { games: t.games, elapsedMs: Date.now() - t.startedAt }) ?? 0;
+    // reloj del entreno (spec/04 §11.2, A1): empieza tras el examen de antes y no cuenta las pausas; startedAt y elapsedMs
+    // siguen siendo la duración total (§9.8)
+    let clockStart = null, pausedMs = 0;
+    const trainedMs = () => (clockStart === null ? 0 : Date.now() - clockStart - pausedMs);
+    const progress = () => progressOf(cfg.duration, { games: t.games, elapsedMs: trainedMs() }) ?? 0;
     const at = (key, base, p) => (R.schedule[key] ? scheduleValue(R.schedule[key], p) : base);
     let batchApplied = null, batchOpen = false; // lo que vale para el lote en curso: se fija al empezar el lote
     const openBatch = () => {
@@ -577,6 +571,7 @@ export function createTrainer(opts = {}) {
     const examNow = async (when) => {
       const subject = { ...g, weights: net.serialize() }; // la red tal como es, con su temperatura
       const res = await runBulletin(subject);
+      if (when === 'after' && t._stop) return; // parar es parar (spec/04 §11.6): el examen de después no cuenta
       t.exam = { ...(t.exam || {}), [when]: scores4(res) };
       if (when === 'after') {
         const file = join(dir, 'bulletin.json'), tmp = file + '.tmp';
@@ -700,7 +695,7 @@ export function createTrainer(opts = {}) {
     const doneBy = () => {
       const d = cfg.duration;
       if (d.games && t.games >= d.games) return 'games';
-      if (d.minutes && Date.now() - t.startedAt >= d.minutes * 60000) return 'minutes';
+      if (d.minutes && trainedMs() >= d.minutes * 60000) return 'minutes';
       if (d.plateau) {
         const w = Math.max(1, d.plateau.window || 50), gain = d.plateau.minGain ?? 0.02;
         if (t.curve.length >= 2 * w) {
@@ -753,8 +748,13 @@ export function createTrainer(opts = {}) {
       if (cur) { lessonEvent('start', 0, 0); t.curriculum = cur.summary(); }
       if (R.exam) { t.phase = 'exam-before'; emit('training', t.info()); await examNow('before'); }
       t.phase = 'training';
+      clockStart = Date.now();
       while (!reason) {
-        while (t._paused && !t._stop) await new Promise((r) => setTimeout(r, 50));
+        if (t._paused && !t._stop) {
+          const p0 = Date.now();
+          while (t._paused && !t._stop) await new Promise((r) => setTimeout(r, 50));
+          pausedMs += Date.now() - p0;
+        }
         if (t._stop) { reason = 'stopped'; break; }
         if (evolutionTurn()) {
           if (batch.length) sleep(); // en 'ambos', el gradiente pendiente va antes que la evolución
@@ -795,11 +795,12 @@ export function createTrainer(opts = {}) {
       saveAll();
       if (R.exam && !t._stop) { t.phase = 'exam-after'; emit('training', t.info()); await examNow('after'); }
     } catch (e) {
-      if (pool) pool.close();
+      if (own) own.close();
       return fail(e.message);
     }
-    if (pool) pool.close();
+    if (own) own.close();
     t.endedAt = Date.now(); // la duración deja de contar (spec/04 §9.8)
+    if (t._stop) reason = 'stopped'; // también si se paró después del bucle (durante el examen de después)
     t.status = reason === 'stopped' ? 'stopped' : 'done';
     t.phase = t.status;
     emit('training', t.info());

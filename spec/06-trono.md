@@ -117,6 +117,10 @@
   | `hot` | `learn([partida], {lrScale: 1})` | nada |
   | `mix` | `learn([partida], {lrScale: 0.25})` | `review(las 6)` con `lrScale 1` |
   Se aplica a las dos redes (cada una aprende de su propia trayectoria). Con `a === b` no se aprende.
+  Cada partida se **absorbe una sola vez** por red (recompensas asignadas, estadísticas de la normalización y memoria;
+  sesión 6, 2026-09-24, decisión del usuario): en `mix`, el repaso recibe **las mismas partidas** (los mismos objetos)
+  que ya aprendió tras cada una, con sus recompensas ya asignadas, igual que el entrenador reutiliza las del lote. Antes
+  el repaso las volvía a absorber: recuerdos repetidos, rivales con el doble de partidas y cada término contado dos veces.
 - Las 6 partidas se guardan en `evo/games/<gameId>.json` (`{meta, events}`, meta con `duelId`, `seed`,
   `soldiers`, `left`, `right`, `winner`, `kills`, `ts`). `stop` → `status: 'stopped'`, se puntúa lo jugado.
 - Registro del duelo: `{id, a, b, status: running|done|stopped, learning, speed, throne, games[], wins,

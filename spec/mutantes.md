@@ -635,3 +635,22 @@ los bloqueos sueltos. Con el código de P1b las partidas lentas duran más (0,4�
 pero sin premisa medida. Lo que la medida sin sesgo destapa (no es de la línea 501; pendiente de decisión del usuario): la
 **actualización de pesos va en el hilo principal** ("coordina y aprende"): con redes lentas, 0,85 s por lote de 4; con
 Vidente normal, 0,15–0,45 s; la primera de un entreno, 0,3–0,8 s (en frío y guardando entera la partida de muestra 0).
+
+## Sesión 6 (2026-09-24): auditoría de las sesiones 4 y 5
+### Estado inicial de Adam y de la base "media" (`evo/train.js` 103, 264, 293, 575)
+Contra `receta`, `receta-entreno`, `receta-api`, `receta-extra`, `receta-extra-b`, `aprendizaje`, `aprendizaje-extra`,
+`entrenador-extra`, `entrenador-extra-b` y, al final, `huecos-s5` (escrito después, con oráculos independientes: el Adam
+de libro de Kingma y Ba y la EMA 0,05 desde 0 calculada a mano; congelado). Con la máquina libre, en serie.
+
+| fichero:líneas | cazados | lo que queda |
+|---|---|---|
+| `evo/train.js:103` (`adamInit`) | 3/4 | `return null` (receta-entreno); `t: 0 → 1` (receta-extra-b; el relevo s5 lo daba por hueco: no lo era); `mean: 0 → 1` **solo lo caza `huecos-s5`** (el hueco queda cerrado); `n: 0 → 1`: **equivalente** (`meanState.n` solo se suma, nunca se lee) |
+| `evo/train.js:264` (`optim.mean \|\| …` en `prepareExperience`) | 1/3 | `\|\|` → `&&` (entrenador-extra-b); `mean: 0 → 1` y `n: 0 → 1` del literal: **equivalentes** (`optim.mean` existe siempre: lo crean `adamInit` y `loadOptim`, y el mensaje `learn` de spec/11 lo lleva) |
+| `evo/train.js:293` (`loadOptim`) | 7/8 | `&&`/`===`/`\|\|` (receta-extra-b); `o.t \|\| 0` y el literal de `mean` (huecos-s5); `n: 0 → 1`: **equivalente** |
+| `evo/train.js:575` (examen de después) | 2/2 | `===` → `!==` (receta-extra-b: el "REVISAR" del relevo s5 queda comprobado) y `&&` → `\|\|` (receta-entreno) |
+
+### Equivalentes de las sesiones 4 y 5, revisados uno a uno
+Todos lo son. Notas: `agents/lib.js:236` (`a.i − b.i` → `+`) es equivalente porque el `sort` de V8 con ≤ 9 elementos es
+inserción binaria y, con el comparador siempre positivo en los empates, conserva el orden de llegada (el de índice);
+`evo/worker.js` (`&&` → `||` en `bulletin`) sigue siendo equivalente con `learn` y `pack` (spec/11) porque esas dos ramas
+van antes: a la de `bulletin` solo llegan `bulletin` y los tipos desconocidos.

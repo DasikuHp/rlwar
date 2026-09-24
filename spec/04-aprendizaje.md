@@ -48,7 +48,10 @@ p. ej. `survive` alto → "cobarde: se esconde tras los muros y dispara poco".
   antes de sumar; se guarda `reward.stats` en el genoma (`{term: {n, mean, m2}}`). Los eventos
   `reward` registran valor **crudo y normalizado**.
 - Retorno: `G_t = Σ_k γ^(k−t) r_k` sobre la secuencia de decisiones **del soldado** (`shoot`, `move`,
-  `shoot`, …). Ventaja `A_t = G_t − b_t`: `b = V` (`hand.value`) · media móvil EMA 0.05 · 0.
+  `shoot`, …). Ventaja `A_t = G_t − b_t`: `b = V` (`hand.value`) · media móvil EMA 0.05 · 0. La media móvil **empieza
+  en 0** (la primera ventaja de una red es `G − 0`; sesión 6, 2026-09-24), se guarda en `optim.json` (`mean`) y sigue de
+  un lote al siguiente; un `optim.json` antiguo sin `mean` empieza también en 0. Adam empieza en `t = 0` (el primer paso
+  es `t = 1`, como en Kingma y Ba 2015): el primer paso mueve cada parámetro `−lr·g/(|g|+ε)`.
 - `milestones` (hitos anti-olvido): cuando la tasa de victoria móvil (50 partidas) contra el
   antagonista o el examen del boletín (spec/07 §7) mejora el mejor valor, se guarda una copia
   `evo/nets/<id>/milestones/<n>.json` que entra en la sala de la fama **propia** (mezcla de rivales).
@@ -92,8 +95,11 @@ p. ej. `survive` alto → "cobarde: se esconde tras los muros y dispara poco".
   antes), las partidas de los duelos turbo (y de los retos al trono), el pre-torneo de hijas y el boletín entero (también
   los exámenes de antes y después de un entreno). El hilo del duelo devuelve además la partida ya empaquetada para
   guardarla (`packGame`: meta con huellas y JSON comprimido): el hilo principal solo escribe el fichero.
-- El hilo principal coordina y **aprende** (sueños, repasos): eso sigue en él (un repaso de 6 partidas ≈ 0,2 s).
-- Mensajes nuevos de `evo/worker.js`: `{type:'duel', row, left, right, save}`, `{type:'pre', spec}` y
+- El hilo principal coordina. Desde spec/11 (sesión 6) también **aprende en un hilo** del grupo: los sueños de los
+  entrenos (a cualquier velocidad), el aprendizaje de los duelos y de las exhibiciones y el empaquetado de las partidas
+  de muestra; el hilo principal aplica lo que vuelve (antes aprendía él: un sueño de 8 partidas de una red grande, 1–2 s
+  sin contestar).
+- Mensajes nuevos de `evo/worker.js` (y, desde spec/11, `learn` y `pack`): `{type:'duel', row, left, right, save}`, `{type:'pre', spec}` y
   `{type:'bulletin', subject}` (este manda avisos `{type:'progress', args}` por escena). Un hilo que revienta se sustituye.
 - Sin el grupo (tests, arena, `runDuel`/`runBulletin`/`runPretournament` llamados en el proceso) todo se juega en el
   proceso: es el mismo código, así que misma semilla da mismo resultado. Test: `test/hilos.spec.mjs` (el servidor

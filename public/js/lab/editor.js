@@ -16,14 +16,16 @@ import { validate, repair, countParams, outDims, newGenome } from '/shared/genom
 import { makeRng } from '/shared/rng.js';
 import { patch } from '../ui/patch.js';
 import { popIn } from '../ui/fx/anim.js';
-import { initRender, startShot, R, resetRoom, say, expect, fnText, TEAM_COLOR } from '../render.js';
-import { hub } from '../ui/sse.js';
+import { R, fnText, TEAM_COLOR, prettyExpr } from '../render.js';
+import { roomWatch } from '../game/sala.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = (v) => (typeof v === 'number' ? (Number.isInteger(v) ? String(v) : String(Math.round(v * 1e6) / 1e6)) : String(v));
 const f2 = (v) => (Number.isFinite(v) ? (Math.round(v * 100) / 100).toFixed(2) : '—');
 const pct = (v) => `${Math.round(v * 100)} %`;
 const FAMILY_ES = { line: 'recta', parabola: 'parábola', sine: 'seno', ode1: "EDO (y')", artillery: 'artillería', wild: 'salvaje' };
+// con su artículo, para las frases del banco ("el tiro #13, un seno …")
+const FAMILY_A = { line: 'una recta', parabola: 'una parábola', sine: 'un seno', ode1: "una EDO (y')", artillery: 'un tiro de artillería', wild: 'un tiro salvaje' };
 const STREAM = { ctx: 'contexto', cand: 'candidatos', move: 'destinos', mix: 'candidatos y destinos juntos' };
 const LS = { level: 'gw.lab.level', pos: (id) => `gw.lab.pos.${id}`, bottom: 'gw.ed.bottom' };
 const store = {
@@ -83,7 +85,7 @@ export function mountEditor(root, { catalog, toast }) {
     <div class="ed-modal" id="edModal" hidden></div>`;
   const $ = (id) => root.querySelector('#' + id);
   // alto del panel de abajo: lo último que elegiste, o un tercio de la ventana; plegado, solo sus pestañas
-  const bottomH = () => Math.max(180, Math.min(620, store.get(LS.bottom, null) ?? Math.round(Math.min(262, (typeof innerHeight === 'number' ? innerHeight : 800) * 0.34))));
+  const bottomH = () => Math.max(180, Math.min(620, store.get(LS.bottom, null) ?? Math.round(Math.min(262, (typeof innerHeight === 'number' ? innerHeight : 800) * 0.3))));
   const applyBottom = () => root.style.setProperty('--ed-bottom', S.folded ? '42px' : `${bottomH()}px`);
   applyBottom();
   function fold(v) { S.folded = v; store.set('gw.ed.folded', v); applyBottom(); renderPanel(); if (S.fit) setTimeout(renderBoard, 30); }
@@ -302,7 +304,7 @@ export function mountEditor(root, { catalog, toast }) {
       <p class="ed-facts" title="${esc(g.id)}"><span>gen ${gen}</span><span>${g.blocks.length} bloques</span><span>${S.params === null ? 'pesos: —' : `${S.params.toLocaleString('es-ES')} pesos`}</span>${net && net.stats && Number.isFinite(net.stats.games) ? `<span>${net.stats.games} partidas</span>` : ''}${net && net.isQueen ? '<span class="tag queen">reina</span>' : ''}${net && net.training ? '<span class="tag busy">entrenando</span>' : ''}</p>
       <button type="button" class="ed-status ${st.cls}" data-ptab="avisos" title="Ver qué le falta y los avisos">${esc(st.text)}</button>
       ${S.dirty ? '<span class="dirty" title="Guarda para que juegue así">cambios sin guardar</span>' : ''}
-      <span class="zoom" role="group" aria-label="Zoom"><button type="button" data-zoom="-1" aria-label="Alejar">−</button><span class="mono" id="edZoom">${Math.round(S.zoom * 100)} %</span><button type="button" data-zoom="1" aria-label="Acercar">+</button><button type="button" data-zoom="fit" aria-pressed="${S.fit}" title="Que el ancho de la red quepa en el lienzo">Encajar</button><button type="button" data-act="tidy" title="Vuelve a colocar los bloques por columnas">Ordenar</button></span>`);
+      <span class="zoom" role="group" aria-label="Zoom"><button type="button" data-zoom="-1" aria-label="Alejar">−</button><span class="mono" id="edZoom">${Math.round(S.zoom * 100)} %</span><button type="button" data-zoom="1" aria-label="Acercar">+</button><button type="button" data-zoom="fit" aria-pressed="${S.fit}" title="Que la red entera quepa en el lienzo">Encajar</button><button type="button" data-act="tidy" title="Vuelve a colocar los bloques por columnas">Ordenar</button></span>`);
   }
 
   // ---------- lienzo ----------
@@ -336,8 +338,9 @@ export function mountEditor(root, { catalog, toast }) {
     if (!S.genome.blocks.length) { patch(b, startHTML()); return; }
     const keep = { left: b.scrollLeft, top: b.scrollTop };
     const L = layout();
-    // encajar: el ancho de la red cabe en el lienzo (entre 60 % y 100 %); lo alto se recorre con la rueda
-    if (S.fit) S.zoom = Math.max(0.6, Math.min(1, (b.clientWidth - 16) / (L.width + 12)));
+    // encajar: la red entera cabe en el lienzo, a lo ancho y a lo alto (entre 55 % y 100 %); si ni así, lo que sobra se
+    // recorre con la rueda (sesión 9: a 1280×800 un cuarto de Tortuga quedaba escondido bajo el panel)
+    if (S.fit) S.zoom = Math.max(0.55, Math.min(1, (b.clientWidth - 16) / (L.width + 12), (b.clientHeight - 12) / (L.height + 8)));
     const z = S.zoom;
     const zl = $('edTools').querySelector('#edZoom');
     if (zl) zl.textContent = `${Math.round(z * 100)} %`;
@@ -400,17 +403,37 @@ export function mountEditor(root, { catalog, toast }) {
     const fx = Hn.fixes(S.genome, catalog, S.check).filter((f) => f.key.endsWith(`:${blk.id}`) || (Number.isInteger(x.wire) && f.key.endsWith(`:${x.wire}`)));
     return `<div class="flag" data-key="f:${esc(blk.id)}" style="left:${p.x}px;top:${p.y + CARD.h + 6}px" role="note">${esc(x.message)}${hint ? `<span class="hintline">👉 ${esc(hint)}</span>` : ''}${fx.map((f, i) => `<button type="button" class="mini fix" data-fix="${esc(f.key)}">${esc(f.label)}</button>`).join('')}${errs.length > 1 ? `<span class="more">y ${errs.length - 1} más en Avisos</span>` : ''}</div>`;
   }
-  function wirePath(a, b) {
+  // un cable largo no pasa por debajo de otra tarjeta (sesión 9: parecía que entraba en ella y salía por el otro lado):
+  // si la curva la cruza, la rodea por arriba o por abajo, por el lado más cercano y sin meterse en otra
+  function wirePath(a, b, L = null, ends = []) {
     const x1 = a.x + CARD.w, y1 = a.y + CARD.h / 2, x2 = b.x, y2 = b.y + CARD.h / 2;
-    const dx = Math.max(48, Math.abs(x2 - x1) / 2);
-    return `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`;
+    const seg = (xa, ya, xb, yb) => { const dx = Math.max(xb > xa ? 24 : 48, Math.abs(xb - xa) / 2); return ` C${xa + dx},${ya} ${xb - dx},${yb} ${xb},${yb}`; };
+    if (!L || x2 <= x1 + 40) return `M${x1},${y1}${seg(x1, y1, x2, y2)}`;
+    const G = 9; // holgura alrededor de cada tarjeta
+    const cards = Object.entries(L.nodes).filter(([id]) => !ends.includes(id)).map(([, p]) => ({ l: p.x - G, r: p.x + CARD.w + G, t: p.y - G, b: p.y + CARD.h + G }))
+      .filter((c) => c.l > x1 - 1 && c.r < x2 + 1).sort((p, q) => p.l - q.l);
+    const inside = (y, c0) => cards.some((o) => o !== c0 && o.r > c0.l && o.l < c0.r && y > o.t && y < o.b);
+    let d = `M${x1},${y1}`, px = x1, py = y1;
+    for (const c of cards) {
+      if (c.l < px) continue;
+      const u = Math.min(1, Math.max(0, ((c.l + c.r) / 2 - px) / Math.max(1, x2 - px)));
+      const yAt = py + (y2 - py) * u * u * (3 - 2 * u); // la curva directa desde aquí al final, a la altura de la tarjeta
+      if (yAt <= c.t || yAt >= c.b) continue;
+      let up = c.t, down = c.b;
+      while (inside(up, c)) up -= 12;
+      while (inside(down, c)) down += 12;
+      const yy = Math.max(4, Math.abs(yAt - up) <= Math.abs(down - yAt) ? up : down);
+      d += `${seg(px, py, c.l, yy)} L${c.r},${yy}`;
+      px = c.r; py = yy;
+    }
+    return d + seg(px, py, x2, y2);
   }
   function wiresSVG(L) {
     const groupOf = (id) => { const blk = S.genome.blocks.find((x) => x.id === id); const e = blk && M.entryOf(catalog, blk.type); return e ? e.group : 'instinct'; };
     return (S.genome.wires || []).map((w, i) => {
       const a = L.nodes[w.from], b = L.nodes[w.to];
       if (!a || !b) return '';
-      const d = wirePath(a, b);
+      const d = wirePath(a, b, L, [w.from, w.to]);
       const bad = (S.issues.byWire[i] || []).length;
       const sel = S.sel && S.sel.kind === 'wire' && S.sel.index === i;
       // nervios: la señal real del bloque de salida en la escena del banco (más señal, pulso más vivo y más rápido)
@@ -687,7 +710,7 @@ export function mountEditor(root, { catalog, toast }) {
     const now = B.now, sv = B.saved;
     const a = now && now.ok ? Bn.pick(now.decision) : null, b = sv && sv.ok ? Bn.pick(sv.decision) : null;
     const same = now && now.ok && sv && sv.ok ? Bn.sameChoice(sv.decision, now.decision) : null;
-    const desc = (x) => (!x ? '—' : x.kind === 'move' ? `${x.stay ? 'quedarse quieta' : `moverse a (${f2(x.to.x)}, ${f2(x.to.y)})`} · probabilidad <b class="mono">${f2(x.p)}</b>` : `el tiro <span class="mono">#${x.i}</span>, una ${esc(FAMILY_ES[x.family] || x.family)} <span class="mono">${esc(x.mode === 'ode2' ? `y'' = ${x.expr}` : x.expr)}</span> · probabilidad <b class="mono">${f2(x.p)}</b>, certeza <b class="mono">${f2(x.certainty)}</b>`);
+    const desc = (x) => (!x ? '—' : x.kind === 'move' ? `${x.stay ? 'quedarse quieta' : `moverse a (${f2(x.to.x)}, ${f2(x.to.y)})`} · probabilidad <b class="mono">${f2(x.p)}</b>` : `el tiro <span class="mono">#${x.i}</span>, ${esc(FAMILY_A[x.family] || `de la familia ${x.family}`)} <span class="mono">${esc(x.mode === 'ode2' ? `y'' = ${prettyExpr(x.expr)} · ${Math.round(x.angle ?? 0)}°` : x.mode === 'ode1' ? `y' = ${prettyExpr(x.expr)}` : `y = ${prettyExpr(x.expr)}`)}</span> · probabilidad <b class="mono">${f2(x.p)}</b>, certeza <b class="mono">${f2(x.certainty)}</b>`);
     const att = now && now.ok && now.decision.attribution ? now.decision.attribution.filter((r) => r.share >= 0.005).sort((x, y) => y.share - x.share) : [];
     const tools = sc.key === 'mia' ? `<div class="b-tools" role="group" aria-label="Editar tu escena"><button type="button" class="mini" data-bench="enemy">+ enemigo</button><button type="button" class="mini" data-bench="ally">+ aliada</button><button type="button" class="mini" data-bench="rock">+ roca</button>${B.picked ? `<button type="button" class="mini danger" data-bench="del">Quitar ${esc(B.picked.kind === 'rock' ? 'la roca' : B.picked.id)}</button>` : ''}</div>` : '';
     patch(el, `<header><h3>Banco de pruebas</h3><button type="button" class="primary mini" data-act="probe" title="Una partida de verdad (x10) contra otra red, aquí mismo">Probar ya</button></header>
@@ -744,13 +767,17 @@ export function mountEditor(root, { catalog, toast }) {
     el.hidden = false;
     const rivals = S.nets.filter((n) => n.id !== S.netId);
     const nameOf = (id) => (S.nets.find((n) => n.id === id) || {}).name || id;
+    const busy = P.busy || new Map();
+    const free = rivals.filter((n) => !busy.has(n.id));
     if (!P.duelId) {
       patch(el, `<div class="pr-box"><header><h3>Probar ya</h3><button type="button" data-act="probe-close" aria-label="Cerrar">✕</button></header>
         ${S.dirty ? '<p class="warn-text">Se prueba la red <b>guardada</b>: tus cambios sin guardar no juegan. Guarda antes si quieres probarlos.</p>' : ''}
         ${!S.forPlay.ok ? '<p class="warn-text">Tu red aún no puede jugar: mira en Avisos qué le falta.</p>' : ''}
-        ${rivals.length ? `<label class="field">Contra <select data-prival>${rivals.map((n) => `<option value="${esc(n.id)}"${n.id === P.rival ? ' selected' : ''}>${esc(n.name)}${n.isQueen ? ' (reina)' : ''}</option>`).join('')}</select></label>
+        ${busy.has(S.netId) ? `<p class="warn-text">Tu red está ${esc(busy.get(S.netId))}: cuando acabe podrás probarla.</p>` : ''}
+        ${rivals.length && !free.length ? '<p class="warn-text">Todas las demás redes están ocupadas (en un duelo o entrenando). Espera a que acaben o crea otra desde una plantilla.</p>' : ''}
+        ${rivals.length ? `<label class="field">Contra <select data-prival>${rivals.map((n) => `<option value="${esc(n.id)}"${n.id === P.rival ? ' selected' : ''}${busy.has(n.id) ? ' disabled' : ''}>${esc(n.name)}${n.isQueen ? ' (reina)' : ''}${busy.has(n.id) ? ` — ${esc(busy.get(n.id))}` : ''}</option>`).join('')}</select></label>
           <p class="dim">6 partidas (3 mapas × 2 lados) a x10, sin aprender (congeladas): así ves cómo juega hoy, sin cambiarla.</p>
-          <div class="row">${S.dirty ? '<button type="button" class="primary" data-act="probe-save-go">Guardar y probar</button>' : ''}<button type="button" class="${S.dirty ? '' : 'primary'}" data-act="probe-go" ${S.forPlay.ok || !S.dirty ? '' : 'disabled'}>Empezar${S.dirty ? ' con la guardada' : ''}</button></div>` : '<p class="empty">Hace falta otra red en este mundo. Crea otra desde una plantilla.</p>'}</div>`);
+          <div class="row">${S.dirty && P.rival && !busy.has(S.netId) ? '<button type="button" class="primary" data-act="probe-save-go">Guardar y probar</button>' : ''}<button type="button" class="${S.dirty ? '' : 'primary'}" data-act="probe-go" ${(S.forPlay.ok || !S.dirty) && P.rival && !busy.has(S.netId) ? '' : 'disabled'}>Empezar${S.dirty ? ' con la guardada' : ''}</button></div>` : '<p class="empty">Hace falta otra red en este mundo. Crea otra desde una plantilla.</p>'}</div>`);
       return;
     }
     const d = P.duel;
@@ -758,27 +785,36 @@ export function mountEditor(root, { catalog, toast }) {
     if (!el.querySelector('#prCanvas')) {
       el.innerHTML = `<div class="pr-live"><header><h3>Probar ya: <span id="prWho"></span></h3><span class="dim" id="prScore"></span><button type="button" data-act="probe-close" aria-label="Cerrar">✕</button></header>
         <canvas id="prCanvas" aria-label="Plano de la partida"></canvas><div class="fnbar" id="prFn"><span class="dim">Aquí sale la función de cada tiro.</span></div><div id="prEnd"></div></div>`;
-      initRender(el.querySelector('#prCanvas'));
-      R.onLanded = (shot) => { const p = R.state && R.state.players.find((q) => q.id === shot.playerId); patch(el.querySelector('#prFn'), `<b class="fn-who" style="color:${TEAM_COLOR[shot.shooterTeam]};border-color:${TEAM_COLOR[shot.shooterTeam]}">${esc(p ? p.name : '?')}</b><span class="fn-expr mono" style="color:${TEAM_COLOR[shot.shooterTeam]}">${esc(fnText(shot))}</span>`); };
     }
     patch(el.querySelector('#prWho'), `${esc(nameOf(d ? d.a : S.netId))} contra ${esc(nameOf(d ? d.b : P.rival))}`);
     patch(el.querySelector('#prScore'), d ? `${d.games.length}/6 partidas · ${d.wins[d.a] ?? 0} – ${d.wins[d.b] ?? 0}` : 'empezando…');
     patch(el.querySelector('#prEnd'), res ? `<div class="pr-end">${res}<p class="dim">Para ver cada decisión con calma, abre la moviola de su ficha:</p><button type="button" data-ficha="${esc(S.netId)}" data-ficha-tab="historia">Moviola de ${esc(nameOf(S.netId))}</button> <button type="button" data-act="probe-again">Otra vez</button></div>` : '');
   }
-  let probeOff = [], probePoll = null;
-  function probeWatch(code) {
-    for (const off of probeOff) off();
-    resetRoom();
-    const url = `/api/rooms/${code}/events`;
-    probeOff = [
-      hub.on(url, 'hello', (st) => { if (st && st.soldiers) R.state = st; }), hub.on(url, 'state', (st) => { if (st && st.soldiers) R.state = st; }),
-      hub.on(url, 'shot', (d) => startShot(d.shot)),
-      hub.on(url, 'decision', (d) => { if (d.decision && d.decision.phase === 'shoot') expect(d.decision.soldierId); }),
-      hub.on(url, 'chat', (d) => { for (const c of (d.chat || []).slice(-3)) if (c.kind === 'say' && c.soldierId && !probeSeen.has(`${c.t}|${c.text}`)) { probeSeen.add(`${c.t}|${c.text}`); const cut = c.text.indexOf(': '); say({ soldierId: c.soldierId, text: cut >= 0 && cut < 40 ? c.text.slice(cut + 2) : c.text, level: c.level || null }); } }),
-    ];
-    api(`/api/rooms/${code}/state`).then((r) => { if (r.ok) R.state = r.body; });
+  // la sala en directo: la misma escucha que el duelo (game/sala.js); al abrirla aquí, el duelo deja de pintar la suya
+  const probeFn = (shot, landed) => {
+    const el = $('edProbe').querySelector('#prFn');
+    if (!el) return;
+    const p = R.state && R.state.players.find((q) => q.id === shot.playerId), c = TEAM_COLOR[shot.shooterTeam] || '#fff';
+    patch(el, `<b class="fn-who" style="color:${c};border-color:${c}">${esc(p ? p.name : '?')}</b><span class="fn-expr mono" style="color:${c}">${esc(fnText(shot))}</span><span class="fn-res">${landed ? '' : '<span class="dim">trazando…</span>'}</span>`);
+  };
+  const PW = roomWatch(() => $('edProbe').querySelector('#prCanvas'), { shot: (x) => probeFn(x, false), landed: (x) => probeFn(x, true) });
+  let probePoll = null;
+  const probeWatch = (code) => PW.watch(code);
+  // quién está ocupada ahora (en un duelo o entrenando): el servidor no la deja jugar otro duelo (409)
+  async function probeBusy() {
+    const [d, n] = await Promise.all([api('/api/lab/duels'), api('/api/lab/nets')]);
+    const busy = new Map();
+    if (d.ok) for (const x of d.body.duels) if (x.status === 'running') for (const id of [x.a, x.b]) busy.set(id, 'en un duelo');
+    if (n.ok) { S.nets = n.body.nets; for (const x of n.body.nets) if (x.training) busy.set(x.id, 'entrenando'); }
+    return busy;
   }
-  const probeSeen = new Set();
+  async function probeOpen(rival0 = null) {
+    const busy = await probeBusy();
+    const rivals = S.nets.filter((n) => n.id !== S.netId && !busy.has(n.id));
+    const q = rivals.find((n) => n.id === rival0) || rivals.find((n) => n.isQueen) || rivals.find((n) => n.id === 'vidente-1') || rivals[0];
+    S.probe = { rival: q ? q.id : null, duelId: null, busy };
+    renderProbe();
+  }
   async function probeStart() {
     const P = S.probe;
     const r = await api('/api/lab/duels', 'POST', { a: S.netId, b: P.rival, speed: 'x10', learning: 'frozen', soldiers: 'random' });
@@ -798,8 +834,7 @@ export function mountEditor(root, { catalog, toast }) {
   }
   function probeClose() {
     clearInterval(probePoll);
-    for (const off of probeOff) off();
-    probeOff = [];
+    PW.stop();
     if (S.probe && S.probe.duelId && S.probe.duel && S.probe.duel.status === 'running') api(`/api/lab/duels/${encodeURIComponent(S.probe.duelId)}/stop`, 'POST', {});
     S.probe = null; $('edProbe').innerHTML = ''; renderProbe();
   }
@@ -905,11 +940,11 @@ export function mountEditor(root, { catalog, toast }) {
       case 'tidy': S.pos = {}; store.del(LS.pos(S.netId)); renderBoard(); break;
       case 'remove': { const id = t.dataset.id; commit(M.removeBlock(S.genome, id), { select: null }); break; }
       case 'unwire': commit(M.disconnect(S.genome, Number(t.dataset.index)), { select: null }); break;
-      case 'probe': { const rivals = S.nets.filter((n) => n.id !== S.netId); const q = rivals.find((n) => n.isQueen) || rivals.find((n) => n.id === 'vidente-1') || rivals[0]; S.probe = { rival: q ? q.id : null, duelId: null }; renderProbe(); break; }
+      case 'probe': probeOpen(); break;
       case 'probe-close': probeClose(); break;
       case 'probe-go': probeStart(); break;
       case 'probe-save-go': await save(); if (!S.dirty) probeStart(); break;
-      case 'probe-again': { const rival = S.probe.rival; probeClose(); S.probe = { rival, duelId: null }; renderProbe(); break; }
+      case 'probe-again': { const rival = S.probe.rival; probeClose(); probeOpen(rival); break; }
       default: break;
     }
   };
@@ -1055,6 +1090,9 @@ export function mountEditor(root, { catalog, toast }) {
     if (S.link) {
       const L = layout(), a = L.nodes[S.link.from], p = boardPoint(ev);
       const tmp = $('edBoard').querySelector('#edTmpWire');
+      // cerca del borde de arriba o de abajo, el lienzo se desplaza solo: así llegas a los bloques que no se ven
+      const bd = $('edBoard'), br = bd.getBoundingClientRect();
+      if (ev.clientY > br.bottom - 28) bd.scrollTop += 14; else if (ev.clientY < br.top + 28) bd.scrollTop -= 14;
       if (tmp && a) tmp.setAttribute('d', `M${a.x + CARD.w},${a.y + CARD.h / 2} C${a.x + CARD.w + 60},${a.y + CARD.h / 2} ${p.x - 60},${p.y} ${p.x},${p.y}`);
       return;
     }

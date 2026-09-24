@@ -479,7 +479,9 @@ de §9.4 (sustituye al `learn` interno, que solo pisaba el gradiente).
 
 ### 11.7 Versión antes del entreno (siempre)
 - Antes de la primera partida se guarda una **versión** de la red tal como estaba: `evo/nets/<id>/versions/<n>.json`
-  (`{n, ts, reason, trainingId?, genome}`, `n` creciente; se quedan las 50 últimas). La vista del entreno lleva
+  (`{n, ts, reason, trainingId?, genome}`, `n` creciente). Las de antes del entreno (con `trainingId`) **no se borran
+  nunca**; de las demás (las del editor al guardar y las de "volver a esta") se quedan las 50 últimas (sesión 9: cada
+  guardado del editor crea una, y 50 guardados no pueden llevarse la que deshace un entreno). La vista del entreno lleva
   `versionBefore: n`. En `evo/store.js`: `saveVersion(genome, {reason, trainingId}) → n`, `listVersions(netId)` (la más
   nueva primero, sin el genoma) y `loadVersion(netId, n)` (o null).
 - API: `GET /api/lab/nets/:id/versions` → `{versions: [{n, ts, reason, trainingId, paramCount}]}` (la más nueva

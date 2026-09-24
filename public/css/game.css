@@ -200,3 +200,11 @@ body.game #toast { z-index: 40; }
   .duel-live { grid-template-columns: 250px minmax(0, 1fr) 290px; }
 }
 @media (prefers-reduced-motion: reduce) { .portada *, .g-top * { animation: none !important; } }
+
+/* ventanas bajas (portátiles de 720–860 px de alto): cabecera de la etapa más baja, para dar sitio al lienzo y al plano */
+@media (max-height: 860px) {
+  .g-head { min-height: 0; padding-top: 6px; }
+  .g-num { font-size: 40px; align-self: end; margin-bottom: 10px; }
+  .g-title h1 { font-size: 20px; margin-bottom: 10px; }
+  .g-title p { display: none; }
+}

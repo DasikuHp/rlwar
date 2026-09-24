@@ -256,3 +256,10 @@ body.reduce .ed2 .nerve { animation: none; stroke-dasharray: none; stroke-width:
 .ed2 .ed-panel .tabs { flex-wrap: nowrap; overflow: hidden; }
 .ed2 .ed-panel .tabs > button { flex: none; white-space: nowrap; }
 .ed2 .ed-panel .tabs .legend2 { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; }
+
+/* sesión 9: el porqué de cada plantilla en su propia línea (antes se cortaba a 1280 sin puntos suspensivos) y la leyenda
+   de los cables, que a 1280 no cabía y salía cortada: ahí se quita (cada cable dice qué lleva al pasar el ratón) */
+.ed2 .tpls2, .ed2 .tpls2 li, .ed2 .tpl2-head { min-width: 0; max-width: 100%; }
+.tpl2-head { flex-wrap: wrap; row-gap: 1px; }
+.tpl2-head small { flex-basis: 100%; padding-left: 27px; white-space: normal; overflow: visible; line-height: 1.25; }
+@media (max-width: 1500px) { .ed2 .ed-panel .tabs .legend2 { display: none; } }

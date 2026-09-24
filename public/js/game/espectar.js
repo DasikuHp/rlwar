@@ -1,10 +1,10 @@
 // Etapa 3 · Duelo en vivo (P5): lanzar un duelo entre dos redes y mirarlo pensar. Sin barra de disparo: aquí nadie dispara
 // a mano. Plano con render.js, candidatos y decisión de live.js (lo que la red pensó de verdad) y el registro de la sala.
 // También vale para espectar cualquier sala por su código (#room=CODE, AGENTS.md).
-import { initRender, startShot, R, resetRoom, say, expect, fnText, TEAM_COLOR } from '../render.js';
-import { overlay, topCandidates, confidenceView, attributionPhrase } from '../live.js';
-import { hub } from '../ui/sse.js';
+import { R, fnText, TEAM_COLOR, prettyExpr } from '../render.js';
+import { topCandidates, confidenceView, attributionPhrase } from '../live.js';
 import { api, reasonOf } from '../lab/api.js';
+import { roomWatch } from './sala.js';
 import { patch } from '../ui/patch.js';
 import { SETTINGS_EVENT } from './ajustes.js';
 
@@ -39,7 +39,13 @@ export function mountDuel(root, { toast, settings }) {
     </aside>
   </div>`;
   const $ = (id) => root.querySelector(`#${id}`);
-  let offRoom = [], room = null, follow = null, poll = null, nets = [], duels = [];
+  let follow = null, poll = null, nets = [], duels = [];
+  // la sala en directo: la escucha es la de sala.js (la misma que "Probar ya"); aquí solo el panel
+  const W = roomWatch(() => $('dCanvas'), {
+    state: onState, shot: onShot, decision: onDecision, landed: (shot) => onLanded(shot),
+    chat: (list) => { chat = list; logSoon(); },
+    missing: (text) => { $('dWho').textContent = text; },
+  });
   const nameOf = (id) => (nets.find((n) => n.id === id) || {}).name || id;
 
   // ---- lanzar ----
@@ -77,8 +83,8 @@ export function mountDuel(root, { toast, settings }) {
     const cur = duels.find((x) => x.id === follow);
     if (cur) {
       renderScore(cur);
-      if (cur.liveRoom && cur.liveRoom !== room) watchRoom(cur.liveRoom);
-      if (cur.status !== 'running' && !room) $('dWho').textContent = `Duelo ${STATUS[cur.status] || cur.status}: ${nameOf(cur.a)} ${cur.wins[cur.a] ?? 0} – ${cur.wins[cur.b] ?? 0} ${nameOf(cur.b)}`;
+      if (cur.liveRoom && cur.liveRoom !== W.code) watchRoom(cur.liveRoom);
+      if (cur.status !== 'running' && !W.code) $('dWho').textContent = `Duelo ${STATUS[cur.status] || cur.status}: ${nameOf(cur.a)} ${cur.wins[cur.a] ?? 0} – ${cur.wins[cur.b] ?? 0} ${nameOf(cur.b)}`;
     }
   }
   function renderList() {
@@ -98,28 +104,11 @@ export function mountDuel(root, { toast, settings }) {
 
   // ---- la sala en directo ----
   function watchRoom(code) {
-    for (const off of offRoom) off();
-    room = code;
-    resetRoom(); held = null; chat = [];
+    held = null; chat = [];
     $('dLog').innerHTML = ''; $('dBrain').innerHTML = '<p class="empty">Esperando a que una red piense…</p>';
-    const url = `/api/rooms/${code}/events`;
-    offRoom = [
-      hub.on(url, 'hello', onState), hub.on(url, 'state', onState),
-      hub.on(url, 'shot', (d) => onShot(d.shot)),
-      hub.on(url, 'decision', (d) => onDecision(d.decision)),
-      hub.on(url, 'move', () => { if (R.think && R.think.kind === 'move') R.think = null; }),
-      hub.on(url, 'chat', (d) => { if (R.state) R.state.chat = d.chat; chat = d.chat || []; logSoon(); bubbles(d.chat); }),
-    ];
-    api(`/api/rooms/${code}/state`).then((r) => {
-      if (r.ok) { onState(r.body); return; }
-      for (const off of offRoom) off();
-      offRoom = []; room = null;
-      $('dWho').textContent = r.status === 404 ? `La sala ${code} no existe (o ya se cerró).` : reasonOf(r);
-    });
+    W.watch(code);
   }
   function onState(st) {
-    if (!st || !st.phase || !Array.isArray(st.players) || !Array.isArray(st.soldiers)) return;
-    R.state = st;
     const side = (team) => st.players.filter((p) => p.team === team).map((p) => esc(p.name)).join(', ');
     const alive = (team) => st.soldiers.filter((s) => s.alive && s.team === team).length;
     patch($('dWho'), `<b style="color:#4fd1ff">${side('left')}</b> <span class="mono">${alive('left')} vs ${alive('right')}</span> <b style="color:#ff9f43">${side('right')}</b> <span class="dim">· sala ${esc(st.code)}${st.phase === 'over' ? ' · acabada' : ''}</span>`);
@@ -146,7 +135,7 @@ export function mountDuel(root, { toast, settings }) {
     const el = $('dLog');
     const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
     const shown = chat.filter((c) => !(held && c.t >= held.from && c.t <= held.to)).slice(-60);
-    patch(el, shown.map((c) => `<li data-key="${esc(`${c.t}|${c.text}`)}" class="${c.playerId ? 'said' : 'sys'}${c.kind === 'think' ? ' think' : ''}">${colorNames(esc(c.text))}</li>`).join(''));
+    patch(el, shown.map((c) => `<li data-key="${esc(`${c.t}|${c.text}`)}" class="${c.playerId ? 'said' : 'sys'}${c.kind === 'think' ? ' think' : ''}">${colorNames(esc(prettyExpr(c.text)))}</li>`).join(''));
     if (atEnd) el.scrollTop = el.scrollHeight; // si estás leyendo más arriba, no te lo mueve
   }
   // ---- la barra de la función, como el campo "y =" del original: quién tira, qué función y qué consigue ----
@@ -172,36 +161,22 @@ export function mountDuel(root, { toast, settings }) {
       <span class="fn-res">${landedYet ? esc(resultText(shot)) : '<span class="dim">trazando…</span>'}</span>`);
   }
   function onShot(shot) {
-    startShot(shot); // si el anterior seguía trazándose, se completa aquí (y suelta lo suyo del registro)
+    // render.js ya lo traza (si el anterior seguía trazándose, se completa y suelta lo suyo del registro)
     held = { from: shot.ts - 40, to: shot.ts + 5 };
     fnBar(shot, false);
     logSoon();
   }
   const onLanded = (shot) => { if (!root.isConnected) return; held = null; fnBar(shot, true); renderLog(); };
 
-  // ---- bocadillos: lo que dice cada red sale sobre su soldado, después de su función (ui/bubbles.js) ----
-  const seenSay = new Set();
-  function bubbles(list) {
-    for (const c of list || []) {
-      if (c.kind !== 'say' || !c.soldierId) continue;
-      const key = `${c.t}|${c.text}`; if (seenSay.has(key)) continue;
-      seenSay.add(key); if (seenSay.size > 200) seenSay.clear();
-      const cut = c.text.indexOf(': ');
-      say({ soldierId: c.soldierId, text: cut >= 0 && cut < 40 ? c.text.slice(cut + 2) : c.text, level: c.level || null });
-    }
-  }
+  // los bocadillos (lo que dice cada red, después de su función) y lo que piensa en el plano los pone sala.js
   async function onDecision(d) {
-    if (!d || !R.state) return;
+    if (!d || !R.state || d.phase !== 'shoot') return;
     const st = R.state;
     const sol = st.soldiers.find((s) => s.id === d.soldierId);
-    const ov = overlay(d);
-    R.think = ov ? { ...ov, team: sol ? sol.team : 'left', until: Date.now() + (ov.kind === 'move' ? 4000 : 15000) } : null;
-    if (d.phase !== 'shoot') return;
-    expect(d.soldierId);
     const owner = sol && st.players.find((p) => p.id === sol.ownerId);
     const c = confidenceView(d.confidence);
     $('dBrain').innerHTML = `<p><b>${esc(owner ? owner.name : d.netId)}</b> <span class="dim">antes de disparar</span></p>
-      <ol class="b-cands">${topCandidates(d, 5).map((x) => `<li class="${x.chosen ? 'chosen' : ''}"><span class="mono">#${x.i}</span><span>${esc(FAMILY[x.family] || x.family)}</span><span class="expr">${esc(x.expr)}</span><span class="p">${f2(x.p)}</span></li>`).join('')}</ol>
+      <ol class="b-cands">${topCandidates(d, 5).map((x) => `<li class="${x.chosen ? 'chosen' : ''}"><span class="mono">#${x.i}</span><span>${esc(FAMILY[x.family] || x.family)}</span><span class="expr" title="${esc(prettyExpr(x.expr))}">${esc(prettyExpr(x.expr))}</span><span class="p">${f2(x.p)}</span></li>`).join('')}</ol>
       ${c ? `<p class="b-conf"><span class="lvl lvl-${esc(c.level)}">${esc(c.label)}</span> certeza <b>${f2(c.certainty)}</b></p><span class="meter"><i style="width:${Math.round(Math.max(0, Math.min(1, c.certainty)) * 100)}%"></i></span>` : ''}
       <p class="dim">elegida #${d.chosen} · margen ${f2(d.margin)}</p><p class="b-say" id="dSay"></p>`;
     // la frase solo sale si se compone con compose y pasa checkPhrase contra esta misma decisión (spec/07 §2)
@@ -215,13 +190,10 @@ export function mountDuel(root, { toast, settings }) {
   return {
     async start(code = null) {
       // el plano es uno para todo el juego: si lo estaba usando "Probar ya" del editor, vuelve aquí y se repinta la sala
-      const took = R.canvas !== $('dCanvas');
-      initRender($('dCanvas'));
-      R.onLanded = onLanded;
-      if (took && room) { const c = room; room = null; watchRoom(c); }
+      if (!W.active) W.take();
       await loadDuels();
       renderForm();
-      if (code && code !== room) watchRoom(code);
+      if (code && code !== W.code) watchRoom(code);
       clearInterval(poll);
       poll = setInterval(() => { if (!root.closest('[hidden]')) loadDuels(); }, 1500);
     },

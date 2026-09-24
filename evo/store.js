@@ -214,7 +214,9 @@ function gcSnapshots() {
     if (f.endsWith('.json.gz') && !used.has(f.slice(0, -8))) { try { unlinkSync(join(snapshotsDir(), f)); } catch { /* ignorar */ } }
   }
 }
-// versiones de una red (spec/04 §11.7): evo/nets/<id>/versions/<n>.json = {n, ts, reason, trainingId, genome}; las 50 últimas
+// versiones de una red (spec/04 §11.7): evo/nets/<id>/versions/<n>.json = {n, ts, reason, trainingId, genome}.
+// Sesión 9: las de "antes del entreno" (con trainingId) no se borran nunca; el tope de 50 poda solo las demás (las del
+// editor y las de "volver a esta"), para que 50 guardados seguidos no se lleven la de deshacer un entreno malo.
 const VERSIONS_KEEP = 50;
 const versionsDir = (netId) => join(netsDir(), netId, 'versions');
 const versionFiles = (netId) => {
@@ -230,7 +232,9 @@ export function saveVersion(genome, { reason = '', trainingId = null } = {}) {
   const n = (ns.length ? ns[ns.length - 1] : 0) + 1;
   const file = join(dir, `${n}.json`), tmp = file + '.tmp';
   writeFileSync(tmp, JSON.stringify({ n, ts: Date.now(), reason, trainingId, genome }, plain)); renameSync(tmp, file);
-  for (const old of ns.slice(0, Math.max(0, ns.length + 1 - VERSIONS_KEEP))) { try { unlinkSync(join(dir, `${old}.json`)); } catch { /* ya no está */ } }
+  // solo se leen las de antes si puede sobrar alguna (hasta 50 no se mira nada)
+  const prunable = ns.length + 1 <= VERSIONS_KEEP ? [] : [...ns, n].filter((k) => { const v = k === n ? { trainingId } : loadVersion(genome.id, k); return !(v && v.trainingId); });
+  for (const old of prunable.slice(0, Math.max(0, prunable.length - VERSIONS_KEEP))) { try { unlinkSync(join(dir, `${old}.json`)); } catch { /* ya no está */ } }
   return n;
 }
 export function loadVersion(netId, n) {

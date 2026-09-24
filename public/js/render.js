@@ -21,7 +21,7 @@ export const R = {
 
 export const TEAM_COLOR = { left: '#4fd1ff', right: '#ff9f43' };
 const SHOT_SPEED = 55; // u/s a x1, como shared/constants.js (el servidor espera lo mismo antes del siguiente turno)
-const MAX_TRAILS = 24;
+const MAX_TRAILS = 96; // toda la partida (el tope es de 90 disparos): en x10 se ven siempre todas las curvas
 const MODE_LABEL = { function: 'y =', ode1: "y' =", ode2: "y'' =" };
 const SANS = "Bahnschrift, 'Segoe UI', sans-serif", MONO = "'Cascadia Mono', Consolas, monospace";
 const speedOf = () => (R.state && R.state.config && R.state.config.speed) || 1;
@@ -97,7 +97,9 @@ export const w2s = (x, y) => {
 };
 
 // la función tal como la escribiría una persona en el original: "y = …", "y' = …" o "y'' = … · 35°"
-export const fnText = (shot) => `${MODE_LABEL[shot.mode] || 'y ='} ${shot.expr}${shot.mode === 'ode2' && Number.isFinite(shot.angle) ? ` · ${Math.round(shot.angle)}°` : ''}`;
+// para leerla: "0.1*x+-2*sin(x)" se escribe "0.1*x-2*sin(x)" (la función es la misma)
+export const prettyExpr = (e) => String(e ?? '').replace(/\+\s*-/g, '-').replace(/-\s*-(?=\d)/g, '+');
+export const fnText = (shot) => `${MODE_LABEL[shot.mode] || 'y ='} ${prettyExpr(shot.expr)}${shot.mode === 'ode2' && Number.isFinite(shot.angle) ? ` · ${Math.round(shot.angle)}°` : ''}`;
 
 // una red ha decidido su tiro: lo que diga ahora espera a que salga su función
 export const expect = (soldierId) => expectShot(R.bq, soldierId, Date.now(), speedOf());

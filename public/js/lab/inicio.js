@@ -5,6 +5,7 @@ import * as H from './home.js';
 import { emblemSVG } from './emblem.js';
 import { api } from './api.js';
 import { hub } from '../ui/sse.js';
+import { patch } from '../ui/patch.js';
 const LAB_EVENTS = '/api/lab/events'; // una conexión para todas las vistas (spec/08 §11)
 import { tutorialSteps } from './whatif.js';
 
@@ -37,10 +38,10 @@ export function mountHome(root) {
     return `<table class="nets-table">
       <thead><tr><th scope="col">Red</th><th scope="col" class="num">Gen.</th><th scope="col" class="num">Pesos</th><th scope="col" class="num">Partidas</th><th scope="col" class="num">Victorias</th><th scope="col" class="num">Tasa</th><th scope="col" class="num">Bajas / muertes</th><th scope="col">Estado</th><th scope="col"><span class="sr">Acciones</span></th></tr></thead>
       <tbody>${rows.map((r) => `<tr>
-        <th scope="row"><span class="cell-net"><span class="em" aria-hidden="true">${emblemSVG(r.emblem, 28)}</span><span><b>${esc(r.name)}</b><span class="mono dim">${esc(r.id)}</span></span></span></th>
+        <th scope="row"><span class="cell-net"><span class="em" aria-hidden="true">${emblemSVG(r.emblem, 28)}</span><span><button type="button" class="link" data-ficha="${esc(r.id)}" title="Abrir su ficha"><b>${esc(r.name)}</b></button><span class="mono dim">${esc(r.id)}</span></span></span></th>
         <td class="num">${r.generation}</td><td class="num">${(r.paramCount ?? 0).toLocaleString('es-ES')}</td><td class="num">${r.games}</td><td class="num">${r.wins}</td><td class="num">${pct(r.winRate)}</td><td class="num">${r.kills} / ${r.deaths}</td>
         <td>${r.tags.map((t) => `<span class="tag ${t === 'reina' ? 'queen' : t === 'entrenando' ? 'busy' : t === 'no puede jugar' ? 'bad' : ''}">${esc(t)}</span>`).join(' ')}</td>
-        <td><a class="btn small" href="#editor/${esc(r.id)}">Editar</a></td></tr>`).join('')}</tbody></table>`;
+        <td><button type="button" class="small" data-ficha="${esc(r.id)}">Ficha</button> <a class="btn small" href="#editor/${esc(r.id)}">Editar</a></td></tr>`).join('')}</tbody></table>`;
   }
   function throneCard() {
     const r = H.reignOf(S.throne);
@@ -48,7 +49,7 @@ export function mountHome(root) {
     const queenNet = r && S.nets.find((n) => n.id === r.queen);
     const head = r
       ? `<div class="queen"><span class="em-big" aria-hidden="true">${queenNet ? emblemSVG(queenNet.emblem, 72) : ''}</span>
-          <div><p class="label">Reina</p><p class="queen-name">${esc(r.queenName || nameOf(r.queen))}</p><p class="dim">en el trono desde hace ${esc(H.duration(r.ms))}</p></div></div>
+          <div><p class="label">Reina</p><p class="queen-name"><button type="button" class="link" data-ficha="${esc(r.queen)}" title="Abrir su ficha">${esc(r.queenName || nameOf(r.queen))}</button></p><p class="dim">en el trono desde hace ${esc(H.duration(r.ms))}</p></div></div>
         <dl class="facts"><div><dt>Reinado</dt><dd>${r.number}.º</dd></div><div><dt>Defensas</dt><dd>${r.defenses}</dd></div><div><dt>Retos ganados</dt><dd>${r.won}</dd></div><div><dt>Retos perdidos</dt><dd>${r.lost}</dd></div></dl>`
       : '<p class="empty">Aún no hay reina. La primera red que rete al trono se sienta en él sin duelo.</p>';
     const hall = hof.length ? `<p class="hall"><b>Sala de la fama</b> ${hof.map((h) => esc(nameOf(h.netId))).join(', ')} <span class="dim">(copias congeladas de ex-reinas)</span></p>` : '';
@@ -81,14 +82,14 @@ export function mountHome(root) {
     return `<section class="card" aria-labelledby="hSteps"><h2 id="hSteps">Primeros pasos <span class="dim">${left ? `${steps.length - left} de ${steps.length}` : 'hechos'}</span></h2>${left ? list : ''}</section>`;
   }
   function render() {
-    if (!S.loaded) { root.innerHTML = '<p class="loading">Cargando el laboratorio…</p>'; return; }
-    root.innerHTML = `
+    if (!S.loaded) { patch(root, '<p class="loading">Cargando el laboratorio…</p>'); return; }
+    patch(root, `
       <section class="home-nets" aria-labelledby="hRedes">
         <div class="sec-head"><h1 id="hRedes">Tus redes <span class="dim">${S.nets.length}</span></h1><a class="btn primary" href="#editor">Abrir el editor</a></div>
         ${S.error ? `<p class="bad">${esc(S.error)}</p>` : ''}
         ${netsTable()}
       </section>
-      <aside class="home-side">${stepsCard()}${throneCard()}${challengesCard()}${housesCard()}${liveCard()}</aside>`;
+      <aside class="home-side">${stepsCard()}${throneCard()}${challengesCard()}${housesCard()}${liveCard()}</aside>`);
   }
 
   return {

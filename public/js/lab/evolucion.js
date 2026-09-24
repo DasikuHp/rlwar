@@ -6,6 +6,7 @@ import * as M from './model.js';
 import { emblemSVG } from './emblem.js';
 import { api, reasonOf } from './api.js';
 import { hub } from '../ui/sse.js';
+import { patch } from '../ui/patch.js';
 const LAB_EVENTS = '/api/lab/events'; // una conexión para todas las vistas (spec/08 §11)
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -123,13 +124,13 @@ export function mountEvolution(root, { catalog, toast }) {
   }
   function render() {
     if (!S.form) S.form = defaults();
-    root.innerHTML = `<div class="tr-left">${formHTML()}</div><section class="tr-right" aria-label="Hijos" id="evRight"></section>`;
+    patch(root, `<div class="tr-left">${formHTML()}</div><section class="tr-right" aria-label="Hijos" id="evRight"></section>`);
     renderRight();
   }
   // la columna derecha se repinta sola (SSE, selección, diferencias): el formulario no pierde lo que estás escribiendo
   function renderRight() {
     const el = root.querySelector('#evRight');
-    if (el) el.innerHTML = `<h2 class="sr">Hijos</h2>${jobsHTML()}${rankingHTML()}${compareHTML()}${diffHTML()}`;
+    if (el) patch(el, `<h2 class="sr">Hijos</h2>${jobsHTML()}${rankingHTML()}${compareHTML()}${diffHTML()}`);
   }
 
   // ---------- eventos ----------

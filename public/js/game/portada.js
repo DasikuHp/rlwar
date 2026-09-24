@@ -17,10 +17,13 @@ function fit(canvas) {
   return { w: canvas.width, h: canvas.height, dpr };
 }
 
-// fondo: devuelve stop()
-export function startBackground(canvas, { quality = 'alta', reduce = false } = {}) {
+// fondo: devuelve stop(). Sin `dust`, no pinta el polvo (lo pone tsParticles encima). `onHead(x, y, dx, dy, i)` recibe
+// cada pocos fotogramas dónde va la cabeza de cada curva (en 0..1 de la pantalla): el fluido la usa para echar tinta.
+export function startBackground(canvas, { quality = 'alta', reduce = false, dust: withDust = true, onHead = null } = {}) {
   const ctx = canvas.getContext('2d');
-  const n = quality === 'alta' ? 140 : quality === 'media' ? 70 : 0;
+  const n = !withDust ? 0 : quality === 'alta' ? 140 : quality === 'media' ? 70 : 0;
+  const heads = CURVES.map(() => null);
+  let frameN = 0;
   const dust = Array.from({ length: n }, () => ({ x: Math.random(), y: Math.random(), vx: 0, vy: 0, r: Math.random() * 1.3 + 0.3, a: Math.random() * 0.5 + 0.15 }));
   const mouse = { x: -1, y: -1 };
   const onMove = (e) => { const r = canvas.getBoundingClientRect(); mouse.x = (e.clientX - r.left) / r.width; mouse.y = (e.clientY - r.top) / r.height; };
@@ -54,7 +57,12 @@ export function startBackground(canvas, { quality = 'alta', reduce = false } = {
       for (let x = -25; x <= head; x += 0.25) { const y = f(x, t * 0.15 + i); const px = cx + x * s, py = cy - y * s; if (x === -25) ctx.moveTo(px, py); else ctx.lineTo(px, py); }
       ctx.stroke();
       ctx.shadowBlur = 0;
-      if (fade > 0.2 && ph < 0.77) { const hy = f(head, t * 0.15 + i); ctx.fillStyle = `rgba(${col},0.9)`; ctx.beginPath(); ctx.arc(cx + head * s, cy - hy * s, 2.4 * dpr, 0, Math.PI * 2); ctx.fill(); }
+      if (fade > 0.2 && ph < 0.77) {
+        const hy = f(head, t * 0.15 + i), hx = (cx + head * s) / w, hyN = (cy - hy * s) / h;
+        ctx.fillStyle = `rgba(${col},0.9)`; ctx.beginPath(); ctx.arc(cx + head * s, cy - hy * s, 2.4 * dpr, 0, Math.PI * 2); ctx.fill();
+        if (onHead && frameN % 3 === 0 && heads[i]) onHead(hx, hyN, hx - heads[i][0], hyN - heads[i][1], i);
+        heads[i] = [hx, hyN];
+      } else heads[i] = null;
     });
     // polvo que huye del ratón
     for (const d of dust) {
@@ -65,6 +73,7 @@ export function startBackground(canvas, { quality = 'alta', reduce = false } = {
       ctx.fillStyle = `rgba(160,200,255,${d.a})`;
       ctx.beginPath(); ctx.arc(d.x * w, d.y * h, d.r * dpr, 0, Math.PI * 2); ctx.fill();
     }
+    frameN += 1;
     if (!reduce) raf = requestAnimationFrame(draw);
   };
   const onVis = () => { if (document.hidden) cancelAnimationFrame(raf); else if (alive && !reduce) raf = requestAnimationFrame(draw); };
@@ -84,6 +93,15 @@ export function constellationLayout(genome, groupOf) {
   const pos = {};
   for (const [d, list] of Object.entries(cols)) list.forEach((b, i) => { pos[b.id] = { x: 0.08 + 0.84 * (Number(d) / maxD), y: (i + 1) / (list.length + 1), group: groupOf(b.type) }; });
   return pos;
+}
+// pulsos de verdad: la activación media de cada bloque en las decisiones de la última partida guardada de la red
+export async function lastBeats(api, id) {
+  const games = await api(`/api/lab/games?netId=${encodeURIComponent(id)}&limit=1`);
+  if (!games.ok || !games.body.games.length) return [];
+  const game = await api(`/api/lab/games/${encodeURIComponent(games.body.games[0].gameId)}`);
+  if (!game.ok) return [];
+  return game.body.events.filter((e) => e.type === 'decision' && e.actor && e.actor.netId === id && e.data && e.data.activationsSummary)
+    .slice(0, 120).map((e) => Object.fromEntries(Object.entries(e.data.activationsSummary).map(([k, v]) => [k, v.mean])));
 }
 const paramsOf = (genome, id) => Object.values((genome.weights || {})[id] || {}).reduce((s, a) => s + (Array.isArray(a) ? a.length : 0), 0);
 

@@ -4,12 +4,14 @@
 import * as X from './surgery.js';
 import * as M from './model.js';
 import { api, reasonOf } from './api.js';
+import { patch } from '../ui/patch.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const f3 = (v) => (typeof v === 'number' && Number.isFinite(v) ? String(Math.round(v * 1000) / 1000) : '—');
 const EDIT_MAX = 5000; // más números que esto no caben en un cuadro de texto útil: para eso, exportar/importar
 
-export function mountSurgery(root, { catalog, toast }) {
+// `bare` (la ficha de red): sin título ni selector de red; `show({netId})` cambia de red.
+export function mountSurgery(root, { catalog, toast, bare = false }) {
   const S = { nets: [], netId: '', genome: null, block: null, frozen: new Set(), err: null, tp: { from: '', blockId: '', replace: '' }, donor: null };
   const entry = (type) => M.entryOf(catalog, type) || { name: type };
 
@@ -63,9 +65,9 @@ export function mountSurgery(root, { catalog, toast }) {
   }
   function render() {
     const list = S.genome ? X.weightBlocks(S.genome) : [];
-    root.innerHTML = `<div class="sg-head"><h1>Cirugía</h1><p class="dim">Nivel Científico: cambios a mano en los pesos de una red. Si entrena o juega un duelo, espera a que acabe.</p>
-        <label for="sgNet">Red</label><select id="sgNet">${S.nets.map((n) => `<option value="${esc(n.id)}" ${n.id === S.netId ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select> <a class="btn small" href="#editor/${esc(S.netId)}">Abrir en el editor</a></div>
-      ${S.genome ? `<div class="sg-grid"><div>${weightsHTML(list)}</div><aside>${frozenHTML(list)}${transplantHTML()}</aside></div>` : '<p class="empty">Elige una red.</p>'}`;
+    patch(root, `${bare ? '<p class="hint">Cambios a mano en los pesos: congelar, tocar números y trasplantar. Si la red entrena o juega un duelo, espera a que acabe.</p>' : `<div class="sg-head"><h1>Cirugía</h1><p class="dim">Nivel Científico: cambios a mano en los pesos de una red. Si entrena o juega un duelo, espera a que acabe.</p>
+        <label for="sgNet">Red</label><select id="sgNet">${S.nets.map((n) => `<option value="${esc(n.id)}" ${n.id === S.netId ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select> <a class="btn small" href="#editor/${esc(S.netId)}">Abrir en el editor</a></div>`}
+      ${S.genome ? `<div class="sg-grid"><div>${weightsHTML(list)}</div><aside>${frozenHTML(list)}${transplantHTML()}</aside></div>` : '<p class="empty">Elige una red.</p>'}`);
     paint();
   }
   // lienzos: una celda por peso, color divergente
@@ -137,5 +139,8 @@ export function mountSurgery(root, { catalog, toast }) {
     }
   });
 
-  return { async start() { await loadNets(); await loadNet(); render(); } };
+  return {
+    async start() { await loadNets(); await loadNet(); render(); },
+    async show({ netId }) { if (netId !== S.netId) { S.netId = netId; S.err = null; S.tp = { from: '', blockId: '', replace: '' }; S.donor = null; S.block = null; } await this.start(); },
+  };
 }

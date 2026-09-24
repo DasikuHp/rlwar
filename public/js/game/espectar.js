@@ -5,6 +5,7 @@ import { initRender, startShot, R } from '../render.js';
 import { overlay, topCandidates, confidenceView, attributionPhrase } from '../live.js';
 import { hub } from '../ui/sse.js';
 import { api, reasonOf } from '../lab/api.js';
+import { patch } from '../ui/patch.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const f2 = (v) => (typeof v === 'number' ? (Math.round(v * 100) / 100).toFixed(2) : '—');
@@ -42,16 +43,16 @@ export function mountDuel(root, { toast, settings }) {
   // ---- lanzar ----
   function renderForm() {
     const opt = (sel) => nets.map((n) => `<option value="${esc(n.id)}"${n.id === sel ? ' selected' : ''}>${esc(n.name)}</option>`).join('');
-    if (nets.length < 2) { $('dForm').innerHTML = '<p class="empty">Hacen falta dos redes. Crea otra en <a href="#crear">1 · Crear</a> (desde una plantilla tarda un clic).</p>'; return; }
+    if (nets.length < 2) { patch($('dForm'), '<p class="empty">Hacen falta dos redes. Crea otra en <a href="#crear">1 · Crear</a> (desde una plantilla tarda un clic).</p>'); return; }
     const speed = settings.speed === 'x1' ? 'x1' : 'x10';
-    $('dForm').innerHTML = `<label class="field">Red A<select id="dA">${opt(nets[0].id)}</select></label>
+    patch($('dForm'), `<label class="field">Red A<select id="dA">${opt(nets[0].id)}</select></label>
       <label class="field">Red B<select id="dB">${opt(nets[1].id)}</select></label>
       <label class="field">Velocidad<select id="dSpeed"><option value="x10"${speed === 'x10' ? ' selected' : ''}>x10 — en directo, rápido</option><option value="x1"${speed === 'x1' ? ' selected' : ''}>x1 — como el original</option></select></label>
       <label class="field">Cómo aprenden<select id="dLearn">${LEARNING.map((l) => `<option value="${l.v}">${l.name}</option>`).join('')}</select></label>
       <p class="dim" id="dLearnHelp">${esc(LEARNING[0].help)}</p>
-      <button type="button" class="primary" id="dGo">Empezar duelo (6 partidas)</button>`;
-    $('dLearn').addEventListener('change', (e) => { $('dLearnHelp').textContent = LEARNING.find((l) => l.v === e.target.value).help; });
-    $('dGo').addEventListener('click', launch);
+      <button type="button" class="primary" id="dGo">Empezar duelo (6 partidas)</button>`);
+    $('dLearn').onchange = (e) => { $('dLearnHelp').textContent = LEARNING.find((l) => l.v === e.target.value).help; };
+    $('dGo').onclick = launch;
   }
   async function launch() {
     const a = $('dA').value, b = $('dB').value;
@@ -78,16 +79,18 @@ export function mountDuel(root, { toast, settings }) {
     }
   }
   function renderList() {
-    if (!duels.length) { $('dList').innerHTML = '<p class="empty">Aún no hay duelos en este mundo.</p>'; return; }
-    $('dList').innerHTML = duels.slice(0, 20).map((d) => `<a href="#duelo" data-duel="${esc(d.id)}"${d.id === follow ? ' aria-current="true"' : ''}>
+    if (!duels.length) { patch($('dList'), '<p class="empty">Aún no hay duelos en este mundo.</p>'); return; }
+    patch($('dList'), duels.slice(0, 20).map((d) => `<a href="#duelo" data-key="${esc(d.id)}" data-duel="${esc(d.id)}"${d.id === follow ? ' aria-current="true"' : ''}>
       <span><b>${esc(nameOf(d.a))}</b> ${d.wins[d.a] ?? 0} – ${d.wins[d.b] ?? 0} <b>${esc(nameOf(d.b))}</b></span>
-      <small>${esc(STATUS[d.status] || d.status)} · ${esc(d.speed)} · ${d.games.length}/6 partidas${d.throne ? ' · 👑 trono' : ''}</small></a>`).join('');
-    for (const a of $('dList').querySelectorAll('[data-duel]')) a.addEventListener('click', (e) => { e.preventDefault(); follow = a.dataset.duel; loadDuels(); });
+      <small>${esc(STATUS[d.status] || d.status)} · ${esc(d.speed)} · ${d.games.length}/6 partidas${d.throne ? ' · 👑 trono' : ''}</small></a>`).join(''));
   }
   function renderScore(d) {
-    $('dScore').innerHTML = `<span>${esc(nameOf(d.a))}</span><b>${d.wins[d.a] ?? 0}</b><span>${esc(nameOf(d.b))}</span><b>${d.wins[d.b] ?? 0}</b>
-      <span class="dim">Partidas</span><b>${d.games.length} / 6</b><span class="dim">Diferencia de bajas</span><b>${d.killDiff > 0 ? '+' : ''}${d.killDiff ?? 0}</b>`;
+    const who = (id) => `<button type="button" class="link" data-ficha="${esc(id)}" title="Abrir su ficha">${esc(nameOf(id))}</button>`;
+    patch($('dScore'), `<span>${who(d.a)}</span><b>${d.wins[d.a] ?? 0}</b><span>${who(d.b)}</span><b>${d.wins[d.b] ?? 0}</b>
+      <span class="dim">Partidas</span><b>${d.games.length} / 6</b><span class="dim">Diferencia de bajas</span><b>${d.killDiff > 0 ? '+' : ''}${d.killDiff ?? 0}</b>`);
   }
+
+  $('dList').addEventListener('click', (e) => { const a = e.target.closest('[data-duel]'); if (!a) return; e.preventDefault(); follow = a.dataset.duel; loadDuels(); });
 
   // ---- la sala en directo ----
   function watchRoom(code) {
@@ -115,14 +118,15 @@ export function mountDuel(root, { toast, settings }) {
     R.state = st;
     const side = (team) => st.players.filter((p) => p.team === team).map((p) => esc(p.name)).join(', ');
     const alive = (team) => st.soldiers.filter((s) => s.alive && s.team === team).length;
-    $('dWho').innerHTML = `<b style="color:#4fd1ff">${side('left')}</b> <span class="mono">${alive('left')} vs ${alive('right')}</span> <b style="color:#ff9f43">${side('right')}</b> <span class="dim">· sala ${esc(st.code)}${st.phase === 'over' ? ' · acabada' : ''}</span>`;
+    patch($('dWho'), `<b style="color:#4fd1ff">${side('left')}</b> <span class="mono">${alive('left')} vs ${alive('right')}</span> <b style="color:#ff9f43">${side('right')}</b> <span class="dim">· sala ${esc(st.code)}${st.phase === 'over' ? ' · acabada' : ''}</span>`);
     $('dTurn').textContent = st.stats ? `disparo ${st.stats.shots}` : '';
     renderLog(st.chat);
   }
   function renderLog(chat) {
     const el = $('dLog');
-    el.innerHTML = (chat || []).filter((c) => c.kind !== 'say').slice(-60).map((c) => `<li>${esc(c.text)}</li>`).join('');
-    el.scrollTop = el.scrollHeight;
+    const atEnd = el.scrollTop + el.clientHeight >= el.scrollHeight - 8;
+    patch(el, (chat || []).filter((c) => c.kind !== 'say').slice(-60).map((c) => `<li data-key="${esc(`${c.t}|${c.text}`)}">${esc(c.text)}</li>`).join(''));
+    if (atEnd) el.scrollTop = el.scrollHeight; // si estás leyendo más arriba, no te lo mueve
   }
   const seenSay = new Set();
   function bubbles(chat) {

@@ -5,6 +5,7 @@ import * as T from './training.js';
 import * as M from './model.js';
 import { api, reasonOf } from './api.js';
 import { hub } from '../ui/sse.js';
+import { patch } from '../ui/patch.js';
 const LAB_EVENTS = '/api/lab/events'; // una conexión para todas las vistas (spec/08 §11)
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -148,9 +149,9 @@ export function mountTraining(root, { toast }) {
   }
   function render() {
     if (!S.form) S.form = defaults();
-    root.innerHTML = `<div class="tr-left">${formHTML()}</div><section class="tr-right" aria-label="Entrenos"><h2 class="sr">Entrenos</h2>${listHTML()}<div class="tr-detail" id="trDetail">${detailHTML()}</div></section>`;
+    patch(root, `<div class="tr-left">${formHTML()}</div><section class="tr-right" aria-label="Entrenos"><h2 class="sr">Entrenos</h2>${listHTML()}<div class="tr-detail" id="trDetail">${detailHTML()}</div></section>`);
   }
-  const renderDetail = () => { const el = root.querySelector('#trDetail'); if (el) el.innerHTML = detailHTML(); };
+  const renderDetail = () => { const el = root.querySelector('#trDetail'); if (el) patch(el, detailHTML()); };
 
   // ---------- eventos ----------
   root.addEventListener('input', (ev) => {

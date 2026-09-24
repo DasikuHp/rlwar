@@ -1,6 +1,7 @@
 // Rutas del juego (P5): qué pantalla, etapa y pestaña dice el `#` de la dirección. Puro (sin DOM): lo usa main.js.
 // Las 4 etapas de referencianoabsoluta.png: 1 Crear · 2 Entrenar y evolucionar · 3 Duelo en vivo · 4 Trono y análisis.
-// Los enlaces viejos del laboratorio (#editor, #entreno, #trono…) siguen valiendo: llevan a su etapa y pestaña.
+// Los enlaces viejos del laboratorio (#editor, #entreno, #trono…) siguen valiendo: llevan a su etapa y pestaña. Verdad y
+// Cirugía son de cada red y viven en su ficha (sesión 7): sus enlaces viejos llevan a la Crónica de la etapa 4.
 export const STAGES = [
   { key: 'crear', n: 1, title: 'Crear / diseñar tu red', short: 'Crear', sub: 'Construye una inteligencia a tu medida. Arrastra, conecta y explora.',
     tabs: [{ key: 'editor', name: 'Editor' }, { key: 'redes', name: 'Tus redes' }] },
@@ -9,13 +10,13 @@ export const STAGES = [
   { key: 'duelo', n: 3, title: 'Ver en acción / duelo', short: 'Duelo', sub: 'Mira pensar a las redes en tiempo real. Todo lo que ves sale de la partida.',
     tabs: [{ key: 'vivo', name: 'En vivo' }] },
   { key: 'trono', n: 4, title: 'Resultados, trono y análisis', short: 'Trono', sub: 'Sigue la historia. Solo la retadora gana el trono; los empates lo conservan.',
-    tabs: [{ key: 'trono', name: 'Trono y duelos' }, { key: 'dinastias', name: 'Dinastías' }, { key: 'verdad', name: 'Verdad' }, { key: 'cirugia', name: 'Quirófano' }] },
+    tabs: [{ key: 'trono', name: 'Trono y duelos' }, { key: 'dinastias', name: 'Dinastías' }, { key: 'cronica', name: 'Crónica' }] },
 ];
 const ID = '[a-z0-9-]{3,32}';
 const CODE = '[A-Z0-9]{4}';
 const LEGACY = {
   '#inicio': ['crear', 'redes'], '#entreno': ['entrenar', 'entrenamiento'], '#evolucion': ['entrenar', 'evolucion'],
-  '#trono': ['trono', 'trono'], '#dinastias': ['trono', 'dinastias'], '#verdad': ['trono', 'verdad'], '#cirugia': ['trono', 'cirugia'],
+  '#trono': ['trono', 'trono'], '#dinastias': ['trono', 'dinastias'], '#verdad': ['trono', 'cronica'], '#cirugia': ['trono', 'cronica'],
 };
 
 // hash → {screen: 'portada'|'stage'|'room', stage, tab, id, code}

@@ -95,5 +95,6 @@
   "test/ui-sse.spec.mjs": "28d1a0a08c92eed571c52cf247c57c7231d49c1710d1ed9053a6a26732861efc",
   "test/ui-trono.spec.mjs": "ee507caf058b2db04004be416ebf262acf353e16c650781d32bf53642f4df597",
   "test/ui-verdad.spec.mjs": "940166797408d314ee96e8eb38e0634c4c13ef2c4c75cc8228ce5a8baef6613c",
+  "test/vendor.spec.mjs": "33e9745dffab7773c70eb693dbcf55faef249581ffeab08c8e16f6e7bc8920a3",
   "test/verdad.spec.mjs": "6cd1955024fc4271d304eb90d20a41028c1fe7b8ee81756ca1394db0ac9983e7"
 }

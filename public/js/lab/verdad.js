@@ -7,6 +7,7 @@ import * as L from '../live.js';
 import { emblemSVG } from './emblem.js';
 import { api, reasonOf } from './api.js';
 import { hub } from '../ui/sse.js';
+import { patch } from '../ui/patch.js';
 const LAB_EVENTS = '/api/lab/events'; // una conexión para todas las vistas (spec/08 §11)
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -22,8 +23,12 @@ const TABS = [['diario', 'Diario'], ['moviola', 'Moviola'], ['boletin', 'Boletí
 let truthMod = null;
 const truth = () => (truthMod ||= import('/evo/truth.js').catch(() => null));
 
-export function mountTruth(root, { catalog, toast }) {
+// `bare` (la ficha de red y la Crónica de la etapa 4): sin el selector de red; `tabs` limita las pestañas (con una sola,
+// no se ve la barra). `show({netId, tabs})` cambia de red y de pestañas sin volver a montar.
+export function mountTruth(root, { catalog, toast, bare = false, tabs = null }) {
+  let allowed = tabs ? TABS.filter(([k]) => tabs.includes(k)) : TABS;
   const S = { nets: [], netId: null, tab: 'diario', diary: [], chronicle: [], openRef: null, refEvents: [], games: [], game: null, gameId: null, turns: [], turn: null, brain: null, phrase: null, feedbackMsg: null, bulletin: null, examJob: null, neurons: null, memory: null, feedback: null };
+  S.tab = allowed[0][0];
   let es = null;
   const net = (id) => S.nets.find((n) => n.id === id);
   const nameOf = (id) => (net(id) ? net(id).name : id);
@@ -185,8 +190,9 @@ export function mountTruth(root, { catalog, toast }) {
   }
 
   function render() {
-    const netSel = `<div class="tv-head"><label for="tvNet">Red</label><select id="tvNet">${S.nets.map((n) => `<option value="${esc(n.id)}" ${n.id === S.netId ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select>${net(S.netId) ? `<span class="em" aria-hidden="true">${emblemSVG(net(S.netId).emblem, 30)}</span>` : ''}
-      <div class="tabs" role="tablist">${TABS.map(([k, t]) => `<button type="button" role="tab" data-tab="${k}" aria-selected="${S.tab === k}">${t}</button>`).join('')}</div></div>`;
+    const tabBar = allowed.length > 1 ? `<div class="tabs" role="tablist">${allowed.map(([k, t]) => `<button type="button" role="tab" data-tab="${k}" aria-selected="${S.tab === k}">${t}</button>`).join('')}</div>` : '';
+    const netSel = bare ? (tabBar ? `<div class="tv-head">${tabBar}</div>` : '') : `<div class="tv-head"><label for="tvNet">Red</label><select id="tvNet">${S.nets.map((n) => `<option value="${esc(n.id)}" ${n.id === S.netId ? 'selected' : ''}>${esc(n.name)}</option>`).join('')}</select>${net(S.netId) ? `<span class="em" aria-hidden="true">${emblemSVG(net(S.netId).emblem, 30)}</span>` : ''}
+      ${tabBar}</div>`;
     let body = '';
     if (!S.nets.length && S.tab !== 'cronica') body = '<p class="empty">Aún no hay redes.</p>';
     else if (S.tab === 'diario') body = entriesHTML(S.diary, 'Esta red aún no tiene entradas en su diario.');
@@ -195,7 +201,7 @@ export function mountTruth(root, { catalog, toast }) {
     else if (S.tab === 'boletin') body = bulletinHTML();
     else if (S.tab === 'neuronas') body = neuronsHTML();
     else if (S.tab === 'memoria') body = memoryHTML();
-    root.innerHTML = `${netSel}<div class="tv-body">${body}</div>`;
+    patch(root, `${netSel}<div class="tv-body">${body}</div>`);
   }
 
   root.addEventListener('change', async (ev) => {
@@ -235,6 +241,11 @@ export function mountTruth(root, { catalog, toast }) {
   });
 
   return {
+    async show({ netId = null, tabs: t = null } = {}) {
+      if (t) { allowed = TABS.filter(([k]) => t.includes(k)); if (!allowed.some(([k]) => k === S.tab)) S.tab = allowed[0][0]; }
+      if (netId && netId !== S.netId) { S.netId = netId; S.game = null; S.gameId = null; S.brain = null; S.openRef = null; S.turns = []; }
+      await this.start();
+    },
     async start() {
       await refreshAll();
       if (es) return;

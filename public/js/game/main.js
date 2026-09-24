@@ -9,11 +9,13 @@ import { mountEvolution } from '../lab/evolucion.js';
 import { mountThrone } from '../lab/trono.js';
 import { mountDynasties } from '../lab/dinastias.js';
 import { mountTruth } from '../lab/verdad.js';
-import { mountSurgery } from '../lab/cirugia.js';
 import { mountDuel } from './espectar.js';
 import { STAGES, parseRoute, hrefOf } from './routes.js';
 import { SETTINGS, loadSettings, saveSettings, reduceMotion } from './ajustes.js';
-import { startBackground, startQueen } from './portada.js';
+import { startBackground, startQueen, lastBeats } from './portada.js';
+import { mountFicha } from './ficha.js';
+import { startFluid } from '../ui/fx/fluid.js';
+import { setReduce, introPortada, enter, springButtons, particles } from '../ui/fx/anim.js';
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -36,7 +38,7 @@ function toast(msg, kind = 'info') {
 
 // ---------- ajustes ----------
 let settings = loadSettings();
-const applyMotion = () => document.body.classList.toggle('reduce', reduceMotion(settings));
+const applyMotion = () => { document.body.classList.toggle('reduce', reduceMotion(settings)); setReduce(reduceMotion(settings)); };
 applyMotion();
 
 // ---------- mundos ----------
@@ -58,16 +60,29 @@ async function openWorld(n, then = '#crear') {
   return true;
 }
 
-// ---------- portada ----------
-let stopBg = null, stopQueen = null;
+// ---------- portada: tres capas (fluido WebGL, partículas, constelación) y el plano con sus curvas ----------
+let stopBg = null, stopQueen = null, introDone = false;
+async function startLayers() {
+  if (stopBg) stopBg();
+  const still = reduceMotion(settings) || settings.quality === 'baja';
+  const fluid = still ? null : startFluid($('fluid'), { quality: settings.quality });
+  $('fluid').hidden = !fluid;
+  const stopParticles = still ? () => {} : await particles($('pfx'), { quality: settings.quality });
+  const COLORS = [[0.05, 0.2, 0.3], [0.14, 0.09, 0.3]];
+  const stopCurves = startBackground($('bgfx'), {
+    quality: settings.quality, reduce: still, dust: $('pfx').childElementCount === 0,
+    onHead: fluid ? (x, y, dx, dy, i) => fluid.splat(x, y, dx * 0.6, dy * 0.6, COLORS[i % 2], 0.0012) : null,
+  });
+  stopBg = () => { stopCurves(); stopParticles(); if (fluid) fluid.stop(); };
+}
 async function showPortada() {
   $('game').hidden = true;
   $('portada').hidden = false;
   document.title = 'Graphwar · Entrenador de redes';
   await loadWorlds();
   renderMenu();
-  if (stopBg) stopBg();
-  stopBg = startBackground($('bgfx'), { quality: settings.quality, reduce: reduceMotion(settings) || settings.quality === 'baja' });
+  if (!introDone) { introDone = true; introPortada({ title: $('portada').querySelector('.p-title'), sub: $('portada').querySelector('.p-sub'), items: [...$('menu').children] }); }
+  await startLayers();
   renderQueen();
 }
 function renderMenu() {
@@ -101,14 +116,8 @@ async function renderQueen() {
   const net = id ? await api(`/api/lab/nets/${id}`) : null;
   if (!net || !net.ok) { cap.textContent = 'Este mundo aún no tiene reina.'; clearQueen(); return; }
   const g = net.body.genome;
-  // pulsos de verdad: la activación media de cada bloque en las decisiones de su última partida guardada
-  let beats = [];
-  const games = await api(`/api/lab/games?netId=${encodeURIComponent(id)}&limit=1`);
-  if (games.ok && games.body.games.length) {
-    const game = await api(`/api/lab/games/${encodeURIComponent(games.body.games[0].gameId)}`);
-    if (game.ok) beats = game.body.events.filter((e) => e.type === 'decision' && e.actor && e.actor.netId === id && e.data && e.data.activationsSummary)
-      .slice(0, 120).map((e) => Object.fromEntries(Object.entries(e.data.activationsSummary).map(([k, v]) => [k, v.mean])));
-  }
+  const beats = await lastBeats(api, id);
+  if ($('portada').hidden) return; // ya te has ido de la portada
   const params = Object.values(g.weights || {}).reduce((s, w) => s + Object.values(w).reduce((t, a) => t + (Array.isArray(a) ? a.length : 0), 0), 0);
   cap.innerHTML = `${queenId ? '👑 Reina' : 'Rival de práctica'}: <b>${esc(g.name)}</b> · ${g.blocks.length} bloques · ${params.toLocaleString('es-ES')} pesos${beats.length ? ` · late con ${beats.length} decisiones reales de su última partida` : ' · aún no ha jugado: sin pulsos'}`;
   stopQueen = startQueen($('queenCanvas'), { genome: g, groupOf, beats, reduce: reduceMotion(settings) });
@@ -182,7 +191,7 @@ function openSettings() {
   for (const inp of d.querySelectorAll('input[type="radio"]')) inp.onchange = () => {
     settings = { ...settings, [inp.name]: inp.value };
     saveSettings(settings); applyMotion();
-    if (!$('portada').hidden) { if (stopBg) stopBg(); stopBg = startBackground($('bgfx'), { quality: settings.quality, reduce: reduceMotion(settings) || settings.quality === 'baja' }); renderQueen(); }
+    if (!$('portada').hidden) { startLayers(); renderQueen(); }
   };
   d.showModal();
 }
@@ -204,11 +213,10 @@ const MOUNT = {
   'duelo/vivo': (el) => mountDuel(el, { toast, settings }),
   'trono/trono': (el) => mountThrone(el, { toast }),
   'trono/dinastias': (el) => mountDynasties(el, { toast }),
-  'trono/verdad': (el) => mountTruth(el, { catalog, toast }),
-  'trono/cirugia': (el) => mountSurgery(el, { catalog, toast }),
+  'trono/cronica': (el) => mountTruth(el, { catalog, toast, bare: true, tabs: ['cronica'] }),
 };
-const CLASS = { 'crear/editor': 'lab-ed', 'crear/redes': 'lab-home', 'entrenar/entrenamiento': 'lab-tr', 'entrenar/evolucion': 'lab-tr', 'trono/trono': 'lab-thr', 'trono/dinastias': 'lab-thr', 'trono/verdad': 'lab-tv', 'trono/cirugia': 'lab-sg' };
-let editorStarted = false;
+const CLASS = { 'crear/editor': 'lab-ed', 'crear/redes': 'lab-home', 'entrenar/entrenamiento': 'lab-tr', 'entrenar/evolucion': 'lab-tr', 'trono/trono': 'lab-thr', 'trono/dinastias': 'lab-thr', 'trono/cronica': 'lab-tv' };
+let editorStarted = false, shownKey = null;
 async function showStage(r) {
   if (!activeWorld()) { toast('Abre o crea una partida primero.', 'error'); location.hash = '#portada'; return; }
   if (stopBg) { stopBg(); stopBg = null; }
@@ -225,6 +233,8 @@ async function showStage(r) {
   const key = `${r.stage}/${r.tab}`;
   for (const el of $('view').children) el.hidden = el.dataset.view !== key;
   const el = viewEl(key);
+  if (el.hidden || shownKey !== key) enter(el);
+  shownKey = key;
   el.hidden = false;
   if (CLASS[key]) el.className = CLASS[key];
   if (!views[key]) views[key] = MOUNT[key](el);
@@ -252,6 +262,8 @@ if (!cat.ok) {
   document.body.innerHTML = `<p style="padding:40px">No se pudo cargar el catálogo de bloques: ${esc(reasonOf(cat))}. ¿Está el servidor en marcha? (<span class="mono">node server/server.js</span>)</p>`;
 } else {
   catalog = cat.body;
+  mountFicha($('ficha'), { catalog, toast });
+  springButtons('.p-menu button, body.game button.primary, .g-stages a, .g-tabs a');
   $('btnSettings').onclick = openSettings;
   $('worldChip').onclick = () => { location.hash = '#portada'; };
   $('worldChip').title = 'Volver a la portada (cambiar de partida)';

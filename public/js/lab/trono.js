@@ -6,6 +6,7 @@ import * as H from './home.js';
 import { emblemSVG } from './emblem.js';
 import { api, reasonOf } from './api.js';
 import { hub } from '../ui/sse.js';
+import { patch } from '../ui/patch.js';
 const LAB_EVENTS = '/api/lab/events'; // una conexión para todas las vistas (spec/08 §11)
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -39,7 +40,7 @@ export function mountThrone(root, { toast }) {
   const netOptions = (cur, except = []) => `<option value="">elige una red…</option>${S.nets.filter((n) => !except.includes(n.id)).map((n) => `<option value="${esc(n.id)}" ${n.id === cur ? 'selected' : ''}>${esc(n.name)}${n.training ? ' (entrenando)' : ''}</option>`).join('')}`;
   const card = (id, label, facts) => {
     const n = id && net(id);
-    return `<div class="duelist ${label === 'Reina' ? 'is-queen' : ''}"><p class="label">${label}</p>${n ? `<span class="em-big" aria-hidden="true">${emblemSVG(n.emblem, 84)}</span><p class="queen-name">${esc(n.name)}</p>` : `<p class="dim">${label === 'Reina' ? 'Trono vacío' : 'Elige una retadora'}</p>`}${facts}</div>`;
+    return `<div class="duelist ${label === 'Reina' ? 'is-queen' : ''}"><p class="label">${label}</p>${n ? `<span class="em-big" aria-hidden="true">${emblemSVG(n.emblem, 84)}</span><p class="queen-name"><button type="button" class="link" data-ficha="${esc(n.id)}" title="Abrir su ficha">${esc(n.name)}</button></p>` : `<p class="dim">${label === 'Reina' ? 'Trono vacío' : 'Elige una retadora'}</p>`}${facts}</div>`;
   };
 
   function throneHTML() {
@@ -95,13 +96,13 @@ export function mountThrone(root, { toast }) {
   function treeHTML() {
     const flat = D.flattenTree(D.genealogyTree(S.genealogy));
     const queen = S.throne && S.throne.queen;
-    return `<section class="card" aria-labelledby="hTree"><h2 id="hTree">Árbol genealógico</h2>${flat.length ? `<ul class="tree">${flat.map((n) => `<li style="--d:${n.depth}"><span class="em" aria-hidden="true">${net(n.id) ? emblemSVG(net(n.id).emblem, 20) : ''}</span><b>${esc(nameOf(n.id))}</b><span class="dim mono">gen ${n.generation}</span>${n.id === queen ? '<span class="tag queen">reina</span>' : ''}${n.marks.map((m) => `<span class="tag">${esc(m)}</span>`).join('')}</li>`).join('')}</ul>` : '<p class="empty">Sin redes.</p>'}</section>`;
+    return `<section class="card" aria-labelledby="hTree"><h2 id="hTree">Árbol genealógico</h2>${flat.length ? `<ul class="tree">${flat.map((n) => `<li style="--d:${n.depth}"><span class="em" aria-hidden="true">${net(n.id) ? emblemSVG(net(n.id).emblem, 20) : ''}</span>${net(n.id) ? `<button type="button" class="link" data-ficha="${esc(n.id)}" data-ficha-tab="familia"><b>${esc(nameOf(n.id))}</b></button>` : `<b>${esc(nameOf(n.id))}</b>`}<span class="dim mono">gen ${n.generation}</span>${n.id === queen ? '<span class="tag queen">reina</span>' : ''}${n.marks.map((m) => `<span class="tag">${esc(m)}</span>`).join('')}</li>`).join('')}</ul>` : '<p class="empty">Sin redes.</p>'}</section>`;
   }
   function render() {
-    root.innerHTML = `<div class="thr-main">${throneHTML()}${duelsHTML()}</div><aside class="thr-side">${freeDuelHTML()}${hallHTML()}${treeHTML()}</aside>`;
+    patch(root, `<div class="thr-main">${throneHTML()}${duelsHTML()}</div><aside class="thr-side">${freeDuelHTML()}${hallHTML()}${treeHTML()}</aside>`);
   }
-  // el marcador en vivo repinta solo los duelos: los formularios no pierden el foco
-  function renderDuels() { const el = root.querySelector('#thrDuels'); if (el) el.outerHTML = duelsHTML(); else render(); }
+  // el marcador en vivo: con el parche del DOM, repintar todo no quita el foco a los formularios
+  const renderDuels = () => render();
 
   root.addEventListener('change', (ev) => {
     const el = ev.target;

@@ -5,6 +5,7 @@ import * as Y from './dynasty.js';
 import { emblemSVG } from './emblem.js';
 import { api, reasonOf } from './api.js';
 import { hub } from '../ui/sse.js';
+import { patch } from '../ui/patch.js';
 const LAB_EVENTS = '/api/lab/events'; // una conexión para todas las vistas (spec/08 §11)
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -74,7 +75,7 @@ export function mountDynasties(root, { toast }) {
   function render() {
     const founded = S.houses.A && S.houses.B;
     const main = !founded ? foundHTML() : S.refound ? `${foundHTML(S.refound)}` : `<div class="houses-row">${houseHTML('A')}<span class="vs" aria-hidden="true">contra</span>${houseHTML('B')}</div>${genHTML()}`;
-    root.innerHTML = `<div class="thr-main">${main}</div><aside class="thr-side">${storyHTML()}</aside>`;
+    patch(root, `<div class="thr-main">${main}</div><aside class="thr-side">${storyHTML()}</aside>`);
   }
 
   root.addEventListener('change', (ev) => {

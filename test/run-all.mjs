@@ -130,6 +130,12 @@ try {
   results.push(await run('terreno (P1): huecos de la prueba de mutantes', [join(ROOT, 'test', 'terreno-extra-b.spec.mjs')]));
   results.push(await run('auditoría P0: SSE compartida, darse de baja dos veces', [join(ROOT, 'test', 'ui-sse-b.spec.mjs')]));
   results.push(await run('receta de entreno: reloj del entreno (A1) y huecos de los mutantes', [join(ROOT, 'test', 'receta-extra.spec.mjs')]));
+  results.push(await run('auditoría s3: ángulo de artillería en grados (sala, heurísticos y Simulador)', [join(ROOT, 'test', 'angulo.spec.mjs')]));
+  results.push(await run('auditoría s3: tope exacto de /api/lab y cuerpos cortados', [join(ROOT, 'test', 'cuerpos.spec.mjs')]));
+  results.push(await run('auditoría s3: Adam por estructura y parar en el examen de después', [join(ROOT, 'test', 'receta-extra-b.spec.mjs')]));
+  results.push(await run('auditoría s3: el bocado solo si toca', [join(ROOT, 'test', 'terreno-extra-c.spec.mjs')]));
+  results.push(await run('auditoría s3: hilos para las partidas sin pantalla del servidor', [join(ROOT, 'test', 'hilos.spec.mjs')]));
+  results.push(await run('auditoría s3: normalize idempotente y decisiones que no tocan el genoma', [join(ROOT, 'test', 'normalize.spec.mjs')]));
 } finally {
   server.kill();
 }

@@ -265,25 +265,26 @@ export function onExhibitionOver(room) {
     const games = players.map((p) => ({ events: room.events, trajectory: trajectories[p.id] || { netId, soldiers: {} }, playerId: p.id }));
     L.addStats({ games: players.length }); // una exhibición suma partidas, nunca victorias ni bajas (spec/04 §7)
     if (!players.some((p) => p.learn)) { L.absorb(games); L.save(); continue; }
-    const r = L.learn(games); // gradiente (o solo memoria si la red es de evolución)
-    L.save();
-    if (r) logUpdate(netId, room, r, { games: games.length, rival: rival ? rival.id : null });
-    if (L.method === 'evolution' || L.method === 'both') {
-      // ocupada hasta que guarda el paso: lo que llegue mientras tanto espera en cola (spec/04 §10.5)
-      const holder = { kind: 'exhibition', id: room.code };
-      holdNet(netId, holder);
-      (async () => {
-        try {
+    // aprende en un hilo del grupo del servidor (spec/11) y, si es de evolución, da su paso después: ocupada hasta que guarda
+    // lo último; lo que llegue mientras tanto espera en cola (spec/04 §10.5)
+    const holder = { kind: 'exhibition', id: room.code };
+    holdNet(netId, holder);
+    (async () => {
+      try {
+        const r = await L.learnAsync(games); // gradiente (o solo memoria si la red es de evolución)
+        L.save();
+        if (r) logUpdate(netId, room, r, { games: games.length, rival: rival ? rival.id : null });
+        if (L.method === 'evolution' || L.method === 'both') {
           const out = await L.evolve({ rival: rival.spec, seed: room.seed, soldiers: room.soldiersPerPlayer });
           if (activeTraining(netId)) { appendLog({ type: 'exhibition.skipped', netId, roomCode: room.code, reason: 'empezó un entreno durante la evolución' }); return; }
           L.save();
           logUpdate(netId, room, out, { games: out.update.games, rival: rival.id });
-        } finally {
-          releaseNet(netId, holder);
-          settleFeedback(netId);
         }
-      })().catch((e) => pushEvent('error', { message: `exhibición ${room.code}: ${e.message}` }));
-    }
+      } finally {
+        releaseNet(netId, holder);
+        settleFeedback(netId);
+      }
+    })().catch((e) => pushEvent('error', { message: `exhibición ${room.code}: ${e.message}` }));
   }
 }
 

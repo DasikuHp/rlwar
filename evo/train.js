@@ -7,7 +7,7 @@ import { compile } from '../shared/nn.js';
 import { normalize, validate, BLOCKS } from '../shared/genome.js';
 import { softmaxT } from '../shared/policy.js';
 import { assignRewards, returns } from '../shared/reward.js';
-import { loadNet, saveNet, netsDir, evoDir, saveGameKept, loadGame, appendLog, readFeedback, writeFeedback, appendApplied, appendCurve, nextRecordSeq, saveVersion } from './store.js';
+import { loadNet, saveNet, netsDir, evoDir, saveGameKept, packGame, loadGame, appendLog, readFeedback, writeFeedback, appendApplied, appendCurve, nextRecordSeq, saveVersion } from './store.js';
 import { emotionOf, memoryOf, updateMemory, addEpisode, rewardEvents, emotionEvents } from './truth.js';
 import { readThroneFull, pickOpponent } from './league.js';
 import { adaptImagination } from './mutate.js';
@@ -281,6 +281,37 @@ export function learnFromGames({ net, genome, games, optim, cfg = {} }) {
   return { imagination, emotions, episodes: episodes.map((ep) => ({ game: ep.game, soldierId: ep.soldierId, steps: ep.steps.length })), update: { kind: 'gradient', loss: pg.stats.loss, entropy: pg.stats.entropy, valueLoss: pg.stats.valueLoss, gradNorm: update.gradNorm, clipped: update.clipped, perBlock: update.perBlock, top: update.top, steps: pg.stats.steps }, lesson, rewards: { steps, meanEffective: steps ? sumEff / steps : 0 }, stats: pg.stats };
 }
 
+// ---------- aprender en un hilo (spec/11) ----------
+// la partida de muestra con sus recompensas y sus emociones dentro, empaquetada para guardarla (spec/04 §6, spec/07 §12.1);
+// `sample` = {index, meta, events, playerId, netId, tau, normalized, genomes}, `game` = la del lote (rewards, trajectory)
+export function packSample(sample, game, emotions) {
+  const ids = new Set(Object.values(game.trajectory && game.trajectory.soldiers ? game.trajectory.soldiers : {}).flat().map((s) => s.decision && s.decision.eventId));
+  const events = sample.events.map((e) => ({ ...e }));
+  rewardEvents(events, game.rewards, { playerId: sample.playerId, netId: sample.netId, tau: sample.tau, normalized: sample.normalized });
+  emotionEvents(events, emotions.filter((em) => em.game === sample.index && ids.has(em.decisionEventId)), { playerId: sample.playerId, netId: sample.netId }); // solo las de esta partida (spec/04 §10.1)
+  return { index: sample.index, ...packGame(sample.meta, events, { [sample.playerId]: game.trajectory }, sample.genomes) };
+}
+// lo que hace el hilo con el mensaje `learn`: la red desde el genoma y los pesos, un sueño y las muestras empaquetadas
+export function learnBatch({ genome, weights, optim, games, cfg, samples = [] }) {
+  const net = compile(genome);
+  net.setFlat(weights);
+  const o = { m: optim.m, v: optim.v, t: optim.t, mean: optim.mean };
+  const result = learnFromGames({ net, genome, games, optim: o, cfg });
+  const packed = samples.map((s) => packSample(s, games[s.index], result.emotions));
+  return { weights: net.getFlat(), optim: { m: o.m, v: o.v, t: o.t, mean: o.mean }, result, packed };
+}
+// un sueño: con `pool`, en un hilo (el hilo principal solo aplica lo que vuelve); sin él, aquí mismo. Mismo resultado
+export async function learnInThread({ pool = null, net, genome, games, optim, cfg, samples = [] }) {
+  if (!pool) {
+    const result = learnFromGames({ net, genome, games, optim, cfg });
+    return { result, packed: samples.map((s) => packSample(s, games[s.index], result.emotions)) };
+  }
+  const m = await pool.run({ type: 'learn', genome, weights: net.getFlat(), optim: { m: optim.m, v: optim.v, t: optim.t, mean: optim.mean }, games: games.map((x) => ({ rewards: x.rewards, trajectory: x.trajectory })), cfg, samples });
+  net.setFlat(m.weights);
+  optim.m = m.optim.m; optim.v = m.optim.v; optim.t = m.optim.t; optim.mean = m.optim.mean;
+  return { result: m.result, packed: m.packed };
+}
+
 // ---------- estado de Adam en disco y aprendiz reutilizable (entrenador y duelos) ----------
 export function loadOptim(net, dir) {
   let optim = adamInit(net);
@@ -411,6 +442,16 @@ export function makeLearner(genome) {
     g.weights = net.serialize();
     return r;
   };
+  // lo mismo, aprendiendo en un hilo del grupo del servidor si lo hay (spec/11): absorbe aquí, aprende allí
+  const learnAsync = async (games, { lrScale = 1 } = {}, pool = threads()) => {
+    const lc = { ...g.learning.gradient, lr: g.learning.gradient.lr * lrScale };
+    absorb(games);
+    if (method === 'evolution') return null;
+    const { result: r } = await learnInThread({ pool, net, genome: g, games, optim, cfg: lc });
+    applyImagination(g, r.imagination);
+    g.weights = net.serialize();
+    return r;
+  };
   // paso de evolución tras un duelo o una exhibición (spec/04 §10.2): copias contra esa misma rival
   const evolve = async ({ rival, seed = 0, soldiers = 1, play } = {}) => {
     const ev = g.learning.evolution;
@@ -421,7 +462,7 @@ export function makeLearner(genome) {
     return out;
   };
   return {
-    net, genome: g, optim, learn, method, evolve, absorb,
+    net, genome: g, optim, learn, learnAsync, method, evolve, absorb,
     review: (games) => learn(games, { lrScale: 1 }),
     addStats: (s) => { g.stats.games += s.games || 0; g.stats.wins += s.wins || 0; g.stats.kills += s.kills || 0; g.stats.deaths += s.deaths || 0; },
     save: () => {
@@ -593,36 +634,34 @@ export function createTrainer(opts = {}) {
       saveNet(g);
       saveOptim(optim, dir);
     };
-    // partida de muestra (spec/04 §6, spec/07 §12.1): recompensa y emoción dentro del registro de la partida
-    const saveSample = (game, emotions) => {
-      const events = game.events.map((e) => ({ ...e }));
-      rewardEvents(events, game.rewards, { playerId: game.playerId, netId: g.id, tau: g.traits.teamSpirit, normalized: !!g.reward.normalize });
-      emotionEvents(events, emotions, { playerId: game.playerId, netId: g.id });
+    // partida de muestra (spec/04 §6, spec/07 §12.1): recompensa y emoción dentro del registro de la partida. Se empaqueta
+    // con el sueño, en su hilo si lo hay (spec/11: `packSample`); aquí solo se escribe
+    const sampleOf = (game, index) => {
+      const events = game.events;
       const gameId = events[0] ? events[0].game : `g-${game.seed}-t${t.id}`;
       const start = events.find((e) => e.type === 'game.start');
       const nets = start && start.data && Array.isArray(start.data.players) ? start.data.players.map((p) => p.netId).filter(Boolean) : [g.id];
       const winner = game.win ? g.id : (start && start.data.players.find((p) => p.playerId !== game.playerId) || {}).netId || null;
-      saveGameKept({ gameId, kind: 'training', trainingId: t.id, seed: game.seed, soldiers: game.soldiers, left: start ? (start.data.players.find((p) => p.team === 'left') || {}).netId || null : null, right: start ? (start.data.players.find((p) => p.team === 'right') || {}).netId || null : null, nets: [...new Set(nets)], winner, kills: { [g.id]: game.kills }, rival: game.rivalKind, ts: Date.now() }, events, { [game.playerId]: game.trajectory }, { genomes: game.genomes });
-      t.sampleGames.push(gameId);
+      const meta = { gameId, kind: 'training', trainingId: t.id, seed: game.seed, soldiers: game.soldiers, left: start ? (start.data.players.find((p) => p.team === 'left') || {}).netId || null : null, right: start ? (start.data.players.find((p) => p.team === 'right') || {}).netId || null : null, nets: [...new Set(nets)], winner, kills: { [g.id]: game.kills }, rival: game.rivalKind, ts: Date.now() };
+      return { index, meta, events, playerId: game.playerId, netId: g.id, tau: g.traits.teamSpirit, normalized: !!g.reward.normalize, genomes: game.genomes };
     };
+    const keepSample = (p, game) => { saveGameKept(p.meta, null, null, { genomes: game.genomes, packed: p }); t.sampleGames.push(p.meta.gameId); };
     // bofetadas y caricias que llegaron mientras entrenaba: las aplica el siguiente sueño (spec/04 §10.4)
     const applyQueued = () => withTrainingFrozen(() => applyQueuedFeedback({ net, genome: g, trainingId: t.id }));
-    const sleep = () => {
+    // el sueño aprende en un hilo si hay grupo (spec/11), a cualquier velocidad: el del entreno si tiene más de 1 hilo; si
+    // no, el del servidor. El lote siguiente espera a que vuelva y se aplique
+    const learnPool = own || threads();
+    const sleep = async () => {
       applyQueued();
       if (!batch.length) { batchOpen = false; return; }
       const A = batchApplied || { lr: lc.lr, entropy: lc.entropy, temperature: g.traits.temperature };
-      const r = learnFromGames({ net, genome: view(A.temperature, cur ? cur.index() : null), games: batch, optim, cfg: { ...lc, lr: A.lr, entropy: A.entropy } });
+      const samples = batch.map((game, i) => (game.sample ? sampleOf(game, i) : null)).filter(Boolean);
+      const { result: r, packed } = await learnInThread({ pool: learnPool, net, genome: view(A.temperature, cur ? cur.index() : null), games: batch, optim, cfg: { ...lc, lr: A.lr, entropy: A.entropy }, samples });
       r.update.applied = { ...A };
       t.applied = { ...A };
       batchOpen = false;
       t.updates++;
-      // partidas de muestra (spec/04 §6, spec/07 §12.1): recompensa y emoción dentro del registro de la partida
-      const byGame = new Map();
-      for (const game of batch) if (game.sample) byGame.set(game, new Set(Object.values(game.trajectory && game.trajectory.soldiers ? game.trajectory.soldiers : {}).flat().map((s) => s.decision && s.decision.eventId)));
-      for (const [game, ids] of byGame) {
-        const gi = batch.indexOf(game);
-        saveSample(game, r.emotions.filter((em) => em.game === gi && ids.has(em.decisionEventId))); // solo las de esta partida (spec/04 §10.1)
-      }
+      for (const p of packed) keepSample(p, batch[p.index]);
       const refs = batch.map((game) => ({ game: game.events && game.events[0] ? game.events[0].game : null })).filter((x) => x.game);
       appendLog({ type: 'update', netId: g.id, trainingId: t.id, games: batch.length, loss: r.update.loss, entropy: r.update.entropy, gradNorm: r.update.gradNorm, top: r.update.top, applied: r.update.applied, refs });
       if (r.lesson) appendLog({ type: 'lesson', netId: g.id, trainingId: t.id, blockId: r.lesson.blockId, name: r.lesson.name, relChange: r.lesson.relChange, bulb: r.lesson.bulb, refs });
@@ -732,7 +771,8 @@ export function createTrainer(opts = {}) {
       const res = cfg.speed !== 'turbo' ? await playLive(spec) : await playAsync(spec);
       const game = record(t.games, { ...res, ...extraOf(spec) }, { intoBatch: false, kind: 'showcase', sample: true, seed: spec.seed, soldiers: sold });
       const x = prepareExperience({ genome: vg, games: [game], optim, cfg: lc });
-      saveSample(game, x.emotions);
+      const s = sampleOf(game, 0);
+      keepSample(learnPool ? (await learnPool.run({ type: 'pack', sample: s, game: { rewards: game.rewards, trajectory: game.trajectory }, emotions: x.emotions })).packed : packSample(s, game, x.emotions), game); // en un hilo si lo hay (spec/11)
       const refs = game.events && game.events[0] ? [{ game: game.events[0].game }] : [];
       appendLog({ type: 'update', kind: 'evolution', netId: g.id, trainingId: t.id, step: e, games: out.update.games, meanFitness: out.update.meanFitness, bestFitness: out.update.bestFitness, top: out.update.top, applied: out.update.applied, refs });
       if (out.lesson) appendLog({ type: 'lesson', netId: g.id, trainingId: t.id, blockId: out.lesson.blockId, name: out.lesson.name, relChange: out.lesson.relChange, bulb: out.lesson.bulb, refs });
@@ -758,7 +798,7 @@ export function createTrainer(opts = {}) {
         }
         if (t._stop) { reason = 'stopped'; break; }
         if (evolutionTurn()) {
-          if (batch.length) sleep(); // en 'ambos', el gradiente pendiente va antes que la evolución
+          if (batch.length) await sleep(); // en 'ambos', el gradiente pendiente va antes que la evolución
           await runEvolutionStep();
           if (method === 'both' && ++cycleSteps >= Math.max(1, bothCfg.evolutionStepsPerCycle)) { cycleGames = 0; cycleSteps = 0; }
           reason = doneBy();
@@ -773,16 +813,16 @@ export function createTrainer(opts = {}) {
           const results = await Promise.all(specs.map((spec) => pool.run({ type: 'play', seed: spec.seed, left: spec.left, right: spec.right, soldiers: spec.soldiers })));
           results.forEach((res, i) => { if (!reason && !t._stop) { record(k + i, { ...res, ...extraOf(specs[i]) }); reason = doneBy(); } });
           k += n; cycleGames += n;
-          if (batch.length >= batchSize) sleep();
+          if (batch.length >= batchSize) await sleep();
           if (reason) break;
           continue;
         }
-        if (batch.length >= batchSize) sleep();
+        if (batch.length >= batchSize) await sleep();
         reason = doneBy();
         if (!reason && t._stop) reason = 'stopped';
       }
       if (t._stop && reason !== 'stopped') reason = 'stopped';
-      sleep();
+      await sleep();
       if (R.keepBest) {
         const b = best.result();
         if (!b) t.keptBest = { restored: false, reason: 'menos de 20 partidas' };

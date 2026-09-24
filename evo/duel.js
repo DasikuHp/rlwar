@@ -93,8 +93,9 @@ export function makePlay({ speed = 'turbo', duelId = null, saveGames = true, gen
 export function defaultLearner(netId) {
   const L = makeLearner(loadNet(netId));
   return {
-    learn: (games, opts) => L.learn(games, opts),
-    review: (games) => L.review(games),
+    // aprende en un hilo del grupo del servidor si lo hay (spec/11); sin él, aquí mismo
+    learn: (games, opts) => L.learnAsync(games, opts),
+    review: (games) => L.learnAsync(games, { lrScale: 1 }),
     save: () => L.save(),
     addStats: (s) => L.addStats(s),
     method: L.method,
@@ -136,7 +137,13 @@ async function playDuel(opts) {
   const plan = duelPlan({ a, b, seed, soldiers });
   const played = [];
   const t0 = Date.now();
-  const gameFor = (out, netId) => ({ events: out.events, trajectory: out.trajectories[out.playerIds[netId]] || { netId, soldiers: {} }, playerId: out.playerIds[netId] });
+  // una partida por red, creada una vez: el repaso de `mix` recibe las mismas que ya aprendió, con sus recompensas, y no
+  // las vuelve a absorber (spec/06 §6.2)
+  const perNet = new Map(); // out → {netId: partida}
+  const gameFor = (out, netId) => {
+    const byNet = perNet.get(out) || perNet.set(out, {}).get(out);
+    return byNet[netId] || (byNet[netId] = { events: out.events, trajectory: out.trajectories[out.playerIds[netId]] || { netId, soldiers: {} }, playerId: out.playerIds[netId] });
+  };
   for (const row of plan) {
     if (stop()) break;
     if (speed === 'turbo') await new Promise((r) => setImmediate(r));
@@ -150,8 +157,8 @@ async function playDuel(opts) {
       for (const netId of [a, b]) {
         const L = learnerOf(netId);
         if (L.addStats) L.addStats({ games: 1, wins: out.winner === netId ? 1 : 0, kills: (out.kills || {})[netId] || 0, deaths: (out.kills || {})[netId === a ? b : a] || 0 });
-        if (learning === 'hot') L.learn([gameFor(out, netId)], { lrScale: 1 });
-        else if (learning === 'mix') L.learn([gameFor(out, netId)], { lrScale: 0.25 });
+        if (learning === 'hot') await L.learn([gameFor(out, netId)], { lrScale: 1 });
+        else if (learning === 'mix') await L.learn([gameFor(out, netId)], { lrScale: 0.25 });
         L.save();
       }
     }
@@ -160,7 +167,7 @@ async function playDuel(opts) {
     if (onGame) onGame(row.k, game, rec);
   }
   if (learnEnabled && (learning === 'frozen' || learning === 'mix') && played.length) {
-    for (const netId of [a, b]) { const L = learnerOf(netId); L.review(played.map((out) => gameFor(out, netId))); L.save(); }
+    for (const netId of [a, b]) { const L = learnerOf(netId); await L.review(played.map((out) => gameFor(out, netId))); L.save(); }
   }
   // redes con evolución: al acabar el duelo, un paso de evolución contra la rival tal como quedó (spec/04 §10.2)
   if (learnEnabled && played.length) {

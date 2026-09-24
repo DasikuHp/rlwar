@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { checkFrozen, describeCheck } from '../tools/freeze.mjs';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -39,6 +39,11 @@ const fz = checkFrozen(rootArg >= 0 ? args[rootArg + 1] : ROOT);
 console.log(describeCheck(fz));
 if (!fz.ok) { console.log('\nFAIL ✘ (tests congelados modificados: OK del usuario + motivo escrito + tools/freeze.mjs)'); process.exit(1); }
 if (args.includes('--check-only')) process.exit(0);
+
+// carpetas gw-* de TEMP que había antes de la batería: al acabar se borran solo las que haya creado ella (sesión 6, decisión
+// del usuario). Las de la prueba de mutantes (gw-mutants-*) no se tocan: no se corre la batería a la vez que los mutantes
+const gwDirs = () => { try { return readdirSync(tmpdir()).filter((n) => n.startsWith('gw-')); } catch { return []; } };
+const before = new Set(gwDirs());
 
 const server = spawn(process.execPath, [join(ROOT, 'server', 'server.js')], {
   env: { ...process.env, GW_FAST: '1', PORT: String(PORT), GW_EVO_DIR: mkdtempSync(join(tmpdir(), 'gw-evo-test-')) }, stdio: 'ignore',
@@ -144,11 +149,20 @@ try {
   results.push(await run('moverse (P1b): solo donde se puede, castigo y destinos a 1,5 u', [join(ROOT, 'test', 'moverse.spec.mjs')]));
   results.push(await run('moverse (P1b): huecos de los mutantes', [join(ROOT, 'test', 'moverse-b.spec.mjs')]));
   results.push(await run('hilos b: el entreno de 1 hilo no vuelve al hilo principal (train.js:501)', [join(ROOT, 'test', 'hilos-b.spec.mjs')]));
+  results.push(await run('auditoría s5: estado inicial de Adam y de la base "media" (train.js 103, 264, 293)', [join(ROOT, 'test', 'huecos-s5.spec.mjs')]));
+  results.push(await run('auditoría s5: duelo "mix", cada partida se absorbe una vez', [join(ROOT, 'test', 'duelo-mix.spec.mjs')]));
+  results.push(await run('hilos c: el servidor aprende en un hilo y contesta siempre (spec/11)', [join(ROOT, 'test', 'hilos-c.spec.mjs')]));
 } finally {
   server.kill();
 }
+await new Promise((r) => (server.exitCode !== null ? r() : server.once('exit', r)));
+let cleaned = 0;
+for (const n of gwDirs()) {
+  if (before.has(n) || n.startsWith('gw-mutants-')) continue;
+  try { rmSync(join(tmpdir(), n), { recursive: true, force: true }); cleaned++; } catch { /* en uso: se queda */ }
+}
 
-console.log('\n=== resumen ===');
+console.log(`\n=== resumen === (carpetas gw-* de esta batería borradas: ${cleaned})`);
 for (const r of results) console.log(` ${r.ok ? '✔' : '✘'} ${r.label} (${r.s.toFixed(1)} s)`);
 const failed = results.filter((r) => !r.ok).length;
 console.log(failed ? `\nFAIL ✘ (${failed})` : '\nTODO OK ✔');

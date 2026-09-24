@@ -55,7 +55,7 @@ export class Room {
     this.bites = [];        // bocados que las explosiones arrancan al terreno (spec/01 §10.1)
     this.turn = null;     // {playerId, soldierId, stage: 'shoot'|'move', deadline, radius?}
     this.lastShot = null; // {playerId, expr, mode, result, ts} (los puntos van por el evento 'shot')
-    this.lastMove = null; // {playerId, soldierId, from, to, requested, slid, stayed, reason, ts}
+    this.lastMove = null; // {playerId, soldierId, from, to, requested, stayed, reason, why, ts}
     this.chat = [];
     this.winner = null;
     this.listeners = new Set();

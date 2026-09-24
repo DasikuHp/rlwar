@@ -1,5 +1,6 @@
-// Grupo de hilos para las partidas sin pantalla (spec/04 §5): cada hilo juega (forward) lo que le mandan y el hilo
-// principal aprende. Los genomas viajan inline: el hilo no toca el almacén.
+// Grupo de hilos para las partidas sin pantalla (spec/04 §5): cada hilo juega (forward) lo que le mandan y, desde spec/11,
+// también aprende (sueños de los entrenos, duelos y exhibiciones); el hilo principal coordina y aplica lo que vuelve. Los
+// genomas viajan inline: el hilo no toca el almacén.
 // El servidor crea su grupo al arrancar (`useThreads`, auditoría s3): así los duelos turbo, el boletín, el pre-torneo de
 // hijas y los entrenos turbo de 1 hilo se juegan fuera de su hilo y sigue contestando. Sin él (tests, arena), todo se
 // juega en el proceso. Es el mismo código: misma semilla, mismo resultado.

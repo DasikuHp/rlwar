@@ -141,6 +141,7 @@ try {
   results.push(await run('auditoría s3: huecos de los mutantes (mapas, lib, geometría, percepción, sala)', [join(ROOT, 'test', 'huecos-s3.spec.mjs')]));
   results.push(await run('auditoría s3: huecos de los mutantes por la API (cuerpos cortados, 405 de sala)', [join(ROOT, 'test', 'huecos-s3-api.spec.mjs')]));
   results.push(await run('moverse (P1b): solo donde se puede, castigo y destinos a 1,5 u', [join(ROOT, 'test', 'moverse.spec.mjs')]));
+  results.push(await run('moverse (P1b): huecos de los mutantes', [join(ROOT, 'test', 'moverse-b.spec.mjs')]));
 } finally {
   server.kill();
 }

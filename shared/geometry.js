@@ -1,6 +1,6 @@
-// Geometría (spec/01 §3 y §10): terreno (círculos, rectángulos y bocados), validez de un destino, deslizamiento al punto
-// válido más cercano y línea de tiro. Pura: sin estado, sin aleatoriedad, nunca lanza.
-import { PLANE, MOVE_RADIUS, BODY, MIN_SEPARATION, SLIDE_R_STEP, SLIDE_DEG_STEP } from './constants.js';
+// Geometría (spec/01 §3 y §10, spec/10): terreno (círculos, rectángulos y bocados), validez de un destino (y por qué no
+// vale) y línea de tiro. Pura: sin estado, sin aleatoriedad, nunca lanza.
+import { PLANE, MOVE_RADIUS, BODY, MIN_SEPARATION } from './constants.js';
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -37,46 +37,30 @@ export function segmentClear(from, P, terrain, pad = BODY) {
   return true;
 }
 
-// Las 5 reglas de validez de spec/01 §3
-export function isValidMove(P, { from, soldiers = [], obstacles = [], bites = [], selfId = null, plane = PLANE }) {
-  if (dist(P, from) > MOVE_RADIUS + 1e-9) return false;
-  if (P.x < plane.xMin + BODY || P.x > plane.xMax - BODY || P.y < plane.yMin + BODY || P.y > plane.yMax - BODY) return false;
+// Las 5 reglas de validez de spec/01 §3: la primera que falla (spec/10 §1), o null si el punto vale
+// far = a más de 2 u · edge = fuera del mapa · terrain = dentro de terreno · soldier = pegado a otro soldado · wall = el camino cruza terreno
+export function moveProblem(P, { from, soldiers = [], obstacles = [], bites = [], selfId = null, plane = PLANE }) {
+  if (dist(P, from) > MOVE_RADIUS + 1e-9) return 'far';
+  if (P.x < plane.xMin + BODY || P.x > plane.xMax - BODY || P.y < plane.yMin + BODY || P.y > plane.yMax - BODY) return 'edge';
   const terrain = { obstacles, bites };
-  if (isSolid(P, terrain, BODY)) return false;
+  if (isSolid(P, terrain, BODY)) return 'terrain';
   for (const s of soldiers) {
     if (s.id === selfId || !s.alive) continue;
-    if (dist(P, s) < MIN_SEPARATION) return false;
+    if (dist(P, s) < MIN_SEPARATION) return 'soldier';
   }
-  return segmentClear(from, P, terrain);
+  return segmentClear(from, P, terrain) ? null : 'wall';
 }
+export const isValidMove = (P, ctx) => moveProblem(P, ctx) === null;
 
-// Devuelve {to, slid, stayed, reason}. `requested` = {x,y} | 'stay' | null | cualquier cosa.
+// Devuelve {to, stayed, reason, why}. `requested` = {x,y} | 'stay' | null | cualquier cosa. Sin deslizar (spec/10 §1): un
+// sitio imposible hace perder el movimiento (reason 'blocked' y la regla que falla en `why`)
 export function slideMove({ from, requested, soldiers = [], obstacles = [], bites = [], selfId = null, plane = PLANE }) {
-  const stay = (reason, slid = false) => ({ to: { x: from.x, y: from.y }, slid, stayed: true, reason });
+  const stay = (reason, why = null) => ({ to: { x: from.x, y: from.y }, stayed: true, reason, why });
   if (requested === 'stay' || requested === null || requested === undefined) return stay('stay');
   if (typeof requested !== 'object' || !isNum(requested.x) || !isNum(requested.y)) return stay('invalid');
-  let T = { x: requested.x, y: requested.y };
-  const d = dist(T, from);
-  if (d > MOVE_RADIUS) T = { x: from.x + (T.x - from.x) * MOVE_RADIUS / d, y: from.y + (T.y - from.y) * MOVE_RADIUS / d };
-  const ctx = { from, soldiers, obstacles, bites, selfId, plane };
-  if (isValidMove(T, ctx)) return { to: T, slid: false, stayed: false, reason: 'ok' };
-
-  // rejilla polar: r creciente, θ creciente; gana la menor distancia a T (empates: primero encontrado). Un punto que no
-  // mejora la distancia no puede ganar: se descarta antes de validarlo (validar es lo caro), con el mismo resultado
-  let best = null, bestD = Infinity;
-  const nr = Math.round(MOVE_RADIUS / SLIDE_R_STEP), na = Math.round(360 / SLIDE_DEG_STEP);
-  for (let i = 1; i <= nr; i++) {
-    const r = i * SLIDE_R_STEP;
-    for (let k = 0; k < na; k++) {
-      const th = k * SLIDE_DEG_STEP * Math.PI / 180;
-      const P = { x: from.x + r * Math.cos(th), y: from.y + r * Math.sin(th) };
-      const dd = dist(P, T);
-      if (!(dd < bestD - 1e-12) || !isValidMove(P, ctx)) continue;
-      best = P; bestD = dd;
-    }
-  }
-  if (!best) return stay('blocked', true);
-  return { to: best, slid: true, stayed: false, reason: 'slide' };
+  const T = { x: requested.x, y: requested.y };
+  const why = moveProblem(T, { from, soldiers, obstacles, bites, selfId, plane });
+  return why ? stay('blocked', why) : { to: T, stayed: false, reason: 'ok', why: null };
 }
 
 // Línea de tiro (spec/01 §5): segmento recto a→b sin cruzar terreno sólido (sin agrandar, bordes incluidos; muestreo

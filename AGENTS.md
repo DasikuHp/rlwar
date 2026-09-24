@@ -43,9 +43,13 @@ Después de cada disparo, el soldado que disparó puede moverse hasta **2 u** (c
 - **con el disparo**: `fire` admite `move: {x, y}` o `move: "stay"` (se aplica al instante);
 - **después de ver el tiro**: si `fire` no lleva `move`, el turno pasa a `state.turn.stage === "move"`
   (con `deadline` y `radius`); envía `POST /move` antes del plazo o te quedas quieto.
-Un destino inválido (dentro de un obstáculo, fuera del plano, a menos de 1 u de otro soldado, o al otro
-lado de un muro) **se desliza** al punto válido más cercano. `state.lastMove` y el evento SSE `move`
-(`{move:{from,to,requested,slid,stayed}}`) cuentan qué pasó. `POST /api/rooms` admite `seed` (partida
+**Solo donde se puede** (P1b, `spec/10-moverse.md`): un destino imposible (a más de 2 u, fuera del plano, dentro de
+terreno, a menos de 1 u de otro soldado vivo, o al otro lado de un muro) **no se mueve**: el soldado pierde el movimiento y
+se queda donde estaba, con `reason: 'blocked'` y `why` = la primera regla que falla (`far`, `edge`, `terrain`, `soldier`,
+`wall`). Ni se recorta ni se busca otro sitio; las redes reciben el castigo "Movimiento imposible" (−0,3 por defecto).
+Ejemplo: en (−10, 0) pides (−7, 0), a 3 u → te quedas en (−10, 0), `why: 'far'`. Los 9 `moveOptions` que reciben los
+agentes (quedarse y 8 direcciones a **1,5 u**) llevan `impossible` y `why`. `state.lastMove` y el evento SSE
+`move` (`{from,to,requested,stayed,reason,why}`) cuentan qué pasó. `POST /api/rooms` admite `seed` (partida
 reproducible; `state.config.seed` la expone siempre) y `speed` (`1` | `10`; una sala x10 solo admite agentes).
 ### Terreno que se rompe y tiro que atraviesa (P1, `spec/01-motor.md` §10)
 - **Obstáculos**: círculos `{kind:'circle', x, y, r}` (los mapas nuevos solo generan círculos) o rectángulos `{x, y, w, h}`.
@@ -82,7 +86,7 @@ export function create({ level = 2 } = {}) {
     },
     // opcional (F1): se llama tras ver el resultado del tiro; gana sobre `move` de chooseShot
     chooseMove({ soldiers, obstacles, bites, soldier, shot, moveOptions, history, rng }) {
-      return moveOptions[1].to;          // moveOptions: 9 destinos ya deslizados {i,to,stay,slid,cover,distEnemy,los}
+      return moveOptions[1].impossible ? 'stay' : moveOptions[1].to; // 9 destinos a 1,5 u {i,to,stay,impossible,why,cover,distEnemy,los}
     },
   };
 }

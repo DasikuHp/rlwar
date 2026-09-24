@@ -1,5 +1,7 @@
 // F1 — Motor: movimiento tras disparar, semilla, partidas sin pantalla, ángulo de artillería.
 // Contrato: spec/01-motor.md. Escrito ANTES del código y congelado.
+// P1b (2026-09-24, OK del usuario, spec/10): ya no se desliza ni se recorta; `slid` desaparece (reason/why); los 9 destinos
+// a 1,5 u. Cambian las comprobaciones de las constantes, de slideMove, de moveOptions y de Sniper/Greedy/Artillery.
 // Uso: node test/motor.spec.mjs [http://localhost:8791]   (la parte de API necesita el servidor)
 process.env.GW_FAST = '1'; // las salas vivas de este test usan tiempos cortos
 import { strict as assert } from 'node:assert';
@@ -57,7 +59,7 @@ const base = { from: { x: 0, y: 0 }, soldiers: [me], obstacles: [], selfId: 's1'
 // ---------- constantes ----------
 await check('constantes nuevas de F1', () => {
   assert.equal(C.MOVE_RADIUS, 2); assert.equal(C.BODY, 0.5); assert.equal(C.MIN_SEPARATION, 1.0);
-  assert.equal(C.MOVE_TIME, 400, 'FAST: 400 ms'); assert.equal(C.SLIDE_R_STEP, 0.05); assert.equal(C.SLIDE_DEG_STEP, 5); assert.equal(C.MOVE_DIRS, 8);
+  assert.equal(C.MOVE_TIME, 400, 'FAST: 400 ms'); assert.equal(C.MOVE_OPTION_RADIUS, 1.5); assert.equal(C.MOVE_DIRS, 8);
 });
 
 // ---------- rng ----------
@@ -75,18 +77,18 @@ await check('makeRng: determinista, [0,1), int/pick/gauss/seed, y compatible con
 });
 
 // ---------- slideMove ----------
-await check('slideMove: destino válido dentro del radio → sin deslizar', () => {
+await check('slideMove: destino válido dentro del radio → allí (reason "ok")', () => {
   const r = slideMove({ ...base, requested: { x: 1.2, y: -0.7 } });
-  assert.ok(near(r.to.x, 1.2) && near(r.to.y, -0.7)); assert.equal(r.slid, false); assert.equal(r.stayed, false);
+  assert.ok(near(r.to.x, 1.2) && near(r.to.y, -0.7)); assert.equal(r.reason, 'ok'); assert.equal(r.why, null); assert.equal(r.stayed, false);
 });
-await check('slideMove: fuera del radio → recortado al círculo en la misma dirección', () => {
+await check('slideMove: fuera del radio → pierde el movimiento (blocked, far), sin recortar', () => {
   const r = slideMove({ ...base, requested: { x: 3, y: 4 } });
-  assert.ok(near(dist(r.to, base.from), 2, 1e-9)); assert.ok(near(r.to.x, 1.2, 1e-9) && near(r.to.y, 1.6, 1e-9)); assert.equal(r.slid, false);
+  assert.deepEqual(r.to, base.from); assert.equal(r.stayed, true); assert.equal(r.reason, 'blocked'); assert.equal(r.why, 'far');
 });
-await check('slideMove: "stay", null y undefined → quieto sin deslizar', () => {
+await check('slideMove: "stay", null y undefined → quieto (reason "stay")', () => {
   for (const req of ['stay', null, undefined]) {
     const r = slideMove({ ...base, requested: req });
-    assert.deepEqual(r.to, base.from); assert.equal(r.stayed, true); assert.equal(r.slid, false);
+    assert.deepEqual(r.to, base.from); assert.equal(r.stayed, true); assert.equal(r.reason, 'stay');
   }
 });
 await check('slideMove: NaN, cadena o Infinity → quieto con reason "invalid" (nunca lanza)', () => {
@@ -95,14 +97,11 @@ await check('slideMove: NaN, cadena o Infinity → quieto con reason "invalid" (
     assert.deepEqual(r.to, base.from); assert.equal(r.stayed, true); assert.equal(r.reason, 'invalid');
   }
 });
-await check('slideMove: dentro de un obstáculo ampliado → punto válido más cercano (contrastado con fuerza bruta)', () => {
+await check('slideMove: dentro de un obstáculo ampliado → pierde el movimiento (blocked, terrain)', () => {
   const obstacles = [{ x: 0.8, y: -1, w: 2, h: 2 }];
   const T = { x: 1.5, y: 0.2 };
   const r = slideMove({ ...base, obstacles, requested: T });
-  assert.equal(r.slid, true); assert.equal(r.stayed, false);
-  assert.ok(isValid(r.to, base.from, base.soldiers, 's1', obstacles), 'el destino es válido');
-  const best = bruteBest(T, base.from, base.soldiers, 's1', obstacles);
-  assert.ok(dist(r.to, T) <= best + 0.08, `a ${dist(r.to, T).toFixed(3)} de T; fuerza bruta ${best.toFixed(3)}`);
+  assert.deepEqual(r.to, base.from); assert.equal(r.stayed, true); assert.equal(r.reason, 'blocked'); assert.equal(r.why, 'terrain');
 });
 await check('slideMove: borde del plano → se respeta BODY', () => {
   const from = { x: 24, y: 14 };
@@ -110,13 +109,13 @@ await check('slideMove: borde del plano → se respeta BODY', () => {
   assert.ok(r.to.x <= PLANE.xMax - BODY + 1e-9 && r.to.y <= PLANE.yMax - BODY + 1e-9);
   assert.ok(isValid(r.to, from, [{ ...me, x: 24, y: 14 }], 's1', []));
 });
-await check('slideMove: otro soldado vivo a 0.9 u del destino → acaba a ≥ 1.0; muerto no bloquea', () => {
+await check('slideMove: otro soldado vivo a 0.9 u del destino → pierde el movimiento (blocked, soldier); muerto no bloquea', () => {
   const other = { id: 's2', team: 'right', x: 1.5, y: 0.9, alive: true };
   const T = { x: 1.5, y: 0 };
   const r = slideMove({ ...base, soldiers: [me, other], requested: T });
-  assert.ok(dist(r.to, other) >= SEP - 1e-9); assert.equal(r.slid, true);
+  assert.deepEqual(r.to, base.from); assert.equal(r.reason, 'blocked'); assert.equal(r.why, 'soldier');
   const r2 = slideMove({ ...base, soldiers: [me, { ...other, alive: false }], requested: T });
-  assert.ok(near(r2.to.x, 1.5) && near(r2.to.y, 0)); assert.equal(r2.slid, false);
+  assert.ok(near(r2.to.x, 1.5) && near(r2.to.y, 0)); assert.equal(r2.reason, 'ok');
 });
 await check('slideMove: no atraviesa un muro fino de un salto', () => {
   const obstacles = [{ x: 0.9, y: -5, w: 0.1, h: 10 }];
@@ -152,7 +151,7 @@ await check('lib: randomTemplates/directShots/pickWeighted/addMissNoise/avoidRep
   assert.deepEqual(lib.avoidRepeats(cands, hist, makeRng(2)), lib.avoidRepeats(cands, hist, makeRng(2)));
   assert.ok(Number.isFinite(lib.gauss(makeRng(1))));
 });
-await check('lib.moveOptions: 9 destinos en orden (quedarse, 0°, 45° … 315°), deslizados, con cover/distEnemy/los', () => {
+await check('lib.moveOptions: 9 destinos en orden (quedarse, 0°, 45° … 315°) a 1,5 u, con impossible/why y cover/distEnemy/los', () => {
   const enemy = { id: 'e', team: 'right', x: 10, y: 0, alive: true };
   const ctx = lib.contextFor([me, enemy], [], me);
   const opts = lib.moveOptions(ctx);
@@ -161,8 +160,8 @@ await check('lib.moveOptions: 9 destinos en orden (quedarse, 0°, 45° … 315°
   for (let k = 1; k < 9; k++) {
     const th = (k - 1) * Math.PI / 4;
     assert.equal(opts[k].i, k); assert.equal(opts[k].stay, false);
-    assert.ok(near(opts[k].to.x, 2 * Math.cos(th)) && near(opts[k].to.y, 2 * Math.sin(th)), `dirección ${k}`);
-    assert.equal(opts[k].slid, false);
+    assert.ok(near(opts[k].to.x, 1.5 * Math.cos(th)) && near(opts[k].to.y, 1.5 * Math.sin(th)), `dirección ${k}`);
+    assert.equal(opts[k].impossible, false);
     assert.equal(opts[k].cover, 1, 'campo abierto: el enemigo ve todos los destinos');
     assert.equal(opts[k].los, true);
     assert.ok(near(opts[k].distEnemy, dist(opts[k].to, enemy)));
@@ -184,9 +183,9 @@ const moveOf = (type, scene, seed = 1) => {
   assert.equal(typeof agent.chooseMove, 'function', `${type} implementa chooseMove`);
   return agent.chooseMove({ soldiers: scene.soldiers, obstacles: scene.obstacles, soldier: scene.soldier, shot: null, moveOptions: lib.moveOptions(ctx), history: [], rng: makeRng(seed), state: null });
 };
-await check('Sniper: expuesto a dos enemigos, se mueve al destino tapado más lejano (135°)', () => {
+await check('Sniper: expuesto a dos enemigos, se mueve al destino tapado (a 1,5 u solo lo está el de 90°; el de 45° cae en el muro)', () => {
   const m = moveOf('sniper', sniperScene());
-  assert.ok(m && near(m.x, -10 - Math.SQRT2, 1e-6) && near(m.y, Math.SQRT2, 1e-6), JSON.stringify(m));
+  assert.ok(m && near(m.x, -10, 1e-6) && near(m.y, 1.5, 1e-6), JSON.stringify(m));
 });
 await check('Sniper: ya tapado, se queda aunque alejarse sea posible', () => {
   const s = { id: 's1', team: 'left', x: -10, y: 0, alive: true }, e = { id: 'e', team: 'right', x: 10, y: 0, alive: true };
@@ -196,12 +195,12 @@ await check('Sniper: ya tapado, se queda aunque alejarse sea posible', () => {
 await check('Greedy: campo abierto → el destino con línea de tiro más cercano al enemigo (0°)', () => {
   const s = { id: 's1', team: 'left', x: -10, y: 0, alive: true }, e = { id: 'e', team: 'right', x: 10, y: 0, alive: true };
   const m = moveOf('greedy', { soldiers: [s, e], obstacles: [], soldier: s });
-  assert.ok(m && near(m.x, -8) && near(m.y, 0), JSON.stringify(m));
+  assert.ok(m && near(m.x, -8.5) && near(m.y, 0), JSON.stringify(m));
 });
 await check('Artillery: campo abierto → el destino más lejano del enemigo (180°)', () => {
   const s = { id: 's1', team: 'left', x: -10, y: 0, alive: true }, e = { id: 'e', team: 'right', x: 10, y: 0, alive: true };
   const m = moveOf('artillery', { soldiers: [s, e], obstacles: [], soldier: s });
-  assert.ok(m && near(m.x, -12) && near(m.y, 0), JSON.stringify(m));
+  assert.ok(m && near(m.x, -11.5) && near(m.y, 0), JSON.stringify(m));
 });
 await check('Chaos: uno de los 9 destinos, determinista por semilla y variable entre semillas', () => {
   const scene = sniperScene();

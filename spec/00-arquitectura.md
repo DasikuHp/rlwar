@@ -22,7 +22,7 @@ shared/            Lógica pura, sin I/O (servidor, hilos de entreno y navegador
   rng.js           PRNG con semilla (mulberry32): makeRng(seed) → rng, función `() → [0,1)` con
                    rng.int(n), rng.pick(arr), rng.gauss(), rng.seed; compatible con Math.random
   constants.js     + MOVE_RADIUS, BODY, MIN_SEPARATION, MOVE_TIME, límites del laboratorio (LIMITS)
-  geometry.js      validación y deslizamiento de movimiento (spec/01 §3): slideMove(...)
+  geometry.js      validación del movimiento y por qué no vale (spec/01 §3, spec/10): slideMove(...)
   genome.js        esquema del genoma, catálogo de bloques (BLOCKS), validate(), limits (spec/02)
   nn.js            compila un genoma → red ejecutable: forward, backward (BPTT), params (spec/02)
   percept.js       los 8 ojos, 🎲 Imaginación (candidatos), destinos de movimiento, rasgos (spec/03)

@@ -22,8 +22,7 @@ export const MOVE_RADIUS = 2;         // radio máximo del movimiento (u)
 export const BODY = 0.5;              // cuerpo del soldado: distancia mínima a obstáculos y bordes
 export const MIN_SEPARATION = 1.0;    // distancia mínima entre centros de dos soldados vivos
 export const MOVE_TIME = FAST ? 400 : 8000;  // ms de margen para elegir destino tras ver el tiro
-export const SLIDE_R_STEP = 0.05;     // paso radial de la rejilla polar del deslizamiento
-export const SLIDE_DEG_STEP = 5;      // paso angular (grados) de la rejilla polar
+export const MOVE_OPTION_RADIUS = 1.5; // los 8 destinos candidatos (spec/10 §3): margen para el ajuste fino antes de pasarse de 2 u
 export const MOVE_DIRS = 8;           // direcciones de los destinos candidatos (0° = +x)
 // Límites del laboratorio (spec/00 §6): nada que llegue de fuera puede colgar el servidor
 export const LIMITS = {

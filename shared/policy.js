@@ -125,7 +125,7 @@ export function decideMove({ net, genome, state, soldierId, memory, team = null,
     const p = softmaxT(scores, T);
     const k = sampleIndex(p, rng);
     const dests = obs.destinations;
-    decision.moves = dests.map((d, i) => ({ i, to: { x: d.to.x, y: d.to.y }, stay: d.stay, slid: d.slid, cover: d.cover, distEnemy: d.distEnemy, los: d.los, score: scores[i], p: p[i] }));
+    decision.moves = dests.map((d, i) => ({ i, to: { x: d.to.x, y: d.to.y }, stay: d.stay, impossible: d.impossible, why: d.why, cover: d.cover, distEnemy: d.distEnemy, los: d.los, score: scores[i], p: p[i] }));
     decision.chosenMove = k;
     decision.logp.move = Math.log(p[k]);
     const chosen = dests[k];
@@ -135,9 +135,11 @@ export function decideMove({ net, genome, state, soldierId, memory, team = null,
       decision.logp.moveAdjust = sample.reduce((s, a, i) => s + logN(a, mu[i], pulse), 0);
       const tl = toLocal(chosen.to, soldier.team);
       const target = toWorld({ x: tl.x + 0.5 * sample[0], y: tl.y + 0.5 * sample[1] }, soldier.team);
+      // se pide tal cual (spec/10 §4): si es imposible, la sala lo rechaza y la red recibe el castigo; aquí solo se anota
+      // lo que pasará
       const r = slideMove({ from: { x: soldier.x, y: soldier.y }, requested: target, soldiers: state.soldiers, obstacles: state.obstacles, bites: state.bites || [], selfId: soldierId });
-      decision.moveAdjust = { mu, sample, scales: [0.5, 0.5], target, to: { x: r.to.x, y: r.to.y } };
-      move = { x: r.to.x, y: r.to.y };
+      decision.moveAdjust = { mu, sample, scales: [0.5, 0.5], target, to: { x: r.to.x, y: r.to.y }, reason: r.reason, why: r.why };
+      move = { x: target.x, y: target.y };
     } else move = chosen.stay ? 'stay' : { x: chosen.to.x, y: chosen.to.y };
   }
   decision.ms = performance.now() - t0;

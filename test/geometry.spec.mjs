@@ -1,5 +1,7 @@
 // F1 — Geometría del movimiento (spec/01 §3): propiedades sobre escenas aleatorias y casos de borde.
 // Complementa test/motor.spec.mjs (que la prueba de mutantes mostró corto en este módulo). Sin servidor.
+// P1b (2026-09-24, OK del usuario): ya no se desliza; se retiran "deslizamiento" y "rejilla polar" (los sustituye
+// test/moverse.spec.mjs) y las 150 escenas comprueban la regla nueva.
 import { strict as assert } from 'node:assert';
 
 let fails = 0;
@@ -30,25 +32,10 @@ const valid = (P, from, soldiers, selfId, obstacles) =>
   obstacles.every((o) => !inRect(P, o)) &&
   soldiers.every((s) => s.id === selfId || !s.alive || dist(P, s) >= SEP) &&
   segOk(from, P, obstacles);
-// mejor distancia a T sobre una rejilla fina del disco (fuerza bruta)
-const bruteBest = (T, from, soldiers, selfId, obstacles, step = 0.02) => {
-  let best = Infinity;
-  for (let x = from.x - R; x <= from.x + R + 1e-9; x += step) for (let y = from.y - R; y <= from.y + R + 1e-9; y += step) {
-    const P = { x, y };
-    if (valid(P, from, soldiers, selfId, obstacles)) best = Math.min(best, dist(P, T));
-  }
-  return best;
-};
-const polarHasValid = (from, soldiers, selfId, obstacles) => {
-  for (let i = 1; i <= 40; i++) for (let k = 0; k < 72; k++) {
-    const r = i * 0.05, th = k * 5 * Math.PI / 180;
-    if (valid({ x: from.x + r * Math.cos(th), y: from.y + r * Math.sin(th) }, from, soldiers, selfId, obstacles)) return true;
-  }
-  return false;
-};
 
-check('escenas aleatorias (150): válido o quieto, sin deslizar cuando no hace falta, casi óptimo al deslizar, "blocked" solo si nada vale', () => {
-  let slides = 0, blocked = 0, direct = 0;
+
+check('escenas aleatorias (150): lo pedido tal cual si vale; si no, quieto con "blocked" y su motivo (sin deslizar, spec/10)', () => {
+  let blocked = 0, direct = 0;
   for (let seed = 1; seed <= 150; seed++) {
     const rng = makeRng(seed);
     const from = { x: PLANE.xMin + 1 + rng() * 48, y: PLANE.yMin + 1 + rng() * 28 };
@@ -59,29 +46,21 @@ check('escenas aleatorias (150): válido o quieto, sin deslizar cuando no hace f
     const requested = roll < 0.1 ? 'stay' : roll < 0.15 ? { x: NaN, y: 1 } : { x: from.x - 3 + rng() * 6, y: from.y - 3 + rng() * 6 };
     const r = slideMove({ from, requested, soldiers, obstacles, selfId: 'me' });
     assert.ok(r && r.to && Number.isFinite(r.to.x) && Number.isFinite(r.to.y), `seed ${seed}: salida numérica`);
-    if (r.stayed) {
-      assert.ok(near(r.to.x, from.x) && near(r.to.y, from.y), `seed ${seed}: quieto = from`);
-      if (requested === 'stay') assert.equal(r.reason, 'stay');
-      else if (typeof requested === 'object' && !Number.isFinite(requested.x)) assert.equal(r.reason, 'invalid');
-      else { assert.equal(r.reason, 'blocked'); assert.equal(r.slid, true, 'blocked cuenta como deslizado'); assert.ok(!polarHasValid(from, soldiers, 'me', obstacles), `seed ${seed}: blocked pero hay puntos válidos`); blocked++; }
-      continue;
-    }
-    assert.ok(valid(r.to, from, soldiers, 'me', obstacles), `seed ${seed}: destino inválido ${JSON.stringify(r)}`);
-    let T = requested;
-    const d = dist(T, from);
-    if (d > R) T = { x: from.x + (T.x - from.x) * R / d, y: from.y + (T.y - from.y) * R / d };
-    if (valid(T, from, soldiers, 'me', obstacles)) {
-      assert.equal(r.slid, false, `seed ${seed}: T válido no se desliza`);
-      assert.ok(near(r.to.x, T.x) && near(r.to.y, T.y), `seed ${seed}: to = T`);
+    assert.ok(!('slid' in r), `seed ${seed}: ya no se desliza (spec/10)`);
+    if (requested === 'stay') { assert.deepEqual([r.reason, r.stayed], ['stay', true]); continue; }
+    if (!Number.isFinite(requested.x)) { assert.deepEqual([r.reason, r.stayed], ['invalid', true]); continue; }
+    if (valid(requested, from, soldiers, 'me', obstacles)) {
+      assert.deepEqual([r.reason, r.stayed, r.why], ['ok', false, null], `seed ${seed}`);
+      assert.ok(near(r.to.x, requested.x) && near(r.to.y, requested.y), `seed ${seed}: to = lo pedido, tal cual`);
       direct++;
     } else {
-      assert.equal(r.slid, true, `seed ${seed}: T inválido se desliza`);
-      const best = bruteBest(T, from, soldiers, 'me', obstacles);
-      assert.ok(dist(r.to, T) <= best + 0.1, `seed ${seed}: a ${dist(r.to, T).toFixed(3)} de T, fuerza bruta ${best.toFixed(3)}`);
-      slides++;
+      assert.deepEqual([r.reason, r.stayed], ['blocked', true], `seed ${seed}: imposible → pierde el movimiento`);
+      assert.ok(near(r.to.x, from.x) && near(r.to.y, from.y), `seed ${seed}: quieto = from`);
+      assert.ok(['far', 'edge', 'terrain', 'soldier', 'wall'].includes(r.why), `seed ${seed}: motivo ${r.why}`);
+      blocked++;
     }
   }
-  assert.ok(slides >= 20 && direct >= 20 && blocked >= 1, `cobertura: ${direct} directos, ${slides} deslizados, ${blocked} bloqueados`);
+  assert.ok(direct >= 15 && blocked >= 20, `cobertura: ${direct} directos, ${blocked} imposibles`);
 });
 
 check('bordes exactos: en la línea del rect ampliado es inválido; a MIN_SEPARATION justa es válido; en el margen del plano es válido', () => {
@@ -133,42 +112,6 @@ check('segmento: muestreo t = 0.1 … 1.0 (ni antes del origen ni después del d
   assert.equal(segmentClear(from, diagonal, [{ x: 0.5, y: 0.5, w: 0.2, h: 0.2 }]), false);
   assert.equal(segmentClear(from, diagonal, [{ x: 0.5, y: -1.2, w: 0.2, h: 0.2 }]), true, 'obstáculo bajo la diagonal: fuera del ±0.5');
   assert.equal(segmentClear(from, diagonal, [{ x: -1.2, y: 0.5, w: 0.2, h: 0.2 }]), true, 'obstáculo a la izquierda: fuera');
-});
-
-check('deslizamiento: escoge la menor distancia a T; empates → menor radio, luego menor ángulo', () => {
-  // T inaccesible por una pared por delante, huecos simétricos arriba y abajo → empate resuelto por el ángulo menor (arriba, 90° < 270°)
-  const from = { x: 0, y: 0 };
-  const wall = [{ x: 0.6, y: -1.5, w: 0.2, h: 3 }];
-  const r = slideMove({ from, requested: { x: 1.5, y: 0 }, soldiers: [], obstacles: wall, selfId: 'me' });
-  assert.equal(r.slid, true);
-  const T = { x: 1.5, y: 0 };
-  const best = bruteBest(T, from, [], 'me', wall);
-  assert.ok(dist(r.to, T) <= best + 0.1, `${dist(r.to, T)} vs ${best}`);
-  assert.ok(r.to.x <= 0.1 + 1e-9, 'se queda a este lado del muro');
-  // el mismo punto pedido dos veces da lo mismo; y una T ya válida no se toca aunque haya obstáculos alrededor
-  assert.deepEqual(r, slideMove({ from, requested: { x: 1.5, y: 0 }, soldiers: [], obstacles: wall, selfId: 'me' }));
-  const ok = slideMove({ from, requested: { x: -1, y: 1 }, soldiers: [], obstacles: wall, selfId: 'me' });
-  assert.equal(ok.slid, false); assert.ok(near(ok.to.x, -1) && near(ok.to.y, 1));
-  // empate exacto a la misma distancia: T por encima de un bloque, dos huecos equidistantes → menor ángulo (0° antes que 180°)
-  const box = [{ x: -0.7, y: 0.6, w: 1.4, h: 1 }];
-  const t2 = slideMove({ from, requested: { x: 0, y: 0.8 }, soldiers: [], obstacles: box, selfId: 'me' });
-  assert.equal(t2.slid, true);
-  assert.ok(t2.to.x > 0, `empate → ángulo menor (derecha): ${JSON.stringify(t2.to)}`);
-});
-
-check('rejilla polar: encuentra el único hueco angular (300°) entre soldados', () => {
-  // única zona válida: un anillo lejano en dirección 300°; el destino debe estar a r ≈ 2 y θ ≈ 300°
-  const from = { x: 0, y: 0 };
-  const obstacles = [{ x: -3, y: -3, w: 6, h: 6 }]; // todo tapado…
-  const gapCenter = { x: 2 * Math.cos(300 * Math.PI / 180), y: 2 * Math.sin(300 * Math.PI / 180) };
-  // …salvo que quitamos el bloque: usamos otros soldados como barrera con un hueco exacto en 300°
-  const soldiers = [];
-  for (let k = 0; k < 72; k++) { if (k === 60) continue; const th = k * 5 * Math.PI / 180; soldiers.push({ id: 's' + k, x: 2.4 * Math.cos(th), y: 2.4 * Math.sin(th), alive: true }); }
-  const r = slideMove({ from, requested: { x: gapCenter.x * 1.5, y: gapCenter.y * 1.5 }, soldiers, obstacles: [], selfId: 'me' });
-  assert.equal(r.stayed, false);
-  const ang = ((Math.atan2(r.to.y, r.to.x) * 180 / Math.PI) + 360) % 360;
-  assert.ok(Math.abs(ang - 300) < 6 && dist(r.to, from) > 1.0, `destino ${JSON.stringify(r.to)} (ángulo ${ang.toFixed(1)})`);
-  void obstacles;
 });
 
 console.log(fails ? `\nFAIL ✘ (${fails})` : '\nPASS ✔ (geometría F1)');

@@ -51,6 +51,8 @@ export function assignRewards({ reward, teamSpirit = 0.5, events, trajectory, pl
       const e = byDecision.get(ev.data.decisionEventId);
       const gain = Math.max(0, (ev.data.coverBefore || 0) - (ev.data.coverAfter || 0));
       if (e && gain > 0) add(e, 'cover', reward.cover * gain);
+      // pidió un sitio imposible y perdió el movimiento (spec/10 §6)
+      if (ev.data.reason === 'blocked') add(e, 'impossibleMove', reward.impossibleMove);
     } else if (ev.type === 'death' && ev.actor.playerId === playerId) {
       const mine = entries.filter((e) => e.soldierId === ev.actor.soldierId && e.decision.eventId < ev.id);
       if (mine.length) add(mine[mine.length - 1], 'die', reward.die);

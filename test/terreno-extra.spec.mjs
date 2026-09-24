@@ -6,6 +6,8 @@
 // - Deslizar con círculos y bocados da el punto de la rejilla completa (oráculo: recorrido entero, sin atajos) y es
 //   rápido (tope grueso de tiempo).
 // - La capa dibujada del terreno se rehace si cambia cualquier obstáculo o bocado.
+// P1b (2026-09-24, OK del usuario, spec/10): ya no se desliza. El ajuste fino se pide tal cual y se juzga con los
+// bocados; se retira "deslizar = la rejilla completa"; el rendimiento mide 1 000 movimientos imposibles.
 // En proceso, sin servidor. Uso: node test/terreno-extra.spec.mjs
 process.env.GW_FAST = '1';
 import { strict as assert } from 'node:assert';
@@ -63,26 +65,27 @@ await check('sala: "enemigos que te ven" (move.coverBefore/After) mira los bocad
 });
 
 // ---------- red: ajuste fino del movimiento ----------
-await check('red: el ajuste fino del movimiento desliza con los bocados (el mismo punto que la sala)', () => {
+await check('red: el ajuste fino del movimiento se juzga con los bocados (lo mismo que haría la sala) y se pide tal cual', () => {
   const g = normalize(clone(TEMPLATES.turtle.genome)); // Moverse con ajuste
   const net = compile(g);
   // la red está dentro de un círculo grande, en una galería que han abierto los bocados
   const bites = [0, 0.5, 1, 1.5, 2, 2.5].map((x) => ({ x, y: 0, r: C.BITE_RADIUS }));
   const me = soldier('a', 'left', 0, 0), foe = soldier('e', 'right', 15, 5);
   const st = stateOf([me, foe], [circle(0, 0, 5)], bites);
-  let checked = 0;
-  for (let seed = 1; seed <= 6; seed++) {
+  let checked = 0, differs = 0;
+  for (let seed = 1; seed <= 40; seed++) {
     const r = decideMove({ net, genome: g, state: st, soldierId: 'a', memory: net.zeroState(), rng: makeRng(seed) });
     const ma = r.decision.moveAdjust;
     assert.ok(ma && ma.target, 'premisa: la red ajusta su movimiento');
     const want = G.slideMove({ from: { x: 0, y: 0 }, requested: ma.target, soldiers: st.soldiers, obstacles: st.obstacles, bites, selfId: 'a' });
     const blind = G.slideMove({ from: { x: 0, y: 0 }, requested: ma.target, soldiers: st.soldiers, obstacles: st.obstacles, selfId: 'a' });
-    assert.notDeepEqual(want.to, blind.to, 'premisa: sin bocados el resultado sería otro');
-    assert.deepEqual(ma.to, want.to, `semilla ${seed}`);
-    assert.deepEqual(r.move, { x: want.to.x, y: want.to.y });
+    if (want.to.x !== blind.to.x || want.to.y !== blind.to.y) differs++;
+    assert.deepEqual([ma.to, ma.reason, ma.why], [want.to, want.reason, want.why], `semilla ${seed}`);
+    assert.deepEqual(r.move, { x: ma.target.x, y: ma.target.y }, 'se pide el objetivo tal cual');
     checked++;
   }
-  assert.equal(checked, 6);
+  assert.equal(checked, 40);
+  assert.ok(differs >= 1, `premisa: sin bocados el resultado sería otro (${differs})`);
 });
 
 // ---------- red: dibujo de los candidatos (sin Simulador) ----------
@@ -139,55 +142,10 @@ await check('Compañeros: "que mataron" y "con fuego amigo" cuentan las bajas de
 });
 
 // ---------- deslizar con círculos y bocados ----------
-await check('deslizar con círculos y bocados = el punto de la rejilla polar completa (sin atajos)', () => {
-  // oráculo: la rejilla de spec/01 §3 recorrida entera, con la validez de §10.1 reescrita aquí
-  const R = C.MOVE_RADIUS, B = C.BODY;
-  const solid = (p, obstacles, bites, m) => obstacles.some((o) => (o.kind === 'circle' ? Math.hypot(p.x - o.x, p.y - o.y) <= o.r + m : !(p.x < o.x - m || p.x > o.x + o.w + m || p.y < o.y - m || p.y > o.y + o.h + m)))
-    && !bites.some((q) => Math.hypot(p.x - q.x, p.y - q.y) < q.r - m);
-  const valid = (p, from, soldiers, obstacles, bites) => {
-    if (Math.hypot(p.x - from.x, p.y - from.y) > R + 1e-9) return false;
-    if (p.x < C.PLANE.xMin + B || p.x > C.PLANE.xMax - B || p.y < C.PLANE.yMin + B || p.y > C.PLANE.yMax - B) return false;
-    if (solid(p, obstacles, bites, B)) return false;
-    if (soldiers.some((s) => s.alive && s.id !== 'a' && Math.hypot(p.x - s.x, p.y - s.y) < C.MIN_SEPARATION)) return false;
-    for (let k = 1; k <= 10; k++) { const t = k / 10; if (solid({ x: from.x + (p.x - from.x) * t, y: from.y + (p.y - from.y) * t }, obstacles, bites, B)) return false; }
-    return true;
-  };
-  const brute = (from, T, soldiers, obstacles, bites) => {
-    let best = null, bestD = Infinity;
-    const nr = Math.round(R / C.SLIDE_R_STEP), na = Math.round(360 / C.SLIDE_DEG_STEP);
-    for (let i = 1; i <= nr; i++) for (let k = 0; k < na; k++) {
-      const r = i * C.SLIDE_R_STEP, th = k * C.SLIDE_DEG_STEP * Math.PI / 180;
-      const p = { x: from.x + r * Math.cos(th), y: from.y + r * Math.sin(th) };
-      if (!valid(p, from, soldiers, obstacles, bites)) continue;
-      const d = Math.hypot(p.x - T.x, p.y - T.y);
-      if (d < bestD - 1e-12) { best = p; bestD = d; }
-    }
-    return best;
-  };
-  const rng = makeRng(2024);
-  let slid = 0;
-  for (let n = 0; n < 200; n++) {
-    const from = { x: -20 + 40 * rng(), y: -12 + 24 * rng() };
-    const obstacles = Array.from({ length: 3 + rng.int(5) }, () => circle(from.x + (rng() * 6 - 3), from.y + (rng() * 6 - 3), 0.5 + 2 * rng()));
-    const bites = Array.from({ length: rng.int(6) }, () => ({ x: from.x + (rng() * 4 - 2), y: from.y + (rng() * 4 - 2), r: C.BITE_RADIUS }));
-    const soldiers = [{ id: 'a', alive: true, x: from.x, y: from.y }, { id: 'o', alive: true, x: from.x + 1.2, y: from.y + 0.4 }];
-    const req = { x: from.x + (rng() * 5 - 2.5), y: from.y + (rng() * 5 - 2.5) };
-    const got = G.slideMove({ from, requested: req, soldiers, obstacles, bites, selfId: 'a' });
-    if (got.reason !== 'slide' && got.reason !== 'blocked') continue;
-    const d = Math.hypot(req.x - from.x, req.y - from.y);
-    const T = d > R ? { x: from.x + (req.x - from.x) * R / d, y: from.y + (req.y - from.y) * R / d } : req;
-    const want = brute(from, T, soldiers, obstacles, bites);
-    if (!want) { assert.equal(got.reason, 'blocked', `escena ${n}`); continue; }
-    assert.deepEqual(got.to, want, `escena ${n}`);
-    slid++;
-  }
-  assert.ok(slid >= 30, `premisa: bastantes escenas deslizadas (${slid})`);
-});
-
 // ---------- rendimiento ----------
 // tope grueso (margen ~6×): con 8–22 círculos, cada deslizamiento probaba los 2 880 puntos de la rejilla contra todos los
 // círculos y una partida sin pantalla pasó de ~35 ms a ~1 s (auditoría de P1); con el arreglo, 1 000 deslizamientos ≈ 0,3 s
-await check('rendimiento: 1 000 deslizamientos contra un mapa de 20 o más círculos tardan menos de 2 s', () => {
+await check('rendimiento: 1 000 movimientos imposibles contra un mapa de 20 o más círculos tardan menos de 2 s', () => {
   const rng = makeRng(7);
   let obstacles = null;
   for (let s = 1; !obstacles; s++) { const m = genMap(2, makeRng(s)).obstacles; if (m.length >= 20) obstacles = m; }
@@ -199,10 +157,10 @@ await check('rendimiento: 1 000 deslizamientos contra un mapa de 20 o más círc
     cases.push({ from, requested: { x: o.x, y: o.y } });
   }
   const t0 = performance.now();
-  let slid = 0;
-  for (const c of cases) if (G.slideMove({ from: c.from, requested: c.requested, soldiers: [], obstacles, bites: [] }).slid) slid++;
+  let blocked = 0;
+  for (const c of cases) if (G.slideMove({ from: c.from, requested: c.requested, soldiers: [], obstacles, bites: [] }).reason === 'blocked') blocked++;
   const ms = performance.now() - t0;
-  assert.ok(slid >= 900, `premisa: casi todos chocan y se deslizan (${slid})`);
+  assert.ok(blocked >= 900, `premisa: casi todos piden un sitio imposible (${blocked})`);
   assert.ok(ms < 2000, `${Math.round(ms)} ms`);
 });
 

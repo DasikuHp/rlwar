@@ -6,7 +6,7 @@ import { tryCompile } from '../shared/parser.js';
 import { simulateShot } from '../shared/solver.js';
 import { slideMove, los } from '../shared/geometry.js';
 import { gaussFrom } from '../shared/rng.js';
-import { STEP, MAX_STEPS, MODES, TEAMS, MOVE_RADIUS, MOVE_DIRS } from '../shared/constants.js';
+import { STEP, MAX_STEPS, MODES, TEAMS, MOVE_OPTION_RADIUS, MOVE_DIRS } from '../shared/constants.js';
 
 export const COARSE = { ds: 0.05, maxSteps: 2500 };
 
@@ -202,39 +202,44 @@ export function searchShot(state, soldierId, tries = 40, opts = {}) {
 // Línea de tiro: vive en shared/geometry.js (la usan también la percepción y la sala)
 export { los };
 
-// Los 9 destinos (quedarse + 8 direcciones a MOVE_RADIUS), ya deslizados, con rasgos:
-// cover = enemigos vivos con línea de tiro al destino · distEnemy = distancia al enemigo vivo más
-// cercano (null si no hay) · los = línea de tiro desde el destino a ese enemigo
+// Los 9 destinos (quedarse + 8 direcciones a MOVE_OPTION_RADIUS, spec/10 §3): `to` = el punto pedido (también si es
+// imposible: `impossible` y la regla que falla en `why`). Los rasgos, donde acabaría de verdad (en `from` si es imposible):
+// cover = enemigos vivos con línea de tiro · distEnemy = distancia al enemigo vivo más cercano (null si no hay) · los =
+// línea de tiro a ese enemigo
 export function moveOptions(ctx) {
   const from = { x: ctx.soldier.x, y: ctx.soldier.y };
+  const terrain = { obstacles: ctx.obstacles, bites: ctx.bites || [] };
   const out = [];
   for (let i = 0; i <= MOVE_DIRS; i++) {
-    let to, slid;
-    if (i === 0) { to = { x: from.x, y: from.y }; slid = false; }
-    else {
+    let to = { x: from.x, y: from.y }, why = null;
+    if (i > 0) {
       const th = (i - 1) * (2 * Math.PI / MOVE_DIRS);
-      const r = slideMove({ from, requested: { x: from.x + MOVE_RADIUS * Math.cos(th), y: from.y + MOVE_RADIUS * Math.sin(th) }, soldiers: ctx.soldiers, obstacles: ctx.obstacles, bites: ctx.bites || [], selfId: ctx.soldier.id });
-      to = r.to; slid = r.slid;
+      to = { x: from.x + MOVE_OPTION_RADIUS * Math.cos(th), y: from.y + MOVE_OPTION_RADIUS * Math.sin(th) };
+      why = slideMove({ from, requested: to, soldiers: ctx.soldiers, obstacles: ctx.obstacles, bites: ctx.bites || [], selfId: ctx.soldier.id }).why;
     }
+    const at = why ? from : to;
     let cover = 0, distEnemy = null, nearest = null;
     for (const e of ctx.enemies) {
-      const d = Math.hypot(e.x - to.x, e.y - to.y);
+      const d = Math.hypot(e.x - at.x, e.y - at.y);
       if (distEnemy === null || d < distEnemy) { distEnemy = d; nearest = e; }
-      if (los(to, e, { obstacles: ctx.obstacles, bites: ctx.bites || [] })) cover++;
+      if (los(at, e, terrain)) cover++;
     }
-    out.push({ i, to, stay: i === 0, slid, cover, distEnemy, los: nearest ? los(to, nearest, { obstacles: ctx.obstacles, bites: ctx.bites || [] }) : false });
+    out.push({ i, to, stay: i === 0, impossible: !!why, why, cover, distEnemy, los: nearest ? los(at, nearest, terrain) : false });
   }
   return out;
 }
 
 // Reglas de esquiva de los heurísticos (spec/01 §5). Devuelven {x,y} o 'stay'.
-export function coverMove(options, { stayIfCovered = false } = {}) {
+// solo entre los destinos posibles (spec/10 §5); quedarse (el 0) siempre lo es
+export function coverMove(all, { stayIfCovered = false } = {}) {
+  const options = all.filter((o) => !o.impossible);
   const ranked = options.slice().sort((a, b) => a.cover - b.cover || b.distEnemy - a.distEnemy || a.i - b.i);
   const bestOpt = ranked[0];
   if (stayIfCovered && options[0].cover === bestOpt.cover) return 'stay';
   return bestOpt.stay ? 'stay' : { x: bestOpt.to.x, y: bestOpt.to.y };
 }
-export function greedyMove(options) {
+export function greedyMove(all) {
+  const options = all.filter((o) => !o.impossible);
   const withLos = options.filter((o) => o.cover > 0).sort((a, b) => a.distEnemy - b.distEnemy || a.i - b.i);
   const pick = withLos.length ? withLos[0] : options.slice().sort((a, b) => a.cover - b.cover || a.i - b.i)[0];
   return pick.stay ? 'stay' : { x: pick.to.x, y: pick.to.y };

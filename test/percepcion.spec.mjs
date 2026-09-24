@@ -1,5 +1,6 @@
 // F3 — Percepción (spec/03 §1–§6, §9.1): marco local, Imaginación, ajuste, ojos exactos, destinos.
 // Escrito ANTES del código y congelado. Sin servidor.
+// P1b (2026-09-24, OK del usuario, spec/10): los destinos a 1,5 u; la entrada 4 dice "imposible" (antes "deslizado").
 process.env.GW_FAST = '1';
 import { strict as assert } from 'node:assert';
 
@@ -269,8 +270,8 @@ check('moveDestinations: 9 rasgos exactos en campo abierto, espejo para el derec
   for (let k = 0; k < 9; k++) {
     const d = dests[k]; assert.equal(d.i, k); assert.equal(d.stay, k === 0);
     const th = (k - 1) * Math.PI / 4;
-    const exp = k === 0 ? { x: me.x, y: me.y } : { x: me.x + 2 * Math.cos(th), y: me.y + 2 * Math.sin(th) };
-    assert.ok(near(d.to.x, exp.x) && near(d.to.y, exp.y)); assert.equal(d.slid, false);
+    const exp = k === 0 ? { x: me.x, y: me.y } : { x: me.x + 1.5 * Math.cos(th), y: me.y + 1.5 * Math.sin(th) };
+    assert.ok(near(d.to.x, exp.x) && near(d.to.y, exp.y)); assert.equal(d.impossible, false);
     const withLos = enemies.filter((en) => lib.los(d.to, en, [])).length;
     const allyD = Math.min(...allies.map((a) => dist(d.to, a)));
     vecNear(d.feat, [(d.to.x - me.x) / 2, (d.to.y - me.y) / 2, k === 0 ? 1 : 0, 0, withLos / 4, (dist(d.to, e1) - d0) / 2, Math.min(1, allyD / 10), 1, 0], 1e-9, `dest ${k}`);
@@ -279,7 +280,7 @@ check('moveDestinations: 9 rasgos exactos en campo abierto, espejo para el derec
   const right = scene({ team: 'right' }); right.obstacles = []; right.soldiers.find((s) => s.id === 'a1').x = 16;
   const dr = P.moveDestinations(right, right.soldiers[0]);
   for (let k = 0; k < 9; k++) vecNear(dr[k].feat, dests[k].feat, 1e-9, `espejo ${k}`);
-  assert.ok(near(dr[1].to.x, right.soldiers[0].x - 2), 'en el mundo, "adelante" para el derecho es −x');
+  assert.ok(near(dr[1].to.x, right.soldiers[0].x - 1.5), 'en el mundo, "adelante" para el derecho es −x');
   const hug = scene(); hug.soldiers[0].x = -3; hug.soldiers[0].y = 6; // el muro está en x ∈ [−2, 0], y ∈ [0, 5]: a 1 u del rect ampliado en BODY
   const dh = P.moveDestinations(hug, hug.soldiers[0]);
   assert.equal(dh[0].feat[8], 1, 'a menos de 1 u del rect ampliado: pegado');

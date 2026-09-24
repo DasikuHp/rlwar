@@ -1,5 +1,7 @@
 // F1 — Destinos de movimiento y esquiva de los heurísticos (spec/01 §3 y §5): propiedades sobre
 // escenas aleatorias contra una reimplementación independiente de las reglas. Sin servidor.
+// P1b (2026-09-24, OK del usuario, spec/10): los destinos a 1,5 u con impossible/why (sin deslizar) y los rasgos donde
+// acabaría de verdad; las reglas de los heurísticos, solo entre los destinos posibles (Chaos: una tirada entre ellos).
 import { strict as assert } from 'node:assert';
 
 let fails = 0;
@@ -52,7 +54,7 @@ check('los: muestreo cada 0.25 u con bordes incluidos; segmentos cortos usan sol
   }
 });
 
-check('moveOptions (120 escenas): orden, deslizamiento (igual que slideMove), cover, distEnemy y los correctos', () => {
+check('moveOptions (120 escenas): orden, a 1,5 u, imposible igual que slideMove, cover, distEnemy y los donde acabaría', () => {
   for (let seed = 1; seed <= 120; seed++) {
     const { me, soldiers, obstacles } = scene(seed);
     const ctx = lib.contextFor(soldiers, obstacles, me);
@@ -63,47 +65,55 @@ check('moveOptions (120 escenas): orden, deslizamiento (igual que slideMove), co
       const o = opts[i];
       assert.equal(o.i, i); assert.equal(o.stay, i === 0);
       const from = { x: me.x, y: me.y };
-      if (i === 0) { assert.ok(samePoint(o.to, from)); assert.equal(o.slid, false); }
+      if (i === 0) { assert.ok(samePoint(o.to, from)); assert.equal(o.impossible, false); }
       else {
         const th = (i - 1) * Math.PI / 4;
-        const ref = slideMove({ from, requested: { x: me.x + 2 * Math.cos(th), y: me.y + 2 * Math.sin(th) }, soldiers, obstacles, selfId: 'me' });
-        assert.ok(samePoint(o.to, ref.to), `seed ${seed} dir ${i}`); assert.equal(o.slid, ref.slid);
+        const req = { x: me.x + 1.5 * Math.cos(th), y: me.y + 1.5 * Math.sin(th) };
+        const ref = slideMove({ from, requested: req, soldiers, obstacles, selfId: 'me' });
+        assert.ok(samePoint(o.to, req), `seed ${seed} dir ${i}: el punto pedido`);
+        assert.equal(o.impossible, ref.reason === 'blocked'); assert.equal(o.why, ref.why);
       }
-      const cover = enemies.filter((e) => losRef(o.to, e, obstacles)).length;
+      const at = o.impossible ? from : o.to;
+      const cover = enemies.filter((e) => losRef(at, e, obstacles)).length;
       assert.equal(o.cover, cover, `seed ${seed} cover ${i}`);
       if (!enemies.length) { assert.equal(o.distEnemy, null); assert.equal(o.los, false); }
       else {
-        const nearest = enemies.slice().sort((p, q) => dist(o.to, p) - dist(o.to, q))[0];
-        assert.ok(near(o.distEnemy, dist(o.to, nearest)), `seed ${seed} dist ${i}`);
-        assert.equal(o.los, losRef(o.to, nearest, obstacles), `seed ${seed} los ${i}`);
+        const nearest = enemies.slice().sort((p, q) => dist(at, p) - dist(at, q))[0];
+        assert.ok(near(o.distEnemy, dist(at, nearest)), `seed ${seed} dist ${i}`);
+        assert.equal(o.los, losRef(at, nearest, obstacles), `seed ${seed} los ${i}`);
       }
     }
   }
 });
 
-// reglas de spec/01 §5, reimplementadas aquí
+// reglas de spec/01 §5, reimplementadas aquí; solo entre los destinos posibles (spec/10 §5)
+const possible = (all) => all.filter((o) => !o.impossible);
 const rules = {
-  sniper(opts, hasEnemies) {
+  sniper(all, hasEnemies) {
+    const opts = possible(all);
     if (!hasEnemies) return 'stay';
     const best = opts.slice().sort((a, b) => a.cover - b.cover || b.distEnemy - a.distEnemy || a.i - b.i)[0];
     if (opts[0].cover === best.cover) return 'stay';
     return best.to;
   },
-  greedy(opts, hasEnemies) {
+  greedy(all, hasEnemies) {
+    const opts = possible(all);
     if (!hasEnemies) return 'stay';
     const withLos = opts.filter((o) => o.cover > 0).sort((a, b) => a.distEnemy - b.distEnemy || a.i - b.i);
     const pick = withLos.length ? withLos[0] : opts.slice().sort((a, b) => a.cover - b.cover || a.i - b.i)[0];
     return pick.stay ? 'stay' : pick.to;
   },
-  artillery(opts, hasEnemies) {
+  artillery(all, hasEnemies) {
+    const opts = possible(all);
     if (!hasEnemies) return 'stay';
     const best = opts.slice().sort((a, b) => a.cover - b.cover || b.distEnemy - a.distEnemy || a.i - b.i)[0];
     return best.stay ? 'stay' : best.to;
   },
-  chaos(opts, hasEnemies, seed) {
+  chaos(all, hasEnemies, seed) {
     if (!hasEnemies) return 'stay';
     const rng = makeRng(seed);
-    const o = opts[Math.floor(rng() * 9)];
+    const opts = possible(all);
+    const o = opts[Math.floor(rng() * opts.length)];
     return o.stay ? 'stay' : o.to;
   },
 };

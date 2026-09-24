@@ -75,7 +75,7 @@ await check('move() con el soldado del turno ya muerto: cierra el turno sin move
   shooter.alive = false; // muerto por cualquier causa antes de elegir destino
   const m = room.move(pid, { x: shooter.x + 1, y: shooter.y });
   assert.ok(!m.error, `sin error: ${JSON.stringify(m)}`);
-  assert.ok(room.lastMove && room.lastMove.stayed === true && room.lastMove.reason === 'dead' && room.lastMove.slid === false);
+  assert.ok(room.lastMove && room.lastMove.stayed === true && room.lastMove.reason === 'dead' && room.lastMove.why === null); // P1b: sin `slid` (spec/10)
   assert.deepEqual(room.lastMove.to, from, 'no se mueve');
   assert.ok(room.turn === null || room.turn.stage === 'shoot', 'el turno se cierra');
   } finally { room.gameOver(true); }
@@ -108,7 +108,9 @@ await check('redes de plantilla con 4 soldados (semillas 1..30): ninguna partida
       assert.ok(!shooterDeath, `semilla ${seed}: el tirador muere por su propio fuego amigo`);
       const alive = { left: r.result.aliveLeft, right: r.result.aliveRight };
       const shotsAfter = ev.slice(i + 1).filter((x) => x.type === 'shot').length;
-      assert.ok(shotsAfter > 0 || alive.left === 0 || alive.right === 0, `semilla ${seed}: la partida se para tras el fuego amigo`);
+      // o era el último tiro permitido (P1b, OK del usuario: con la regla nueva de moverse, en la semilla 22 cae en el 40)
+      const lastAllowed = ev.slice(0, i).filter((x) => x.type === 'shot').length >= C.MAX_SHOTS;
+      assert.ok(shotsAfter > 0 || alive.left === 0 || alive.right === 0 || lastAllowed, `semilla ${seed}: la partida se para tras el fuego amigo`);
     });
   }
   assert.ok(withFF >= 5, `la muestra tiene fuegos amigos (${withFF})`);

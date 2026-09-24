@@ -197,10 +197,10 @@ await check('Simulador (ojo): topes de alcanzados (4), distancia (1) y puntos (1
 
 await check('destinos: los bocados abren un destino; "pegado a terreno" a 1 u justa del cuerpo; compañero más cercano (sin compañeros, 1; tope 10 u)', () => {
   const me = soldier('a', 'left', -10, 0), e = soldier('e', 'right', 20, 10);
-  // círculo de r 0,3 en (−8, 0) y un túnel de bocados hasta él: el destino 1 (→, a 2 u) vale tal cual
+  // círculo de r 0,3 en (−8, 0) y un túnel de bocados: el destino 1 (→, a 1,5 u desde P1b, OK del usuario) es posible
   const bites = [-8.75, -8.3, -8].map((x) => ({ x, y: 0, r: C.BITE_RADIUS }));
   const d = P.moveDestinations(stateOf([me, e], [circle(-8, 0, 0.3)], bites), me);
-  assert.deepEqual(d[1].to, { x: -8, y: 0 });
+  assert.deepEqual(d[1].to, { x: -8.5, y: 0 }); assert.equal(d[1].impossible, false, 'gracias a los bocados');
   // quedarse (destino 0): a r + 1,5 justas de un círculo está pegado; a r + 1,6, no
   assert.equal(P.moveDestinations(stateOf([me, e], [circle(-7.5, 0, 1)], []), me)[0].feat[8], 1);
   assert.equal(P.moveDestinations(stateOf([me, e], [circle(-7.4, 0, 1)], []), me)[0].feat[8], 0);
@@ -213,7 +213,7 @@ await check('destinos: "quedarse" solo en el 0; acercarse al enemigo 1 da (d −
   const me = soldier('a', 'left', -10, 0), e = soldier('e', 'right', 10, 0);
   const d = P.moveDestinations(stateOf([me, e], [], []), me);
   assert.deepEqual(d.map((x) => x.feat[2]), [1, 0, 0, 0, 0, 0, 0, 0, 0]);
-  assert.ok(near(d[1].feat[5], -1, 1e-12), `→ acerca 2 u: ${d[1].feat[5]}`);
+  assert.ok(near(d[1].feat[5], -0.75, 1e-12), `→ acerca 1,5 u (P1b, OK del usuario): ${d[1].feat[5]}`);
   assert.ok(d.every((x) => x.feat[7] === 1), 'sin terreno, todos ven al enemigo');
   const hidden = P.moveDestinations(stateOf([me, e], [circle(0, 0, 3)], []), me);
   assert.equal(hidden[0].feat[7], 0, 'con un círculo en medio, no lo ve');

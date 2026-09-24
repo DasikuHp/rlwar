@@ -14,6 +14,8 @@ import { checkPhrase, confidenceOf, memoryOf, recall } from '../evo/truth.js';
 import { speak } from '../evo/voice.js';
 
 const FAST = process.env.GW_FAST === '1';
+// por qué un sitio es imposible, en palabras (spec/10 §2)
+const WHY_TEXT = { far: 'a más de 2 u', edge: 'fuera del mapa', terrain: 'dentro de terreno', soldier: 'pegado a otro soldado', wall: 'al otro lado de un muro' };
 
 // polilínea gruesa de un disparo (cada 0.5 u, ≤ 100 puntos) para el registro y las estelas
 function coarsePoints(points) {
@@ -514,8 +516,8 @@ export class Room {
     const coverBefore = this.coverOf(soldier);
     if (!soldier.alive) {
       // el turno nunca se queda abierto (spec/01 §9.2): un soldado caído no se mueve, pero el turno se cierra
-      this.lastMove = { playerId, soldierId: soldier.id, from, to: { ...from }, requested: null, slid: false, stayed: true, reason: 'dead', ts: Date.now() };
-      this.emit('move', this.actorOf(soldier), { from, to: { ...from }, requested: null, slid: false, stayed: true, coverBefore, coverAfter: coverBefore, decisionEventId });
+      this.lastMove = { playerId, soldierId: soldier.id, from, to: { ...from }, requested: null, stayed: true, reason: 'dead', why: null, ts: Date.now() };
+      this.emit('move', this.actorOf(soldier), { from, to: { ...from }, requested: null, stayed: true, reason: 'dead', why: null, coverBefore, coverAfter: coverBefore, decisionEventId });
       this.finishTurn();
       return { ok: true, move: this.lastMove };
     }
@@ -526,15 +528,17 @@ export class Room {
     const coverAfter = this.coverOf(soldier);
     const asked = requested && typeof requested === 'object' && Number.isFinite(requested.x) && Number.isFinite(requested.y) && r.reason !== 'invalid'
       ? { x: requested.x, y: requested.y } : null;
+    const reason = timeout ? 'timeout' : r.reason;
     this.lastMove = {
       playerId, soldierId: soldier.id, from, to: { x: r.to.x, y: r.to.y }, requested: asked,
-      slid: r.slid, stayed: r.stayed, reason: timeout ? 'timeout' : r.reason, ts: Date.now(),
+      stayed: r.stayed, reason, why: r.why, ts: Date.now(),
     };
     const entry = this.shotLog[this.shotLog.length - 1];
     if (entry && entry.soldierId === soldier.id) entry.stayed = r.stayed;
-    this.emit('move', this.actorOf(soldier), { from, to: { x: r.to.x, y: r.to.y }, requested: asked, slid: r.slid, stayed: r.stayed, coverBefore, coverAfter, decisionEventId });
-    if (r.stayed) this.log(`🦶 ${player.name} se queda quieto${timeout ? ' (se acabó el tiempo)' : ''}`);
-    else this.log(`${r.slid ? '↪️' : '🦶'} ${player.name} se mueve a (${r.to.x.toFixed(1)}, ${r.to.y.toFixed(1)})${r.slid ? ' (deslizado)' : ''}`);
+    this.emit('move', this.actorOf(soldier), { from, to: { x: r.to.x, y: r.to.y }, requested: asked, stayed: r.stayed, reason, why: r.why, coverBefore, coverAfter, decisionEventId });
+    if (reason === 'blocked') this.log(`🚫 ${player.name} pidió un sitio imposible (${WHY_TEXT[r.why]}) y pierde el movimiento`);
+    else if (r.stayed) this.log(`🦶 ${player.name} se queda quieto${timeout ? ' (se acabó el tiempo)' : ''}`);
+    else this.log(`🦶 ${player.name} se mueve a (${r.to.x.toFixed(1)}, ${r.to.y.toFixed(1)})`);
     this.finishTurn();
     return { ok: true, move: this.lastMove };
   }

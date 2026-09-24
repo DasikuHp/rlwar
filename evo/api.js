@@ -359,6 +359,7 @@ const REWARD_META = {
   repeatExpr: ['Repetir tiro', 'castiga repetir una expresión reciente (etiqueta)', 'variada: no insiste con lo mismo'],
   nearFriendly: ['Casi fuego amigo', 'castiga pasar muy cerca de un aliado (etiqueta)', 'respetuosa con las líneas de sus compañeros'],
   slapCaress: ['Bofetada/caricia', 'cuánto pesa tu bofetada o caricia sobre una decisión', 'obediente: aprende de tus reacciones'],
+  impossibleMove: ['Movimiento imposible', 'castiga pedir un sitio al que no puede ir (más de 2 u, fuera del mapa, en terreno, pegado a otro soldado o tras un muro): pierde el movimiento', 'cuidadosa: conoce su alcance y el mapa antes de moverse'],
 };
 const REWARD_TERMS_CAT = REWARD_TERMS.map((key) => ({ key, name: REWARD_META[key][0], type: 'number', min: -5, max: 5, step: 0.1, default: DEFAULT_REWARD[key], level: ['kill', 'die', 'win', 'survive'].includes(key) ? L.A : L.B, explain: REWARD_META[key][1], personality: REWARD_META[key][2] }));
 const LEARN_META = {

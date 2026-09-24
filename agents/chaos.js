@@ -42,10 +42,11 @@ export function create({ temperature = 0 } = {}) {
       }
       return withVoice(best(ctx, avoidRepeats(cands, history, rng), { topN: 6 }), ctx, SAY, 0.8, rng);
     },
-    // esquiva caótica: uno de los 9 al azar (spec/01 §5)
+    // esquiva caótica: uno de los destinos posibles al azar, en una tirada (spec/01 §5, spec/10 §5)
     chooseMove({ soldiers, soldier, moveOptions, rng = Math.random }) {
       if (!soldiers.some((s) => s.alive && s.team !== soldier.team)) return 'stay';
-      const o = moveOptions[Math.floor(rng() * 9)];
+      const possible = moveOptions.filter((m) => !m.impossible);
+      const o = possible[Math.floor(rng() * possible.length)];
       return o.stay ? 'stay' : { x: o.to.x, y: o.to.y };
     },
   };

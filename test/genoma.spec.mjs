@@ -20,7 +20,7 @@ const codes = (g, o) => validate(g, o).errors.map((e) => e.code);
 
 check('defaults decididos (ronda 2, 7, spec/02 §2, spec/03 §5, spec/04 §1–2) fijados', () => {
   assert.deepEqual(DEFAULT_TRAITS, { temperature: 1.0, pulse: 0.1, teamSpirit: 0.5, character: 'frio' });
-  assert.deepEqual(DEFAULT_REWARD, { kill: 1, die: -1, friendlyFire: -1.5, graze: 0.1, win: 2, lose: 0, survive: 0, cover: 0, repeatExpr: 0, nearFriendly: 0, slapCaress: 1, normalize: true, grazeRadius: 2.0, milestones: true });
+  assert.deepEqual(DEFAULT_REWARD, { kill: 1, die: -1, friendlyFire: -1.5, graze: 0.1, win: 2, lose: 0, survive: 0, cover: 0, repeatExpr: 0, nearFriendly: 0, slapCaress: 1, impossibleMove: -0.3, normalize: true, grazeRadius: 2.0, milestones: true }); // impossibleMove: P1b, OK del usuario (spec/10 §6)
   assert.deepEqual(DEFAULT_LEARNING, {
     method: 'gradient',
     gradient: { lr: 0.003, gamma: 0.95, entropy: 0.01, clipNorm: 5, batchGames: 4, bpttSteps: 8, baseline: 'value', optimizer: 'adam', adjustLearn: true },

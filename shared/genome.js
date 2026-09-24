@@ -40,10 +40,10 @@ export const DEFAULT_IMAGINATION = {
 
 export const DEFAULT_REWARD = {
   kill: 1, die: -1, friendlyFire: -1.5, graze: 0.1, win: 2, lose: 0, survive: 0,
-  cover: 0, repeatExpr: 0, nearFriendly: 0, slapCaress: 1,
+  cover: 0, repeatExpr: 0, nearFriendly: 0, slapCaress: 1, impossibleMove: -0.3,
   normalize: true, grazeRadius: 2.0, milestones: true,
 };
-export const REWARD_TERMS = ['kill', 'die', 'friendlyFire', 'graze', 'win', 'lose', 'survive', 'cover', 'repeatExpr', 'nearFriendly', 'slapCaress'];
+export const REWARD_TERMS = ['kill', 'die', 'friendlyFire', 'graze', 'win', 'lose', 'survive', 'cover', 'repeatExpr', 'nearFriendly', 'slapCaress', 'impossibleMove'];
 
 export const DEFAULT_LEARNING = {
   method: 'gradient',
@@ -146,7 +146,7 @@ export const BLOCKS = {
     params: [{ key: 'params', name: 'Parámetros que ajusta', type: 'int', min: 1, max: 3, step: 1, default: 3, level: L.B, explain: 'Cuántos parámetros del candidato toca (1 = solo el primero).', example: 'Con 1 solo ajusta la pendiente; con 3, también curvatura/periodo.' }] },
   'foot.move': { type: 'foot.move', name: 'Moverse', icon: '🦶', group: 'feet', level: L.A, streams: { in: ['move'], out: 'move' },
     explain: 'Puntúa los 9 destinos y, si quieres, afina el elegido con un desplazamiento pequeño. Sin este bloque, la red se queda quieta.', example: 'Destino "tras el muro" puntuación 3 → casi siempre se esconde.',
-    params: [{ key: 'adjust', name: 'Afinar destino', type: 'bool', default: true, level: L.B, explain: 'Además de elegir uno de los 9, empuja el punto hasta 1.5 u (y se vuelve a deslizar).', example: 'Elige "arriba" y lo afina un poco a la derecha para quedar justo tras la esquina.' }] },
+    params: [{ key: 'adjust', name: 'Afinar destino', type: 'bool', default: true, level: L.B, explain: 'Además de elegir uno de los 9, empuja el punto hasta 1.5 u. Si el punto final es imposible (a más de 2 u, fuera del mapa, en terreno, pegado a otro soldado o tras un muro), pierde el movimiento y cuenta el castigo "Movimiento imposible".', example: 'Elige "arriba" y lo afina un poco a la derecha para quedar justo tras la esquina.' }] },
   'hand.value': { type: 'hand.value', name: 'Corazonada', icon: '💓', group: 'hands', level: L.B, streams: { in: ['ctx'], out: 'ctx' }, params: [],
     explain: 'Cuánto cree que va a ganar desde aquí (un número). Sirve de referencia al aprendizaje y es la fuente de esperanza y miedo.', example: 'Corazonada 0.8 = "esto lo tengo"; −0.6 = "mal asunto".' },
 };

@@ -1,6 +1,6 @@
 // Percepción (spec/03): marco local del soldado, 🎲 Imaginación, ajuste, los 8 ojos, destinos.
 // Puro: sin I/O. Toda aleatoriedad viene del `rng` recibido.
-import { PLANE, HIT_RADIUS, MAX_SHOTS, STALL_SHOTS, BODY, MOVE_RADIUS, MOVE_DIRS } from './constants.js';
+import { PLANE, HIT_RADIUS, MAX_SHOTS, STALL_SHOTS, BODY, MOVE_OPTION_RADIUS, MOVE_DIRS } from './constants.js';
 import { tryCompile } from './parser.js';
 import { simulateShot } from './solver.js';
 import { slideMove, los, isSolid } from './geometry.js';
@@ -245,24 +245,24 @@ export function moveDestinations(state, soldier) {
   const d0 = e1 ? dist(from, e1) : 0;
   const out = [];
   for (let i = 0; i <= MOVE_DIRS; i++) {
-    let to, slid;
-    if (i === 0) { to = { ...from }; slid = false; }
-    else {
+    // el punto pedido (a 1,5 u, spec/10 §3) y si es imposible; los rasgos, donde acabaría de verdad (en `from` si lo es)
+    let to = { ...from }, why = null;
+    if (i > 0) {
       const th = (i - 1) * (2 * Math.PI / MOVE_DIRS);
-      const reqL = { x: lc.me.x + MOVE_RADIUS * Math.cos(th), y: lc.me.y + MOVE_RADIUS * Math.sin(th) };
-      const r = slideMove({ from, requested: toWorld(reqL, lc.team), soldiers: state.soldiers, obstacles: state.obstacles, bites: state.bites || [], selfId: soldier.id });
-      to = r.to; slid = r.slid;
+      to = toWorld({ x: lc.me.x + MOVE_OPTION_RADIUS * Math.cos(th), y: lc.me.y + MOVE_OPTION_RADIUS * Math.sin(th) }, lc.team);
+      why = slideMove({ from, requested: to, soldiers: state.soldiers, obstacles: state.obstacles, bites: state.bites || [], selfId: soldier.id }).why;
     }
+    const at = why ? from : to;
     let cover = 0, distEnemy = null, nearest = null;
     const terrain = terrainOfState(state);
-    for (const e of enemiesW) { const d = dist(to, e); if (distEnemy === null || d < distEnemy) { distEnemy = d; nearest = e; } if (los(to, e, terrain)) cover++; }
-    const seen = nearest ? los(to, nearest, terrain) : false;
+    for (const e of enemiesW) { const d = dist(at, e); if (distEnemy === null || d < distEnemy) { distEnemy = d; nearest = e; } if (los(at, e, terrain)) cover++; }
+    const seen = nearest ? los(at, nearest, terrain) : false;
     const tl = toLocal(to, lc.team);
-    const allyD = lc.allies.length ? Math.min(...lc.allies.map((a) => dist(to, a))) : null;
-    const adjacent = isSolid(to, terrain, BODY + 1);
-    const feat = Float64Array.from([(tl.x - lc.me.x) / 2, (tl.y - lc.me.y) / 2, i === 0 ? 1 : 0, slid ? 1 : 0, cover / 4,
-      e1 ? (dist(to, e1) - d0) / 2 : 0, allyD === null ? 1 : Math.min(1, allyD / 10), e1 ? (los(to, e1, terrain) ? 1 : 0) : 0, adjacent ? 1 : 0]);
-    out.push({ i, to, stay: i === 0, slid, cover, distEnemy, los: seen, feat });
+    const allyD = lc.allies.length ? Math.min(...lc.allies.map((a) => dist(at, a))) : null;
+    const adjacent = isSolid(at, terrain, BODY + 1);
+    const feat = Float64Array.from([(tl.x - lc.me.x) / 2, (tl.y - lc.me.y) / 2, i === 0 ? 1 : 0, why ? 1 : 0, cover / 4,
+      e1 ? (dist(at, e1) - d0) / 2 : 0, allyD === null ? 1 : Math.min(1, allyD / 10), e1 ? (los(at, e1, terrain) ? 1 : 0) : 0, adjacent ? 1 : 0]);
+    out.push({ i, to, stay: i === 0, impossible: !!why, why, cover, distEnemy, los: seen, feat });
   }
   return out;
 }
@@ -458,7 +458,7 @@ export function eyeLayout(block) {
     case 'eye.mates': push('compañeros vivos', 'compañeros: media x', 'compañeros: media y', 'compañero más cercano', 'compañero más lejano', 'compañeros con línea de tiro', 'compañeros que mataron', 'compañeros con fuego amigo', 'compañeros: distancia mínima del último tiro', 'compañeros que se quedaron quietos', 'compañeros muertos', 'hay compañeros'); break;
     case 'eye.candidates': push('familia recta', 'familia parábola', 'familia seno', 'familia EDO', 'familia artillería', 'familia salvaje', 'parámetro 1', 'parámetro 2', 'parámetro 3', 'error al enemigo 1', 'error al enemigo 2', 'es una EDO'); break;
     case 'eye.simulator': push('enemigos que mata', 'aliados que mata', 'choca con muro', 'choca con borde', 'otro final', 'distancia mínima al enemigo', 'x final', 'y final', 'longitud del tiro', 'mata al enemigo 1'); break;
-    case 'eye.moves': push('desplazamiento x', 'desplazamiento y', 'es quedarse', 'deslizado', 'enemigos que me verían', 'me alejo del enemigo 1', 'distancia al aliado más cercano', 'línea de tiro al enemigo 1', 'pegado a un muro'); break;
+    case 'eye.moves': push('desplazamiento x', 'desplazamiento y', 'es quedarse', 'imposible', 'enemigos que me verían', 'me alejo del enemigo 1', 'distancia al aliado más cercano', 'línea de tiro al enemigo 1', 'pegado a un muro'); break;
     case 'eye.map': {
       const Wc = Math.round(50 / p.cell), Hc = Math.round(30 / p.cell);
       const chName = { obstacles: 'muros', enemies: 'enemigos', allies: 'aliados', self: 'yo', trails: 'estelas' };

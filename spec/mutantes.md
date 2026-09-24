@@ -588,3 +588,35 @@ Lo que no genera mutantes (llamadas sin operadores) lo prueba `mundos-b` igual: 
 (`pushLabEvent`), `lastPlayedAt` que pasa a ahora y lo que no pasa de un mundo a otro (entrenos, duelos). **Hueco
 pequeño anotado**: `resetTrainerSeq` (en el mundo nuevo, los ids de entreno siguen detrás de los guardados en él) no
 tiene test propio.
+
+## Auditoría s3, tanda B: hilos (2026-09-24)
+Líneas que tocó 281c60b ("hilos para todo"), contra `trono` + `hilos` (y `arreglos-almacen` para `store.js`), en serie y
+con la máquina tranquila (los tiempos de `hilos` no se falsean).
+
+| fichero:líneas | cazados | lo que queda |
+|---|---|---|
+| `evo/threads.js` entero | 5/6 | 33 `return → null` en `useThreads`: **equivalente** (nadie usa lo que devuelve) |
+| `evo/worker.js` (cambiadas) | 7/8 | 20 `&&`→`\|\|` en el tipo `bulletin`: **equivalente** (el grupo solo manda `play`, `duel`, `pre` y `bulletin`) |
+| `evo/duel.js` (cambiadas) | 1/2 | 85 `out.packed \|\| null` → `&&`: **equivalente** en resultado (se vuelve a empaquetar igual; solo cuesta tiempo) |
+| `evo/children.js` (cambiadas) | 1/5 | 46, valores por defecto `games = 4`, `seed = 0`: **equivalentes** (los dos que llaman pasan siempre los dos) |
+| `evo/exam.js` (cambiadas) | 1/1 | — |
+| `evo/store.js` (`packGame`, `saveGame`) | 9/9 | — |
+| `evo/train.js:499–501` | 1/8 | 500 (×5, grupo propio o compartido con varios hilos): **equivalentes** (mismo resultado bit a bit). **501 (×2): HUECO REAL** — si el entreno turbo de 1 hilo volviera al hilo principal, `hilos.spec` no lo nota (comprobado a mano): con la semilla 71 sus 4 partidas duran menos de 500 ms (una partida con las redes lentas va de 248 a 1 383 ms según la semilla). Pendiente: un test con partidas largas y la premisa medida en el propio test |
+| `server/server.js:15–17` (tamaño del grupo) | 0/10 | **equivalentes** (el tamaño del grupo no cambia resultados; en esta máquina, 24 núcleos, siempre sale 4) |
+| `evo/train.js` A1/H5 (repetición; solo contra `receta-extra` y `receta-extra-b`) | 20/36 | **equivalentes en la práctica** (10): desfases de 1 ms del reloj (549, 550, 699 `>=`/`60000→60001`), el intervalo de 50 ms de la pausa (756), el `if` de la pausa (754), el avance por defecto `?? 0` (551, siempre hay duración). **Por comprobar contra todos sus tests** (`receta`, `aprendizaje*`, `entrenador*`), que esta tanda no usó (6): estado inicial de Adam `t`/`mean` (103, 293) y "el examen de después solo se salta si se para" (575 `&&`→`\|\|`) |
+
+## P1b — moverse solo donde se puede (2026-09-24)
+Contra `moverse` (congelado antes del código) y los congelados que cambiaron con OK del usuario (`geometry`, `motor`,
+`moves`, `percepcion`, `terreno-extra`, `huecos-s3`, `politica`, `arreglos-motor`, `aprendizaje-extra`, `genoma`); lo que
+sobrevivió lo cubre `moverse-b` (escrito después, congelado).
+
+| fichero:líneas | cazados | lo que queda |
+|---|---|---|
+| `shared/geometry.js:40–63` (`moveProblem`, `slideMove`) | 37/38 | 43 `>`→`>=` junto al tope de 2 u + 1e-9: **equivalente** (solo cambia en la igualdad exacta) |
+| `agents/lib.js:205–242` (destinos y reglas) | 39/42 | 224 `<`→`<=` (empates de distancia: equivalente, como percept 258); 234 `stayIfCovered` por defecto (equivalente: Sniper y Artillery lo pasan); 236 `a.i − b.i` → `+` (**equivalente**: `sort` es estable y los destinos llegan en orden de índice) |
+| `agents/chaos.js:45–49` | 3/4 | 47 `return 'stay'` → `null` sin enemigos: **equivalente** (la sala toma `null` como quedarse) |
+| `shared/percept.js:248–265` | 76/78 | 258 (empates) y 259 (`los` sin enemigos): **equivalentes**, como en la tanda A |
+| `shared/policy.js:128–142` | 30/32 | 134 recorte del ajuste a ±3 (×2): **hueco anterior a P1b** (hace falta un ajuste de más de 3σ); anotado |
+| `server/rooms.js:17–18, 519–541` | 19/22 | 520 y 522 (rama del soldado caído: `stayed` del evento y `ok` devuelto): **huecos anteriores**, ya anotados en R1 (474); 537 `&&`→`\|\|`: equivalente (el último tiro del registro es siempre el del que se mueve) |
+| `shared/reward.js:54–55` | 1/1 | — |
+| `shared/genome.js:43, 46` | 10/10 | — |

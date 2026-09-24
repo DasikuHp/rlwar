@@ -9,8 +9,7 @@
 | `BODY` | 0.5 | cuerpo del soldado: distancia mínima a obstáculos y bordes del plano 🧭 |
 | `MIN_SEPARATION` | 1.0 | distancia mínima entre centros de dos soldados vivos ("sin apilarse") 🧭 |
 | `MOVE_TIME` | 8000 (FAST: 400) ms | margen para que un humano (o agente por API) elija destino tras ver el tiro 🧭 |
-| `SLIDE_R_STEP` | 0.05 | paso radial de la rejilla polar del deslizamiento |
-| `SLIDE_DEG_STEP` | 5 | paso angular (grados) de la rejilla polar |
+| `MOVE_OPTION_RADIUS` | 1.5 | distancia de las 8 direcciones de los destinos candidatos (P1b, spec/10 §3) |
 | `MOVE_DIRS` | 8 | direcciones de los destinos candidatos (0°, 45°, … 315°, 0° = +x) |
 
 Por qué `BODY` 0.5 y no 1.5 como al nacer: esconderse **pegado** a un muro es la gracia del
@@ -38,7 +37,9 @@ turn.stage = 'shoot'  ──fire()──▶  resultado del tiro  ──▶  movi
    mueve nada (no era su turno).
 
 ## 3. Geometría del movimiento (`shared/geometry.js`, pura)
-`slideMove({from, requested, soldiers, obstacles, selfId, plane})` → `{to, slid, stayed, reason}`.
+`slideMove({from, requested, soldiers, obstacles, bites, selfId, plane})` → `{to, stayed, reason, why}`. **Desde P1b
+(2026-09-24) ya no desliza ni recorta**: un sitio imposible hace perder el movimiento. El contrato completo está en
+**spec/10-moverse.md §1**; aquí quedan las 5 reglas de validez, que no cambian.
 
 Un punto `P` es **válido** para el soldado `S` (en `from`) si cumple TODO:
 1. `dist(P, from) ≤ MOVE_RADIUS + 1e-9`.
@@ -49,30 +50,18 @@ Un punto `P` es **válido** para el soldado `S` (en `from`) si cumple TODO:
 5. El segmento `from → P` no atraviesa ningún rect ampliado: se muestrea en `t = 0.1, 0.2 … 1.0`
    (fracción del segmento) y ningún punto cae dentro (no se puede "atravesar" un muro de un salto).
 
-Algoritmo (determinista):
-- `requested === 'stay' | null | undefined` → `{to: from, slid:false, stayed:true}`.
-- `T = requested`; si `dist(T, from) > MOVE_RADIUS`, `T` se recorta al círculo (misma dirección).
-- Si `T` es válido → `{to: T, slid:false, stayed:false}`.
-- Si no: se recorren los puntos `from + r·(cos θ, sin θ)` con `r = 0.05, 0.10 … 2.00` y
-  `θ = 0°, 5° … 355°`; entre los válidos se elige el de **menor distancia a `T`**; empates → menor
-  `r`; empates → menor `θ`. Resultado `{to, slid:true, stayed:false, reason:'slide'}`.
-- Si ningún punto es válido → `{to: from, slid:true, stayed:true, reason:'blocked'}`.
-- Entradas no numéricas (`NaN`, cadenas, `Infinity`) → se tratan como `'stay'` con
-  `reason:'invalid'` (nunca lanza).
-
-Coste: 40 × 72 = 2 880 puntos × (obstáculos + soldados) comprobaciones ≈ < 1 ms.
-
-Destinos candidatos para agentes y redes (`moveOptions(ctx)` en `agents/lib.js`, sobre `slideMove`):
-9 entradas, en este orden: `quedarse`, y luego las 8 direcciones `θ = 0°, 45°, 90° … 315°` a
-`MOVE_RADIUS`, cada una **ya deslizada**. Cada destino lleva rasgos (spec/03 §4).
+Algoritmo: spec/10 §1 (la primera regla que falla, en este orden, es el `why`: `far`, `edge`, `terrain`, `soldier`,
+`wall`). Destinos candidatos para agentes y redes: spec/10 §3 (quedarse y 8 direcciones a 1,5 u, con `impossible` y
+`why`).
 
 ## 4. `Room.move(playerId, requested)` — único validador del movimiento
 - Errores (`{error}`): partida no en curso · `turn` nulo o de otro jugador · `turn.stage !== 'move'`
   (para humanos/API) · soldado muerto.
 - Llama a `slideMove` y aplica `to` al soldado; registra
-  `lastMove = {playerId, soldierId, from, to, requested, slid, stayed, reason, ts}` (`from`/`to`/`requested`
+  `lastMove = {playerId, soldierId, from, to, requested, stayed, reason, why, ts}` (`from`/`to`/`requested`
   son `{x, y}`; `requested` es `null` si fue `stay`, vencimiento o entrada inválida); `log()` una
-  línea: `🦶 <nombre> se mueve a (x, y)` / `🦶 <nombre> se queda quieto` / `↪️ … (deslizado)`.
+  línea: `🦶 <nombre> se mueve a (x, y)` / `🦶 <nombre> se queda quieto` / `🚫 <nombre> pidió un sitio imposible (<motivo>)
+  y pierde el movimiento` (spec/10 §2).
 - `fire()` con `move` en el cuerpo llama a este mismo método (con `stage` interno `'move'` durante la
   llamada). No hay otro camino para cambiar `soldier.x/y` durante la partida (salvo `reposition`).
 
@@ -91,7 +80,8 @@ Destinos candidatos para agentes y redes (`moveOptions(ctx)` en `agents/lib.js`,
   | Chaos | `options[Math.floor(rng() * 9)]`. |
   Sin enemigos vivos: todos se quedan. `rng` es la función `() → [0,1)` de `shared/rng.js`
   (`makeRng(seed)`, con `rng.int(n)`, `rng.pick(arr)`, `rng.gauss()`, `rng.seed`); por defecto
-  `Math.random`. `moveOptions(ctx)` devuelve `[{i, to:{x,y}, stay, slid, cover, distEnemy, los}]`
+  `Math.random`. `moveOptions(ctx)` devuelve `[{i, to:{x,y}, stay, impossible, why, cover, distEnemy, los}]` (spec/10 §3;
+  los heurísticos solo eligen entre los posibles, spec/10 §5)
   (`cover` = enemigos vivos con línea de tiro al destino; `distEnemy` = distancia desde el destino
   al enemigo vivo más cercano; `los` = línea de tiro desde el destino a ese enemigo).
   "Línea de tiro" = segmento recto entre dos puntos sin cruzar obstáculos (muestreo cada 0.25 u).
@@ -148,11 +138,10 @@ los grados tal cual (30° salía a −81°; 35°, a 25°) y el Simulador, que s�
 `test/angulo.spec.mjs`.
 
 ## 8. Tests de F1 (`test/motor.spec.mjs`, escenas fijas)
-- `slideMove`: dentro del radio y válido → sin deslizar · fuera del radio → recortado al círculo ·
-  dentro de un obstáculo ampliado → punto válido más cercano (distancia comprobada contra búsqueda
-  exhaustiva fina) · pegado al borde del plano → `BODY` · a 0.9 u de otro soldado → ≥ 1.0 ·
-  a través de un muro fino → no atraviesa · `NaN` → quieto · determinismo (misma entrada, misma
-  salida).
+- `slideMove` (desde P1b, spec/10): dentro del radio y válido → allí (`ok`) · fuera del radio → se queda (`far`) ·
+  dentro de un obstáculo ampliado → se queda (`terrain`) · pegado al borde del plano → `BODY` · a 0.9 u de otro
+  soldado → se queda (`soldier`) · a través de un muro fino → no atraviesa · `NaN` → quieto (`invalid`) ·
+  determinismo (misma entrada, misma salida). El resto, en `test/moverse.spec.mjs`.
 - `Room`: `fire` con `move` aplica y registra · sin `move` → `stage:'move'` con `deadline` ·
   `POST /move` de otro jugador → error · vencimiento → quieto (`FAST`) · `move` no cambia `x/y` por
   ningún otro camino (comprobación de que `soldier.x/y` solo cambian en `move`/`reposition`).
@@ -176,7 +165,7 @@ Aprobados por el usuario ("arréglalo tú"). Completan §2–§7 sin cambiar lo 
 
 ### 9.2 El turno nunca se queda abierto
 - Si al resolver la etapa `move` el soldado del turno ya no está vivo (por cualquier causa), `move()` **cierra el
-  turno sin mover**: `lastMove = {…, to: from, stayed: true, slid: false, reason: 'dead'}`, evento `move` y
+  turno sin mover**: `lastMove = {…, to: from, stayed: true, reason: 'dead', why: null}`, evento `move` y
   `nextTurn` como siempre. Vale para agentes en proceso, humanos, agentes por API y vencimientos. Sin error.
 - Invariante que prueban los tests: una partida sin pantalla solo termina "por límite" (`result.byLimit`) si ha
   llegado a `MAX_SHOTS` disparos.
@@ -198,8 +187,8 @@ de mapa" y "como el original: atraviesa". Escala del original: el plano de 50 u 
   Un punto es **sólido** si está dentro de algún obstáculo y fuera de todos los bocados.
 - Una sola pregunta de colisión, `isSolid(p, terrain, margin)` en `shared/geometry.js` (`terrain = {obstacles,
   bites}`): con margen `m`, el obstáculo se agranda `m` y cada bocado se encoge `m` (círculo: `d ≤ r + m`; rectángulo:
-  el de siempre agrandado `m`; bocado: `d < r − m`). La usan el trazado (con `OBSTACLE_MARGIN`), el movimiento y el
-  deslizamiento (con `BODY`), la línea de visión (sin margen), la percepción y la colocación de soldados.
+  el de siempre agrandado `m`; bocado: `d < r − m`). La usan el trazado (con `OBSTACLE_MARGIN`), el movimiento (con
+  `BODY`), la línea de visión (sin margen), la percepción y la colocación de soldados.
 - Explosión: todo tiro acaba en un punto (el del choque, el del borde o el último válido) y ahí **arranca un bocado**
   de radio `BITE_RADIUS = 0,78 u` (12 px del original). No mata a nadie por estar cerca: las bajas son las del
   recorrido (§10.3). Solo se guarda el bocado si toca algún obstáculo: la distancia del punto final al obstáculo es
@@ -272,6 +261,8 @@ de mapa" y "como el original: atraviesa". Escala del original: el plano de 50 u 
 - Las redes guardadas siguen siendo válidas (mismas entradas), pero vieron otro terreno: conviene reentrenarlas.
 
 ### 10.5b Rendimiento (auditoría de P1, 2026-09-24)
+> Histórico: desde P1b (spec/10) no hay deslizamiento ni rejilla; queda el atajo de la caja del círculo.
+
 Con 8–22 círculos, cada deslizamiento probaba los 2 880 puntos de la rejilla polar (§3) contra todos los círculos y una
 partida sin pantalla pasó de ~35 ms a ~1 s (el servidor se quedaba sin responder hasta 5,7 s durante un entreno turbo).
 Dos atajos **exactos** (mismo resultado): la rejilla descarta un punto que no mejora la distancia antes de validarlo, y
@@ -286,6 +277,6 @@ antes porque las partidas tienen ~14 tiros en vez de ~5 (el terreno tapa más), 
   tras muchos fallos, la moviola puede rehacer el terreno con los `bite` de los tiros, la percepción con el mismo tamaño
   y el Simulador con cuentas.
 - `test/terreno-extra.spec.mjs` (auditoría de P1): cobertura, ajuste fino del movimiento y dibujo de candidatos con
-  bocados; distancia mínima del Simulador hasta el primer impacto; Compañeros con cuentas; deslizar = la rejilla
-  completa (guarda de los atajos de §10.5b) y un tope grueso de tiempo; la clave de la capa dibujada del terreno.
+  bocados; distancia mínima del Simulador hasta el primer impacto; Compañeros con cuentas; un tope grueso de tiempo
+  (desde P1b, 1 000 movimientos imposibles); la clave de la capa dibujada del terreno.
 - `test/terreno-api.spec.mjs`: "¿qué pasaría si…?" por la API con círculos y bocados (escrito tras el código).

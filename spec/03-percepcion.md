@@ -40,7 +40,7 @@ vivos**; "aliados" excluye al propio soldado.
 | 👥 `eye.mates` [12] | agregados sobre aliados vivos | nº/3, media `dx/50`, media `dy/30`, min `dist/58`, max `dist/58`, fracción con LOS a algún enemigo, fracción cuyo último tiro mató, fracción con fuego amigo, media `minDist/10` del último tiro, fracción que se quedó quieta, aliados muertos/3, presente |
 | 🎯 `eye.candidates` [N×12] | por candidato | familia one-hot(6), `p1n`, `p2n`, `p3n`, error analítico en la x del enemigo 1 (`tanh(Δy/3)`, 0 si EDO), ídem enemigo 2, es-EDO |
 | 🔮 `eye.simulator` [N×10] | por candidato (barrido grueso `ds 0.05`, o fino si `fine`) | enemigos alcanzados (0–4), aliados alcanzados (0–4), obstacle, wall, otro fin (estos tres solo si no alcanza a nadie), `minDist/10` (cap 1), `endX'/25`, `endY/15`, `puntos/200` (cap 1) —los cuatro hasta el primer impacto—, alcanza al enemigo 1 |
-| 🦶 `eye.moves` [9×9] | por destino (§4) | `dx'/2`, `dy/2`, es-quedarse, deslizado, enemigos con LOS hacia él/4, Δ distancia al enemigo 1 (`/2`, + = más lejos), distancia al aliado más cercano/10 (cap 1), LOS al enemigo 1 desde ahí, pegado a obstáculo (a < 1 u de un rect ampliado) |
+| 🦶 `eye.moves` [9×9] | por destino (§4) | `dx'/2`, `dy/2`, es-quedarse, imposible (P1b; antes "deslizado"), enemigos con LOS hacia él/4, Δ distancia al enemigo 1 (`/2`, + = más lejos), distancia al aliado más cercano/10 (cap 1), LOS al enemigo 1 desde ahí, pegado a obstáculo (a < 1 u de un rect ampliado) |
 | 🗺 `eye.map` [C×H×W] | `W = 50/cell`, `H = 30/cell`; índice `c·H·W + fila·W + col`; fila 0 = `yMin`, col 0 = `x' = −25` | canal `obstacles`: fracción de celda cubierta (rejilla 4×4); `enemies`/`allies`/`self`: 1 en la celda del soldado vivo; `trails`: celdas cruzadas por los 2 últimos disparos de cada equipo (último 1, anterior 0.5) |
 
 Error analítico: para `function`, `Δy = f(ex') − f(sx') + sy − ey` (la curva pasa por el soldado).
@@ -57,10 +57,11 @@ Error analítico: para `function`, `Δy = f(ex') − f(sx') + sy − ey` (la cur
 - Coste objetivo: < 1 ms sin simulador; simulador: ≈ 0.11 ms por candidato (medido) → N=24 ≈ 2.6 ms.
 
 ## 4. Destinos de movimiento
-Los 9 de spec/01 §3 (`quedarse`, luego 0°, 45° … 315° en el marco local, deslizados). `foot.move`
+Los 9 de spec/10 §3 (`quedarse`, luego 0°, 45° … 315° en el marco local, a 1,5 u, con la marca "imposible"; los
+rasgos, donde acabaría de verdad). `foot.move`
 puntúa los 9 (`softmax/temperature`) y, si `adjust`, la fila elegida da `μ[2]`: desplazamiento
-`(0.5·a₁, 0.5·a₂)` u con `a ~ N(μ, pulse²)` recortado a [−3, 3]; el punto final se **vuelve a
-deslizar** (siempre válido).
+`(0.5·a₁, 0.5·a₂)` u con `a ~ N(μ, pulse²)` recortado a [−3, 3]; el punto final se **pide tal cual** (spec/10 §4): si
+es imposible, pierde el movimiento y cuenta el castigo `impossibleMove`.
 
 ## 5. 🎲 Imaginación (`genome.imagination`)
 ```json
@@ -171,7 +172,7 @@ applyAdjust(cand, sample) → cand'                    // §6 (recorte de artill
 candidateFeatures(cand, ctx) → Float64Array(12)      // eye.candidates
 simulateCandidate(cand, ctx, fine) → {type, end, minDist, endX, endY, points, victimId, hitIds, enemiesHit, alliesHit, polyline}
 simulatorFeatures(sim, ctx) → Float64Array(10)
-moveDestinations(state, soldier) → [{i, to, stay, slid, cover, distEnemy, los, feat: Float64Array(9)}]
+moveDestinations(state, soldier) → [{i, to, stay, impossible, why, cover, distEnemy, los, feat: Float64Array(9)}]
 observe(state, soldierId, genome, { phase, cands, moves, sims }) → obs (spec/02 §5) + {names}
 eyeLayout(block) → [{index, name}]                   // nombres en español de cada índice (catálogo)
 ```
@@ -217,8 +218,8 @@ attribute(net, obs, memory, chosen, phase) → [{blockId, name, drop, share}]
 - Ajuste: `a_i = clip(μ_i + pulse·gauss(rng), −3, 3)` (se consume **un** `rng.gauss()` por
   parámetro, en orden); `logp.adjust = Σ_i ln N(a_i; μ_i, pulse²)` con la densidad sin recortar.
   Sin `hand.adjust`: `adjust = null`, `logp.adjust = null`.
-- Movimiento: igual sobre 9 destinos; con ajuste, desplazamiento `(0.5·a₁, 0.5·a₂)` y nuevo
-  `slideMove`; el registro guarda `moveAdjust` (spec/03 §7). Sin `foot.move`: `move = 'stay'`.
+- Movimiento: igual sobre 9 destinos; con ajuste, desplazamiento `(0.5·a₁, 0.5·a₂)` pedido tal cual; el registro guarda
+  `moveAdjust` con lo que pasará según `slideMove` (`to`, `reason`, `why`; spec/10 §4). Sin `foot.move`: `move = 'stay'`.
 - Sin `hand.value`: `value = null`. Atribución solo si `attribution:true`.
 - Orden de consumo del `rng` en `decideShot`: 1) `sampleIndex` 2) los `gauss` del ajuste.
   La Imaginación usa su propio `rng` derivado del estado (`shots` y la posición del soldado en

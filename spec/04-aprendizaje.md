@@ -37,6 +37,7 @@ Cada clave lleva `explain` + ejemplo en el catálogo (nivel aprendiz: `method`; 
 | `repeatExpr` (etiqueta) | `expr` igual a alguno de mis 10 últimos | mi `shoot` (negativo por convención) |
 | `nearFriendly` (etiqueta) | sin fuego amigo, `minDist` a un aliado ≤ 1.5 u | mi `shoot` |
 | `slapCaress` | el usuario pulsa bofetada (−) o caricia (+) sobre una decisión | esa decisión (`amount·slapCaress`) |
+| `impossibleMove` (P1b, −0,3) | pidió un sitio imposible y perdió el movimiento (evento `move` con `reason: 'blocked'`) | mi `move` (spec/10 §6) |
 Rangos: −5..5 cada uno. Cada deslizador explica la personalidad que provoca (catálogo `rewardTerms`),
 p. ej. `survive` alto → "cobarde: se esconde tras los muros y dispara poco".
 
@@ -156,7 +157,7 @@ Nunca entra en `stats.wins/kills` del trono; sí en `stats.games`.
 `decision` `{phase, chosen, chosenMove}` (la decisión completa vive en `room.decisions`; el evento
 recibe el mismo `id`, que se escribe en `decision.eventId`) · `shot` `{mode, expr, family, params,
 angle, result:{type, soldierId}, minDist, minAllyDist, decisionEventId}` · `move` `{from, to,
-requested, slid, stayed, coverBefore, coverAfter, decisionEventId}` · `kill` / `friendlyFire`
+requested, stayed, reason, why, coverBefore, coverAfter, decisionEventId}` · `kill` / `friendlyFire`
 `{victimSoldierId, victimPlayerId, victimName, shotEventId}` (actor = tirador) · `death`
 `{killerSoldierId, killerPlayerId, killerName, shotEventId}` (actor = víctima) · `map.renew`
 `{remaps}` · `win` / `lose` / `draw` `{winner, killsLeft, killsRight, shots, byLimit}` (uno por

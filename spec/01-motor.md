@@ -141,6 +141,12 @@ trayectoria sube (`y` crece) igual que el soldado izquierdo espejado. Los heurí
 (buscan el ángulo por simulación). Conversión de spec/03 §1 para `ode2`: con este arreglo,
 `angle` **no** se invierte al pasar de local a mundo.
 
+**Unidades (auditoría de la sesión 3, 2026-09-24).** `angle` va en **grados** en la API, los agentes, el registro y los
+eventos (−85..85); `simulateShot` lo quiere en **radianes**. Convierten quien llama al solver: la sala (`fire`), los
+heurísticos (`agents/lib.js` `sim`) y el Simulador de la red (`percept.js`). Antes, la sala y los heurísticos le pasaban
+los grados tal cual (30° salía a −81°; 35°, a 25°) y el Simulador, que sí convertía, imaginaba otro tiro. Test:
+`test/angulo.spec.mjs`.
+
 ## 8. Tests de F1 (`test/motor.spec.mjs`, escenas fijas)
 - `slideMove`: dentro del radio y válido → sin deslizar · fuera del radio → recortado al círculo ·
   dentro de un obstáculo ampliado → punto válido más cercano (distancia comprobada contra búsqueda
@@ -196,7 +202,9 @@ de mapa" y "como el original: atraviesa". Escala del original: el plano de 50 u 
   deslizamiento (con `BODY`), la línea de visión (sin margen), la percepción y la colocación de soldados.
 - Explosión: todo tiro acaba en un punto (el del choque, el del borde o el último válido) y ahí **arranca un bocado**
   de radio `BITE_RADIUS = 0,78 u` (12 px del original). No mata a nadie por estar cerca: las bajas son las del
-  recorrido (§10.3). Solo se guarda el bocado si toca algún obstáculo. Los bocados son parte del estado: `snapshot`,
+  recorrido (§10.3). Solo se guarda el bocado si toca algún obstáculo: la distancia del punto final al obstáculo es
+  menor que `BITE_RADIUS` (círculo: `d < r + 0,78`; rectángulo: distancia a su punto más cercano, no a su caja agrandada,
+  que junto a una esquina guardaba bocados que no tocaban nada; auditoría s3). Los bocados son parte del estado: `snapshot`,
   moviola, partidas guardadas, "¿qué pasaría si…?" y percepción los ven.
 - El evento `game.start` lleva los obstáculos del mapa (`map.obstacles`); con los `bite` de cada `shot`, cualquiera
   (la moviola, un agente externo) rehace el terreno de cualquier turno.
@@ -207,8 +215,12 @@ de mapa" y "como el original: atraviesa". Escala del original: el plano de 50 u 
 - Los tres biomas siguen (la memoria de la red los recuerda) y cambian cómo se reparten los círculos: `ruinas` (35 %)
   = la regla del original; `fortaleza` (35 %) = 2 o 3 círculos grandes (r 3,5–4 u) apilados cerca del centro (x −4..4)
   más los de la regla hasta completar; `llanura` (30 %) = 8–10 círculos de r 1–2,5 u.
-- Soldados: cada bando en su mitad (x −23..−6 y 6..23), fuera de todo círculo con 1 u de margen, a 3 u o más entre
-  sí (como ahora). Si en 400 intentos no hay sitio, el hueco libre más cercano a (±20, 0).
+- Soldados: cada bando en su mitad (x −23..−6 y 6..23) y a 2 u o más de los bordes de arriba y de abajo (y −13..13),
+  fuera de todo círculo con 1 u de margen, a 3 u o más entre sí (como ahora). Si en 400 intentos no hay sitio, el hueco
+  libre más cercano a (±20, 0) en una rejilla de 0,5 u de su mitad; si tampoco lo hay, (±20, 0) (no pasa con 8–22
+  círculos de radio ≤ 4: haría falta tapar la mitad entera).
+- Fortaleza: los 2 o 3 círculos grandes salen a partes iguales (la mitad de las fortalezas tiene 3).
+  (Detalles que ya fijaba `terreno-extra-b` y faltaban aquí; auditoría s3.)
 
 ### 10.3 El tiro atraviesa
 - `simulateShot` registra **todos** los soldados vivos (menos el que dispara) a `HIT_RADIUS` o menos del recorrido,

@@ -22,7 +22,8 @@ export function sim(ctx, cand, coarse) {
   if (!r.ok) return null;
   const shot = simulateShot({
     mode: cand.mode, f: r.f, start: { x: ctx.soldier.x, y: ctx.soldier.y },
-    angle: cand.angle || 0, soldiers: ctx.soldiers, obstacles: ctx.obstacles, bites: ctx.bites || [],
+    angle: (cand.angle || 0) * Math.PI / 180, // grados, como la sala → radianes (solver)
+    soldiers: ctx.soldiers, obstacles: ctx.obstacles, bites: ctx.bites || [],
     shooterId: ctx.soldier.id, dir: ctx.dir,
     ds: coarse ? COARSE.ds : STEP, maxSteps: coarse ? COARSE.maxSteps : MAX_STEPS,
   });

@@ -380,14 +380,16 @@ export class Room {
 
     const dir = soldier.team === C.TEAMS.LEFT ? 1 : -1;
     const shot = simulateShot({
-      mode, f: r.f, start: { x: soldier.x, y: soldier.y }, dir, angle,
+      mode, f: r.f, start: { x: soldier.x, y: soldier.y }, dir, angle: angle * Math.PI / 180, // grados (API) → radianes (solver)
       soldiers: this.soldiers, obstacles: this.obstacles, bites: this.bites, shooterId: soldier.id,
     });
     // el tiro atraviesa (spec/01 §10.3) y su explosión arranca un bocado si toca terreno (§10.1)
     const hits = shot.result.hits || [];
     const hitIds = new Set(hits.map((h) => h.soldierId));
     const end = { x: shot.result.x, y: shot.result.y }, BR = C.BITE_RADIUS;
-    const touches = this.obstacles.some((o) => (o.kind === 'circle' ? Math.hypot(end.x - o.x, end.y - o.y) < o.r + BR : end.x > o.x - BR && end.x < o.x + o.w + BR && end.y > o.y - BR && end.y < o.y + o.h + BR));
+    // toca = el círculo del bocado se solapa con el obstáculo; en un rectángulo, distancia a su punto más cercano (no a su caja)
+    const touches = this.obstacles.some((o) => (o.kind === 'circle' ? Math.hypot(end.x - o.x, end.y - o.y) < o.r + BR
+      : Math.hypot(end.x - Math.max(o.x, Math.min(end.x, o.x + o.w)), end.y - Math.max(o.y, Math.min(end.y, o.y + o.h))) < BR));
     const bite = touches ? { x: end.x, y: end.y, r: BR } : null;
     if (bite) this.bites.push(bite);
 

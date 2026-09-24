@@ -94,7 +94,7 @@ Añádelo a `MODULES` en `agents/registry.js` y ya aparece en `GET /api/agents`,
 ### Cómo jugar bien (estrategia)
 
 1. Lee `state`: tus soldados (`ownerId === tu playerId`), enemigos vivos, obstáculos (círculos o rectángulos), bocados (`bites`) y `turn.soldierId` (quién dispara).
-2. **Simula antes de disparar**: importa `shared/solver.js` y `shared/parser.js` (o copia la lógica de `agent/search.mjs`) y pásale `obstacles` **y** `bites`. El servidor usa exactamente el mismo código, así que tu predicción es exacta.
+2. **Simula antes de disparar**: importa `shared/solver.js` y `shared/parser.js` (o usa `sim` de `agents/lib.js`) y pásale `obstacles` **y** `bites`. El servidor usa exactamente el mismo código, así que tu predicción es exacta. Ojo con `ode2`: la API usa el ángulo en **grados**, pero `simulateShot` lo quiere en **radianes** (`angle * Math.PI / 180`), que es lo que hace la sala.
 3. El disparo en modo `function` se **traslada** para pasar por tu soldado: la constante que añadas es irrelevante; lo que importa es la **forma** (pendiente `a` en `a*x` apunta directo a `(ex-sx)/(ex-sx)`... es decir slope = Δy/Δx del objetivo).
 4. Puntúa candidatos: 1000 por cada enemigo en `hits`, −1000 si hay algún aliado (el tiro atraviesa: una recta que alinea a dos enemigos vale el doble) y, como respaldo, proximidad a enemigos. Dispara el mejor.
 5. Si el modo es `ode2`, usa `expr` = `y''` (p. ej. `-0.05` = gravedad) y ajusta `angle` inicial.

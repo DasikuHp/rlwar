@@ -3,101 +3,42 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Graphwar Agents ⚔️</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 16 16%27%3E%3Cpath d=%27M1 13 Q7 -3 15 10%27 stroke=%27%234fd1ff%27 stroke-width=%272%27 fill=%27none%27/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/css/style.css">
-<style>
-  .overlay { display: flex; align-items: center; justify-content: center; }
-  .panel { width: 90vw; max-width: 600px; }
-  [hidden] { display: none !important; }
-</style>
+<title>Graphwar · Entrenador de redes</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 13 Q7 -3 15 10' stroke='%233fd0ff' stroke-width='2' fill='none'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/css/lab.css">
+<link rel="stylesheet" href="/css/game.css">
 </head>
-<body>
-  <!-- Pantalla de entrada -->
-  <div id="join" class="overlay">
-    <div class="panel">
-      <h1>GRAPHWAR<span class="accent">.agents</span></h1>
-      <p class="subtitle">Artillería con funciones matemáticas · juega contra humanos o agentes IA</p>
-      <input id="joinName" placeholder="Tu nombre" maxlength="24" value="Jugador">
-      <div class="row">
-        <button id="btnCreate">Crear sala</button>
-        <select id="soldiersPick" title="Soldados por jugador">
-          <option value="2">2 por jugador</option>
-          <option value="3">3 por jugador</option>
-          <option value="4" selected>4 por jugador ⚔️</option>
-        </select>
-      </div>
-      <div class="row" style="margin-top:8px">
-        <input id="joinCode" placeholder="CÓDIGO" maxlength="4" style="text-transform:uppercase">
-        <button id="btnJoin">Unirse</button>
-        <button id="btnSpectate" title="Ver la sala sin jugar">👀</button>
-      </div>
-      <div class="row troops" style="margin-top:8px">
-        <select id="spLeft" title="Tropa del bando izquierdo (cyan)"></select>
-        <span class="vs">vs</span>
-        <select id="spRight" title="Tropa del bando derecho (naranja)"></select>
-        <select id="spSoldiers" title="Soldados por bando">
-          <option value="1">1 por bando</option>
-          <option value="2">2 por bando</option>
-          <option value="3">3 por bando</option>
-          <option value="4" selected>4 por bando</option>
-        </select>
-      </div>
-      <div class="row" style="margin-top:8px">
-        <button id="btnSelfplay">🤖 Ver IA vs IA (self-play)</button>
-      </div>
-      <p class="hint troopsHint">Tú eliges la tropa de cada bando; las posiciones se sortean siempre.</p>
-      <p class="hint"><a class="accent" href="/evo.html">Laboratorio de redes</a>: crea y edita tus propias redes; aparecen solas en el selector de tropas.</p>
-      <div id="lobby" hidden>
-        <p>Código de sala: <b id="roomCode" class="accent"></b> (compártelo)</p>
-        <div class="row" id="lobbyControls">
-          <select id="teamPick"><option value="auto">Equipo: automático</option><option value="left">Izquierdo (cyan)</option><option value="right">Derecho (naranja)</option></select>
-          <button id="btnAddBot">+ CPU</button>
-          <button id="btnStart" class="primary">¡Empezar!</button>
-        </div>
-        <ul id="lobbyPlayers"></ul>
-      </div>
-      <div id="joinError" class="error"></div>
-      <p id="lobbyHint" class="dim" style="font-size:12px"></p>
-      <p class="hint">Sintaxis: y = 0.5*x , y' = -y/3 , y'' = -0.05 (con ángulo). Funciones: sin cos tan sqrt ln log abs exp atan</p>
+<body class="lab game">
+  <!-- portada: fondo animado, título, menú y la constelación de la reina del mundo -->
+  <section class="portada" id="portada" hidden aria-label="Portada">
+    <canvas class="bgfx" id="bgfx" aria-hidden="true"></canvas>
+    <div>
+      <h1 class="p-title">GRAPH<span>WAR</span></h1>
+      <p class="p-sub">Entrenador de redes</p>
+      <nav class="p-menu" id="menu" aria-label="Menú principal"></nav>
     </div>
+    <figure class="p-queen" id="queen" aria-label="La red que reina en este mundo">
+      <canvas id="queenCanvas"></canvas>
+      <figcaption id="queenCaption"></figcaption>
+    </figure>
+    <p class="p-foot">Diseñas redes, las entrenas, crías hijas y miras sus duelos por el trono. Tú no disparas.</p>
+  </section>
+
+  <!-- el juego: 4 etapas -->
+  <div id="game" hidden>
+    <header class="g-top">
+      <a class="g-brand" href="#portada">GRAPHWAR<span>.redes</span></a>
+      <nav class="g-stages" id="stages" aria-label="Etapas"></nav>
+      <div class="g-world"><span class="chip" id="worldChip"></span><button type="button" id="btnSettings" title="Ajustes">⚙ Ajustes</button></div>
+    </header>
+    <div class="g-head" id="stageHead"></div>
+    <main class="g-body" id="view"></main>
   </div>
 
-  <!-- Juego -->
-  <div id="game" hidden>
-    <header>
-      <span class="logo">GRAPHWAR<span class="accent">.agents</span></span>
-      <span id="hdrRoom" class="dim"></span>
-      <div id="turnBox"><span id="turnText"></span><div id="turnBarWrap"><div id="turnBar"></div></div></div>
-      <span id="phaseText" class="dim"></span>
-    </header>
-    <main>
-      <aside id="sideLeft">
-        <h3>Equipos</h3>
-        <ul id="playerList"></ul>
-        <h3>Funciones</h3>
-        <ul id="exprList"></ul>
-      </aside>
-      <div id="canvasWrap"><canvas id="board"></canvas><div id="toast"></div></div>
-      <aside id="sideRight">
-        <h3>Cerebro</h3>
-        <div id="brain" class="brain" aria-live="polite"><p class="dim">Cuando piense una red, aquí verás sus tiros candidatos, lo decidida que estaba y en qué se fijó.</p></div>
-        <h3>Registro</h3>
-        <ul id="chat"></ul>
-        <form id="chatForm"><input id="chatInput" placeholder="Escribe..." autocomplete="off"></form>
-      </aside>
-    </main>
-    <footer>
-      <div id="modeTabs">
-        <button data-mode="function" class="active">y =</button>
-        <button data-mode="ode1">y' =</button>
-        <button data-mode="ode2">y'' =</button>
-      </div>
-      <span id="angleBox" hidden>ángulo <input id="angle" type="range" min="-85" max="85" value="20"><b id="angleVal">20°</b></span>
-      <input id="expr" placeholder="sin(x/5)*3" autocomplete="off" spellcheck="false">
-      <button id="btnFire" class="primary">Disparar ▶</button>
-    </footer>
-  </div>
-<script type="module" src="/js/app.js"></script>
+  <dialog class="g-dlg" id="dlgNew" aria-labelledby="dlgNewT"></dialog>
+  <dialog class="g-dlg" id="dlgLoad" aria-labelledby="dlgLoadT"></dialog>
+  <dialog class="g-dlg" id="dlgSettings" aria-labelledby="dlgSetT"></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/js/game/main.js"></script>
 </body>
 </html>

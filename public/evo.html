@@ -2,26 +2,9 @@
 <html lang="es">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Laboratorio de redes · Graphwar</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M1 13 Q7 -3 15 10' stroke='%234fd1ff' stroke-width='2' fill='none'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/css/lab.css">
+<title>Graphwar</title>
+<!-- el laboratorio vive ahora dentro del juego (P5): #editor, #entreno, #trono… llevan a su etapa -->
+<script>location.replace('/' + (location.hash || '#crear'));</script>
 </head>
-<body class="lab">
-  <nav class="lab-nav" aria-label="Laboratorio">
-    <a class="brand" href="/">GRAPHWAR<span>.agents</span></a>
-    <a href="#inicio" data-view="inicio">Inicio</a>
-    <a href="#editor" data-view="editor">Editor de redes</a>
-    <a href="#entreno" data-view="entreno">Entreno</a>
-    <a href="#evolucion" data-view="evolucion">Evolución</a>
-    <a href="#trono" data-view="trono">Trono y duelos</a>
-    <a href="#dinastias" data-view="dinastias">Dinastías</a>
-    <a href="#verdad" data-view="verdad">Verdad</a>
-    <a href="#cirugia" data-view="cirugia">Cirugía</a>
-    <a href="/">Sala de juego</a>
-  </nav>
-  <main id="view"></main>
-  <div id="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="/js/lab/main.js"></script>
-</body>
+<body><p><a href="/">Ir al juego</a></p></body>
 </html>

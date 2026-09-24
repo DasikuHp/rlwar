@@ -1,4 +1,4 @@
-// Sala viva con redes (parte 4; spec/08 §3, spec/03 §7, spec/07 §2–§4): lógica pura, sin DOM. La usa app.js para el
+// Sala viva con redes (parte 4; spec/08 §3, spec/03 §7, spec/07 §2–§4): lógica pura, sin DOM. La usa game/espectar.js para el
 // dibujo de lo que "piensa" una red antes de disparar o moverse y para el panel del cerebro.
 
 // qué se pinta: en un disparo, los candidatos tenues (de menos a más probable: el más probable queda encima y más

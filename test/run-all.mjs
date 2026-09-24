@@ -56,8 +56,6 @@ try {
   results.push(await run('parser + solver', [join(ROOT, 'test', 'parser.spec.mjs')]));
   results.push(await run('partida agente vs CPU', [join(ROOT, 'test', 'smoke.mjs'), BASE]));
   results.push(await run('self-play de agentes', [join(ROOT, 'test', 'agents.spec.mjs'), BASE]));
-  results.push(await run('cliente (DOM simulado)', [join(ROOT, 'test', 'client.spec.mjs')]));
-  results.push(await run('selector de tropas (F0)', [join(ROOT, 'test', 'troops.spec.mjs')]));
   results.push(await run('herramientas: congelado y mutantes', [join(ROOT, 'test', 'tools.spec.mjs')]));
   results.push(await run('herramientas: mutantes por líneas y con servidor', [join(ROOT, 'test', 'tools-servidor.spec.mjs')]));
   results.push(await run('herramientas: línea base de los mutantes', [join(ROOT, 'test', 'tools-base.spec.mjs')]));

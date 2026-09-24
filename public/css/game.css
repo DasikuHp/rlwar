@@ -1,0 +1,142 @@
+/* Juego (P5): el estilo de referencianoabsoluta.png encima del laboratorio (lab.css). Azul noche, neón cian, violeta y
+   naranja, títulos numerados con letras espaciadas y bordes finos que brillan. Tipografías del sistema. */
+:root {
+  --bg: #060a14; --plane: #081022; --panel: #0a1226; --panel-2: #0e1830;
+  --line: #16233f; --line-2: #22365e; --text: #e3ebf8; --dim: #7c89a8;
+  --cyan: #3fd0ff; --violet: #8b6cff; --orange: #ff8a3d; --gold: #ffcf6b;
+  --glow-c: 0 0 0 1px #3fd0ff33, 0 0 18px #3fd0ff1f; --glow-v: 0 0 0 1px #8b6cff40, 0 0 18px #8b6cff26;
+  --top: 52px; --head: 92px;
+}
+body.game { background: radial-gradient(1400px 700px at 20% -10%, #0f1a36 0%, var(--bg) 60%) fixed, var(--bg); }
+body.game.reduce * { animation: none !important; transition: none !important; }
+
+/* ---------- barra de arriba: marca, las 4 etapas y el mundo ---------- */
+.g-top { height: var(--top); display: flex; align-items: center; gap: 18px; padding: 0 18px; border-bottom: 1px solid var(--line); background: #050913e6; position: relative; z-index: 5; }
+.g-brand { color: var(--text); text-decoration: none; font-weight: 700; letter-spacing: .22em; font-size: 15px; white-space: nowrap; }
+.g-brand span { color: var(--cyan); letter-spacing: .04em; font-weight: 400; }
+.g-stages { display: flex; gap: 6px; flex: 1; justify-content: center; }
+.g-stages a { display: inline-flex; align-items: baseline; gap: 8px; padding: 7px 14px; border: 1px solid transparent; border-radius: 8px; color: var(--dim); text-decoration: none; letter-spacing: .14em; font-size: 12.5px; text-transform: uppercase; }
+.g-stages a b { font-size: 18px; font-weight: 300; letter-spacing: 0; color: var(--line-2); }
+.g-stages a:hover { color: var(--text); border-color: var(--line-2); }
+.g-stages a[aria-current="page"] { color: var(--text); border-color: var(--line-2); background: var(--panel); box-shadow: var(--glow-c); }
+.g-stages a[aria-current="page"] b { color: var(--cyan); }
+.g-stages a[data-stage="entrenar"][aria-current="page"] b { color: var(--violet); }
+.g-stages a[data-stage="trono"][aria-current="page"] b { color: var(--orange); }
+.g-stages a[aria-disabled="true"] { opacity: .35; pointer-events: none; }
+.g-world { display: flex; align-items: center; gap: 10px; white-space: nowrap; }
+.g-world .chip { border: 1px solid var(--line-2); border-radius: 999px; padding: 4px 12px; color: var(--text); background: var(--panel); font-size: 12.5px; }
+.g-world .chip i { font-style: normal; color: var(--dim); }
+
+/* ---------- cabecera de la etapa: número grande, título espaciado, subtítulo y pestañas ---------- */
+.g-head { min-height: var(--head); display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: end; gap: 0 18px; padding: 12px 22px 0; border-bottom: 1px solid var(--line); background: linear-gradient(180deg, #0a132800, #0a1328aa); }
+.g-num { font-size: 56px; line-height: .9; font-weight: 200; color: var(--cyan); text-shadow: 0 0 22px #3fd0ff66; align-self: center; }
+.g-num[data-stage="entrenar"] { color: #fff; text-shadow: 0 0 22px #ffffff40; }
+.g-num[data-stage="trono"] { color: var(--orange); text-shadow: 0 0 22px #ff8a3d66; }
+.g-title h1 { font-size: 24px; font-weight: 400; letter-spacing: .2em; text-transform: uppercase; }
+.g-title h1 em { font-style: normal; color: var(--orange); }
+.g-title p { color: var(--dim); margin: 2px 0 10px; }
+.g-tabs { grid-column: 2 / 4; display: flex; gap: 2px; }
+.g-tabs a { padding: 9px 18px; border: 1px solid var(--line); border-bottom: 0; border-radius: 8px 8px 0 0; color: var(--dim); text-decoration: none; background: #070d1c; }
+.g-tabs a:hover { color: var(--text); }
+.g-tabs a[aria-current="page"] { color: var(--text); background: var(--panel); border-color: var(--line-2); box-shadow: inset 0 2px 0 var(--cyan); }
+.g-motto { color: #2f4470; letter-spacing: .3em; font-size: 11px; text-transform: uppercase; align-self: start; padding-top: 8px; }
+
+/* ---------- cuerpo: aquí viven las vistas del laboratorio ---------- */
+.g-body { height: calc(100vh - var(--top) - var(--head)); position: relative; }
+.g-body > [data-view] { height: 100%; }
+body.game .lab-ed, body.game .lab-home, body.game .lab-tr, body.game .lab-thr, body.game .lab-tv, body.game .lab-sg { height: 100%; }
+body.game .lab-nav { display: none; }
+body.game button.primary { background: linear-gradient(135deg, #25b9ef, var(--cyan)); border-color: var(--cyan); box-shadow: 0 0 16px #3fd0ff40; }
+body.game .panel, body.game section.card { box-shadow: var(--glow-c); }
+
+/* ---------- portada ---------- */
+.portada { position: fixed; inset: 0; z-index: 20; display: grid; grid-template-columns: minmax(360px, 560px) minmax(0, 1fr); align-items: center; gap: 24px; padding: 6vh 7vw; overflow: hidden; background: var(--bg); }
+.portada > canvas.bgfx { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; }
+.portada > * { position: relative; z-index: 1; }
+.p-title { font-size: clamp(44px, 6.4vw, 92px); font-weight: 200; letter-spacing: .28em; line-height: 1; text-shadow: 0 0 34px #3fd0ff55; animation: p-in 1.2s ease-out both; }
+.p-title span { color: var(--cyan); }
+.p-sub { color: var(--dim); letter-spacing: .34em; text-transform: uppercase; font-size: 13px; margin: 14px 0 34px; animation: p-in 1.2s .2s ease-out both; }
+.p-menu { display: grid; gap: 10px; max-width: 380px; }
+.p-menu button { justify-content: space-between; padding: 14px 18px; font-size: 16px; letter-spacing: .12em; text-transform: uppercase; background: #0a1226cc; border-color: var(--line-2); border-radius: 10px; animation: p-in .9s ease-out both; }
+.p-menu button small { letter-spacing: 0; text-transform: none; color: var(--dim); font-size: 12.5px; }
+.p-menu button:hover:not(:disabled) { border-color: var(--cyan); box-shadow: var(--glow-c); }
+.p-menu button.primary { color: #041019; }
+.p-menu button.primary small { color: #06303f; }
+.p-menu button:nth-child(2) { animation-delay: .08s; } .p-menu button:nth-child(3) { animation-delay: .16s; } .p-menu button:nth-child(4) { animation-delay: .24s; } .p-menu button:nth-child(5) { animation-delay: .32s; }
+.p-queen { justify-self: center; width: min(640px, 100%); aspect-ratio: 1.25; position: relative; }
+.p-queen canvas { width: 100%; height: 100%; display: block; }
+.p-queen figcaption { position: absolute; left: 0; right: 0; bottom: 4px; text-align: center; color: var(--dim); font-size: 13px; letter-spacing: .08em; }
+.p-queen figcaption b { color: var(--gold); letter-spacing: .12em; font-weight: 500; }
+.p-foot { position: absolute; left: 7vw; bottom: 3vh; color: #33476f; font-size: 12px; letter-spacing: .1em; }
+@keyframes p-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+/* ---------- diálogos (nueva partida, cargar, ajustes) ---------- */
+dialog.g-dlg { margin: auto; color: var(--text); background: var(--panel); border: 1px solid var(--line-2); border-radius: 14px; padding: 0; width: min(920px, 94vw); box-shadow: var(--glow-c), 0 30px 80px #000c; }
+dialog.g-dlg::backdrop { background: #02050dcc; backdrop-filter: blur(3px); }
+.g-dlg header { display: flex; align-items: baseline; gap: 14px; padding: 18px 22px 10px; border-bottom: 1px solid var(--line); }
+.g-dlg header h2 { font-weight: 400; letter-spacing: .18em; text-transform: uppercase; font-size: 18px; flex: 1; }
+.g-dlg .body { padding: 18px 22px 22px; display: grid; gap: 16px; max-height: 76vh; overflow-y: auto; }
+.g-dlg .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+body.game label.field { display: grid; gap: 4px; color: var(--dim); font-size: 13px; }
+body.game label.field select, body.game label.field input { color: var(--text); }
+.g-dlg .err { color: var(--bad); min-height: 1.2em; }
+.slots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.slot { border: 1px solid var(--line-2); border-radius: 12px; padding: 16px; background: var(--panel-2); display: grid; gap: 8px; align-content: start; min-height: 220px; }
+.slot.empty { border-style: dashed; color: var(--dim); }
+.slot.active { box-shadow: var(--glow-c); border-color: var(--cyan); }
+.slot h3 { font-weight: 400; letter-spacing: .12em; font-size: 15px; display: flex; justify-content: space-between; gap: 8px; }
+.slot h3 small { color: var(--dim); letter-spacing: 0; }
+.slot dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 13px; }
+.slot dt { color: var(--dim); } .slot dd { text-align: right; font-family: var(--mono); }
+.slot .acts { display: flex; gap: 8px; margin-top: auto; flex-wrap: wrap; }
+.paths { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.paths label { border: 1px solid var(--line-2); border-radius: 12px; padding: 14px; display: grid; gap: 6px; cursor: pointer; background: var(--panel-2); }
+.paths label:has(input:checked) { border-color: var(--cyan); box-shadow: var(--glow-c); }
+.paths label b { letter-spacing: .08em; }
+.paths label span { color: var(--dim); font-size: 13px; }
+.set-grid { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 14px 18px; align-items: start; }
+.set-grid > span { color: var(--text); padding-top: 6px; }
+.set-grid .opts { display: grid; gap: 6px; }
+.set-grid .opts label { display: grid; grid-template-columns: auto 1fr; gap: 2px 8px; align-items: baseline; cursor: pointer; }
+.set-grid .opts label small { grid-column: 2; color: var(--dim); }
+
+/* ---------- duelo en vivo (espectador, sin barra de disparo) ---------- */
+.duel-live { height: 100%; display: grid; grid-template-columns: 300px minmax(0, 1fr) 330px; }
+.duel-live aside { border-right: 1px solid var(--line); padding: 14px; overflow-y: auto; display: grid; gap: 12px; align-content: start; background: #070d1ccc; }
+.duel-live aside.right { border-right: 0; border-left: 1px solid var(--line); }
+.duel-live h3 { font-size: 12px; font-weight: 500; text-transform: uppercase; letter-spacing: .14em; color: var(--dim); }
+.duel-live .stage-canvas { position: relative; min-width: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.duel-live .bar { display: flex; gap: 12px; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--line); font-size: 13px; }
+.duel-live .bar .who { flex: 1; }
+.duel-live canvas { width: 100%; height: 100%; display: block; }
+.duel-list { display: grid; gap: 6px; }
+.duel-list a { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); text-decoration: none; background: var(--panel); font-size: 13px; }
+.duel-list a:hover, .duel-list a[aria-current="true"] { border-color: var(--cyan); }
+.duel-list a small { color: var(--dim); }
+.duel-live .empty { color: var(--dim); font-size: 13px; }
+.brain { font-size: 12.5px; display: grid; gap: 6px; }
+.brain .b-conf b { font-family: var(--mono); font-weight: 400; }
+.brain .lvl { display: inline-block; border: 1px solid var(--line-2); border-radius: 4px; padding: 0 5px; margin-right: 4px; }
+.brain .lvl-veterana { border-color: var(--good); color: var(--good); } .brain .lvl-media { border-color: var(--gold); color: var(--gold); }
+.brain .meter { display: block; height: 5px; background: #0a1120; border-radius: 3px; overflow: hidden; }
+.brain .meter i { display: block; height: 100%; background: linear-gradient(90deg, var(--good), var(--cyan)); }
+.b-cands { list-style: none; display: grid; gap: 2px; }
+.b-cands li { display: grid; grid-template-columns: 26px 70px minmax(0, 1fr) 40px; gap: 6px; align-items: baseline; padding: 3px 6px; border-radius: 5px; color: var(--dim); }
+.b-cands li.chosen { color: var(--text); background: #3fd0ff14; box-shadow: inset 0 0 0 1px #3fd0ff55; }
+.b-cands .expr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.b-cands .p { text-align: right; font-family: var(--mono); }
+.b-say { font-style: italic; }
+.log { list-style: none; display: grid; gap: 3px; font-size: 12.5px; color: var(--dim); max-height: 38vh; overflow-y: auto; }
+.log li b { color: var(--text); font-weight: 500; }
+.score { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; font-size: 13px; }
+.score b { font-family: var(--mono); font-weight: 400; }
+
+/* ---------- aviso y mensajes ---------- */
+body.game #toast { z-index: 40; }
+.g-note { color: var(--dim); font-size: 13px; }
+
+@media (max-width: 1400px) {
+  .g-stages a { padding: 7px 9px; letter-spacing: .08em; }
+  .duel-live { grid-template-columns: 250px minmax(0, 1fr) 290px; }
+}
+@media (prefers-reduced-motion: reduce) { .portada *, .g-top * { animation: none !important; } }

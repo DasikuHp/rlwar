@@ -105,7 +105,8 @@ body.game .ed2 { display: grid; grid-template-columns: 236px minmax(0, 1fr) 410p
 .ed2 .node.link-ok { box-shadow: inset 3px 0 0 var(--g), 0 0 0 2px var(--good), 0 0 16px #3ddc9766; }
 .ed2 .node.link-no { opacity: .38; filter: grayscale(.7); }
 .ed2 .node.link-from { box-shadow: inset 3px 0 0 var(--g), 0 0 0 2px var(--cyan); }
-body.reduce .ed2 .node { transition: none; }
+body.reduce .ed2 .node, .ed2 .node.dragging { transition: none; }
+.ed2 .node.dragging { z-index: 5; box-shadow: inset 3px 0 0 var(--g), 0 12px 28px #000c; }
 /* nervios: un pulso que corre por el cable, más vivo cuanta más señal pasa (dato real del banco) */
 .ed2 .nerve { fill: none; stroke: #ffffff; stroke-width: 2.2; stroke-linecap: round; stroke-dasharray: 2 16; opacity: calc(.12 + .7 * var(--lv, 0)); animation: gw-nerve 2s linear infinite; pointer-events: none; }
 @keyframes gw-nerve { to { stroke-dashoffset: -36; } }
@@ -270,9 +271,27 @@ body.reduce .ed2 .nerve { animation: none; stroke-dasharray: none; stroke-width:
 .tpl2-head { flex-wrap: wrap; row-gap: 1px; }
 .tpl2-head small { flex-basis: 100%; padding-left: 27px; white-space: normal; overflow: visible; line-height: 1.25; }
 @media (max-width: 1500px) { .ed2 .ed-panel .tabs .legend2 { display: none; } }
-/* "+ Añadir capa" sobre un cable (P6): el ＋ en la mitad del cable elegido y la lista del panel */
-.ed2 .wire-plus { position: absolute; transform: translate(-50%, -50%); width: 26px; height: 26px; padding: 0; border-radius: 50%; font-size: 15px; line-height: 1; background: var(--panel); border: 1px solid var(--cyan); color: var(--cyan); box-shadow: var(--glow-c); z-index: 3; }
-.ed2 .wire-plus:hover, .ed2 .wire-plus:focus-visible { background: var(--cyan); color: #06101f; }
+/* "+ Añadir capa" sobre un cable (P6): la lista del panel. Sesión 12: los botones del cable bajo el ratón (o del elegido), encima de su mitad y a tamaño de pantalla */
+.ed2 .wire-tools { position: absolute; z-index: 26; display: flex; gap: 6px; transform: translate(-50%, calc(-100% - 12px)); padding: 4px; border-radius: 10px; background: #0b1428f2; border: 1px solid var(--line-2); box-shadow: 0 8px 22px #000a; }
+.ed2 .wire-tools.below { transform: translate(-50%, 12px); }
+.ed2 .wire-tools.compact button { width: 30px; padding: 4px 0; font-size: 14px; }
+.ed2 .wire-tools.compact .t { display: none; }
+.ed2 .wire-tools button { padding: 4px 10px; font-size: 12.5px; white-space: nowrap; }
+.ed2 .wire-tools .wt-x:hover, .ed2 .wire-tools .wt-x:focus-visible { background: var(--bad); border-color: var(--bad); color: #fff; }
+.ed2 .wire-tools .wire-plus:hover, .ed2 .wire-tools .wire-plus:focus-visible { background: var(--cyan); color: #06101f; }
+.ed2 .wire.hov { stroke-width: 4; opacity: 1; filter: drop-shadow(0 0 4px var(--g)); }
+.ed2 .wire.held { opacity: .12; }
+.ed2 .wire.ins-ok { opacity: .2; stroke-dasharray: 3 6; }
+.ed2 .wire.ins-no { stroke: var(--bad); opacity: .7; }
+.ed2 .wire.tmp.no { stroke: var(--bad); }
+.ed2 .node.link-hot { box-shadow: inset 3px 0 0 var(--g), 0 0 0 3px var(--cyan), 0 0 22px #3ad6ff88; }
+.ed2 .node.link-hot.link-no { box-shadow: inset 3px 0 0 var(--g), 0 0 0 2px var(--bad); opacity: .7; }
+/* el cartel que sigue al ratón al arrastrar: qué pasará si sueltas ahí */
+.ed2 .drop-tip { position: absolute; z-index: 40; max-width: 320px; padding: 6px 10px; font-size: 12.5px; line-height: 1.4; color: var(--text); pointer-events: none;
+  background: #0b1428f5; border: 1px solid var(--line-2); border-left: 3px solid var(--dim); border-radius: 8px; box-shadow: 0 10px 26px #000a; }
+.ed2 .drop-tip.ok { border-left-color: var(--good); }
+.ed2 .drop-tip.rm { border-left-color: var(--warn); }
+.ed2 .drop-tip.no { border-left-color: var(--bad); color: #f3c9d2; }
 .ed2 .insert { margin-top: 10px; }
 .ed2 .insert .ins-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
 .ed2 .insert .ins-list .pal-item { width: auto; padding: 5px 10px; }

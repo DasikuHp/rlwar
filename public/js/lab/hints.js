@@ -22,7 +22,7 @@ const shapeCheck = (g, forPlay = false) => {
 };
 const sig = (x) => `${x.code}|${x.blockId ?? ''}|${x.message}`;
 // errores que trae `next` y no tenía `prev` (así un cable no carga con los errores que ya había)
-function newErrors(prev, next) {
+export function newErrors(prev, next) {
   const had = new Set(shapeCheck(prev).errors.map(sig));
   return shapeCheck(next).errors.filter((e) => !had.has(sig(e)));
 }

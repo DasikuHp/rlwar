@@ -1,8 +1,9 @@
-# 12 — Tutorial «Tu primera red» en modo taller, y enchufar y desenchufar cables
+# 12 — Tutorial «Tu primera red» en el editor que se va encendiendo, y enchufar y desenchufar cables
 
-> Propuesta de la sesión 11 (2026-09-25). **Aún no está aprobada**: la sesión siguiente la enseña y pregunta lo del §6
-> antes de programar. Sustituye a la guía de la sesión 10 (una tarjeta en la esquina del editor, `public/js/lab/coach.js`),
-> pero aprovecha su lógica pura.
+> Propuesta de la sesión 11 (2026-09-25), **aprobada con cambios en la sesión 12** (respuestas en §6 y en plan2, fila
+> «Sesión 12»). El cambio grande: no hay «modo taller» que construya el editor pieza a pieza, sino **el editor oficial en
+> penumbra que se va encendiendo** (§4.1, idea y maqueta del usuario). Sustituye a la guía de la sesión 10 (una tarjeta en
+> la esquina del editor, `public/js/lab/coach.js`), pero aprovecha su lógica pura.
 
 ## 1. Por qué se rehace
 
@@ -35,9 +36,9 @@ JavaScript):
 |---|---|---|---|
 | 1 | Nielsen Norman Group · «Onboarding Tutorials vs. Contextual Help» (2023) · nngroup.com/articles/onboarding-tutorials/ | Los tutoriales que te sueltan información fuera de contexto (*push revelations*) interrumpen, se saltan y se olvidan: hay que memorizarlos. Funciona mejor la ayuda que sale cuando la necesitas (*pull*). El tutorial de ArcGIS fue de los buenos porque **te hacía hacer la tarea**, no mirarla. La ayuda se cierra fácil y se vuelve a abrir. | Cada cosa se enseña **cuando se usa y usándola**. Se puede saltar y se puede volver a abrir. |
 | 2 | NN/g · «Instructional Overlays and Coach Marks» (2014) · nngroup.com/articles/mobile-instructional-overlay/ | Una capa que señala todo lo que hay en pantalla sobrecarga: no puedes leerla y usar la app a la vez. Mejor pistas cortas, de una en una, con dibujos. | **Una cosa cada vez**, señalada donde está, no un mapa de todo. |
-| 3 | Valve · comentario de los desarrolladores de *Portal* · theportalwiki.com/wiki/Portal_developer_commentary | Las salas recargadas **distraían tanto que estorbaban el aprendizaje**: las dejaron limpias. Una sala que metía demasiadas ideas a la vez se partió en tres. Lo que no se entiende no se puede pasar tropezando. Cuando algo es importante, hacen una pausa y lo resaltan con partículas y sonido. | **Modo taller**: solo se ve lo que se usa. Un paso que atasca a la gente se parte en dos. Lo importante se resalta con un efecto. |
+| 3 | Valve · comentario de los desarrolladores de *Portal* · theportalwiki.com/wiki/Portal_developer_commentary | Las salas recargadas **distraían tanto que estorbaban el aprendizaje**: las dejaron limpias. Una sala que metía demasiadas ideas a la vez se partió en tres. Lo que no se entiende no se puede pasar tropezando. Cuando algo es importante, hacen una pausa y lo resaltan con partículas y sonido. | **Penumbra**: solo se ilumina lo que se usa. Un paso que atasca a la gente se parte en dos. Lo importante se resalta con un efecto. |
 | 4 | Kim Swift y equipo · «Thinking With Portals» (Game Developer, 2008) · gamedeveloper.com/design/thinking-with-portals-creating-valve-s-new-ip | Probaron con jugadores desde la primera semana. Si más de uno se atascaba en un sitio, **partían el concepto en secciones**. | Sondeo automático con ratón real en cada cambio, y la prueba del usuario, paso a paso. |
-| 5 | Google · *Blockly Games: Maze* · blockly.games; reseña de T. S. von Davier (CMU, Medium, 2019) · medium.com/@tvondavi/betacritic-blockly-maze-88369fa8f626 | Cada nivel da **solo unos pocos bloques**. Cada pocos niveles llega uno nuevo, y el nivel **obliga a usarlo**. Va de lo concreto a lo abstracto, y cada nivel es distinto. | La paleta del taller solo enseña los bloques del capítulo. Cada bloque nuevo hace falta para avanzar. |
+| 5 | Google · *Blockly Games: Maze* · blockly.games; reseña de T. S. von Davier (CMU, Medium, 2019) · medium.com/@tvondavi/betacritic-blockly-maze-88369fa8f626 | Cada nivel da **solo unos pocos bloques**. Cada pocos niveles llega uno nuevo, y el nivel **obliga a usarlo**. Va de lo concreto a lo abstracto, y cada nivel es distinto. | En la paleta solo se iluminan los bloques del capítulo. Cada bloque nuevo hace falta para avanzar. |
 | 6 | Luden.io · *while True: learn()* (juego de aprendizaje automático con nodos) · luden.io/wtl; reseñas en saveorquit.com (2019) y puzzlebyrinth.com | Cada tarea limita los nodos disponibles, y desbloquear uno lo explica. Lo que más se le critica: **"lo pasé sin entender cómo ni por qué"** y que el mismo montaje no dé siempre lo mismo. | Cada logro se explica **con lo que ha cambiado de verdad**. El banco usa semilla fija, así que el mismo montaje da siempre lo mismo. |
 | 7 | Factorio · Friday Facts #241 (2018) · factorio.com/blog/post/fff-241 | Se tardaba de 30 a 45 min en llegar a lo que es el juego. Si limitas tanto al jugador, aprende a pasar el tutorial pero no las ideas. Las tareas sin un porqué ("consigue X porque sí") no enseñan. | La red juega **en ≈ 4 min**. Cada paso responde una pregunta de tu red ("¿cómo ve?"). Se limita lo que se **ve**, no lo que se puede hacer: «Ver todo» siempre está a mano. |
 | 8 | Factorio · Friday Facts #342 (2020) · factorio.com/blog/post/fff-342 | Cada canal de información, con un solo uso. Aunque te saltes todos los bocadillos, **el objetivo solo tiene que bastar** para acabar. Buscaron a propósito los casos en que el jugador se atasca. Cada idea nueva gasta atención. | La línea «👉» basta sola. Si llevas un rato sin avanzar, se ofrece ayuda. Hay un sondeo que recorre el tutorial entero con ratón real. |
@@ -56,8 +57,8 @@ que se retira (Renkl y Atkinson).
 
 ## 3. Reglas del tutorial (salen del §2; cada cambio se contrasta con ellas)
 
-1. **Solo lo necesario a la vista.** El resto del editor no se atenúa: no está. Cada zona aparece la primera vez que se usa
-   (Portal, Blockly, NN/g).
+1. **Solo lo necesario iluminado.** El resto del editor está en penumbra y no responde: lo aprendido, a media luz; lo no
+   visto, a oscuras (Portal, Blockly, NN/g; decisión del usuario en la sesión 12).
 2. **Una cosa nueva cada vez, y hace falta para avanzar** (Blockly, Portal).
 3. **Hacer → ver el efecto en el sitio → entender** (Cook, Victor). Primero el efecto y después el nombre técnico
    (de lo concreto a lo abstracto).
@@ -71,21 +72,27 @@ que se retira (Renkl y Atkinson).
    comprueba.
 10. **Nunca promete lo que una red sin entrenar no sabe hacer** (regla del juego desde la ronda 17).
 
-## 4. Diseño propuesto: el modo taller
+## 4. Diseño: el editor que se va encendiendo
 
-### 4.1 Cómo se ve
-- **Nueva partida → Desde cero** lleva directo al taller, no al editor entero. En pantalla solo hay:
-  - el banco de pruebas, grande y en el centro (tu soldado blanco, un enemigo);
-  - la red, en una tira debajo, con los bloques que lleves;
-  - la paleta, solo con los bloques del capítulo;
-  - un **bocadillo pegado a lo que se pide** (no una tarjeta en una esquina), con la pregunta, la línea «👉» y, al
-    cumplirla, lo que ha cambiado, señalado con una flecha fina sobre la cosa (p. ej., sobre las curvas tenues:
-    «estos son los 24 tiros que imagina»).
-- Arriba siempre: la barra de capítulos (puntos), **«Saltar tutorial»** y **«Ya sé esto»** (salta el capítulo).
-- Al saltar el tutorial entero, un aviso de una línea (qué te pierdes, dónde volver) y el editor completo. Se retoma desde
+### 4.1 Cómo se ve (aprobado en la sesión 12: «se va encendiendo»)
+Maqueta del usuario (sesión 12, `REFERENCIATUTORIAL.png` en la raíz): el editor de siempre, oscurecido; la zona de plantillas con un halo azul que brilla; una
+línea fina con un punto brillante en el borde de la zona lleva a una **ventana del Sistema** con «1/4», el título («Elige
+una plantilla»), el texto, los puntos de avance y un botón redondo azul **→**.
+- **Nueva partida → Desde cero** abre el editor **oficial**, entero pero **a oscuras**. Hay tres luces:
+  - **iluminado**: lo que toca ahora, con halo azul que late. Es lo único que responde al ratón y al teclado;
+  - **media luz**: lo que ya aprendiste. Se ve, pero no responde hasta que acabe el tutorial;
+  - **a oscuras**: lo que aún no has visto.
+  Al acabar (graduación), todo se enciende: ya conoces cada zona.
+- **La voz es «el Sistema»**: una **ventana del Sistema** (azul translúcido, borde que brilla, título «◆ SISTEMA», capítulo y
+  paso), unida a lo iluminado por una línea con un punto. El texto entra línea a línea. Dos clases de paso:
+  - **presentar**: la ventana explica una zona y se avanza con el botón **→** (o Intro);
+  - **hacer**: la línea «👉» dice el gesto; se avanza al hacerlo. Al cumplirlo, «lo que ha cambiado», con números reales
+    y una flecha fina sobre la cosa (p. ej., sobre las curvas tenues: «estos son los 24 tiros que imagina»).
+- Siempre visibles, fuera de la penumbra: la barra de capítulos (puntos), **«Saltar tutorial»** y **«Ya sé esto»** (salta
+  el capítulo).
+- Al saltar el tutorial entero, un aviso de una línea (qué te pierdes, dónde volver) y el editor encendido. Se retoma desde
   el botón **Guía** o desde Academia.
-- Cada zona nueva entra con un efecto y una etiqueta de una línea («Nuevo: el panel de la capa. Aquí ajustas el bloque
-  elegido»).
+- Para curiosear a mitad: «Saltar tutorial» y luego **Guía** te devuelve al paso en que estabas.
 
 ### 4.2 Capítulos (propuesta; tiempos aproximados)
 | Cap. | Pregunta | Lo que haces | Lo que aparece (y se presenta) | Reto sin ayuda |
@@ -118,18 +125,28 @@ hace fallar el test. Claves de hoy:
 - Cabecera: nombre, deshacer y rehacer, Guardar, menú ⋯. Pestañas Editor / Tus redes.
 
 ### 4.4 Efectos (todo pasa por `public/js/ui/fx/anim.js`; con «reducir movimiento», cortes sin animación)
-- **Foco**: el taller no atenúa el editor, lo construye. Dentro del taller, lo que se pide lleva un halo que late
-  (el `coach-target` de hoy, más visible).
-- **Revelar una zona**: GSAP (Flip desde donde se habló de ella, o subir y aparecer) y una etiqueta de una línea.
+- **Foco**: penumbra sobre el editor con un hueco de luz en lo que toca (halo azul que late) y media luz en lo aprendido.
+- **Presentar una zona**: la luz se abre sobre ella (GSAP) y la ventana del Sistema se desliza hasta su lado, con la línea.
 - **Mano fantasma**: un cursor SVG que hace el gesto (arrastrar del punto de salida al bloque) con MotionPathPlugin, en
   bucle suave hasta que lo hagas. Sale en cada gesto nuevo, o cuando llevas un rato atascado.
 - **Cable**: al enchufar se dibuja con DrawSVGPlugin; luego late con la señal real (los nervios de hoy).
 - **Acierto**: una ráfaga corta de partículas (tsParticles) en el sitio, los números que cuentan hasta su valor
   (24 tiros, 12 números) y el punto del capítulo que se llena.
 - **La pregunta** entra línea a línea (SplitText).
-- **Graduación**: Flip del taller al editor entero, y cada zona se ilumina un instante con su nombre.
+- **Graduación**: la penumbra se retira y cada zona se ilumina un instante con su nombre («ya la conoces»).
 
-## 5. Enchufar y desenchufar (va antes que el tutorial, porque el tutorial lo enseña)
+## 5. Enchufar y desenchufar (va antes que el tutorial, porque el tutorial lo enseña) — hecho en la sesión 12
+Lógica pura en `public/js/lab/plug.js` (`grab`, `targets`, `drop`, `unplugAll`) con `test/ui-enchufe.spec.mjs`; sondeo
+con ratón real `tools/sondeo-enchufe.mjs` (Tortuga, 1280 a 58 % y 1920). Además de lo de abajo:
+- mientras arrastras, un **cartel sigue al ratón** y dice qué pasará si sueltas ahí («Suelta para unir…», «Suelta aquí
+  para desenchufar…», «No vale: …»);
+- los botones del cable salen tras 0,25 s quieto encima, en el primer sitio del cable donde no tapen tarjetas; si no
+  caben con texto, salen compactos (✕ y ＋, con el texto al pasar el ratón);
+- al quitar un cable (✕, Supr, «Quitar cable», punta al vacío o Alt + clic) el aviso trae un botón **Deshacer**;
+- arreglos que salieron del sondeo: las tarjetas iban 0,28 s por detrás del ratón al arrastrarlas (transición) y los
+  cables esquivaban la tarjeta arrastrada; y `patch()` leía los `<path>` sueltos como HTML, así que al mover una tarjeta
+  sus cables se rompían (ni se pintaban ni se podían tocar) hasta soltarla.
+
 - **Zona de agarre**: cada punto de enchufe atrapa el ratón en un círculo de **28 px en pantalla**, sea cual sea el zoom.
   El punto visible crece al pasar por encima.
 - **Enchufar**: arrastra desde la salida (derecha) o, al revés, desde una entrada vacía (izquierda). Suelta encima de la
@@ -146,16 +163,16 @@ hace fallar el test. Claves de hoy:
   empieza el arrastre y dónde se suelta, dice qué pasa (`connect`, `move`, `remove`, `insert` o `nada`) y por qué. Además,
   un sondeo con ratón real en Tortuga a 1280 (zoom 58 %) y a 1920.
 
-## 6. Preguntas para el usuario (al empezar la sesión siguiente, con estas opciones)
-1. **Dónde vive el tutorial**: (a) *modo taller dentro del editor*: el editor se construye pieza a pieza y al acabar es el
-   de siempre (recomendado); (b) una pantalla aparte, más sencilla, que al final se convierte en el editor.
-2. **Cuánto dura**: (a) completo, 8 capítulos y la graduación (≈25 min), cada uno saltable, con la pausa para probar tras
-   el 4 (recomendado); (b) capítulos 1–4 y el resto como lecciones cortas que saltan la primera vez que abres cada zona
-   (ayuda *pull*, NN/g); (c) solo capítulos 1–4.
-3. **Quién habla**: (a) *Vidente*, la rival de práctica, como mentora (con su emblema y su voz); (b) la voz neutra del juego.
-4. **Mano fantasma**: (a) en cada gesto nuevo (recomendado); (b) solo si llevas un rato atascado o la pides.
-5. **Retos de fin de capítulo**: (a) sí, con «Hazlo por mí» tras dos intentos (recomendado); (b) no.
-6. **Soltar una tarjeta encima de un cable la mete en medio** (como Blender): sí / no.
+## 6. Preguntas para el usuario — respondidas en la sesión 12
+1. **Dónde vive el tutorial** → el **editor oficial en penumbra que se va encendiendo** (§4.1). El usuario marcó primero
+   «pantalla aparte» y aclaró: "había pensado que fuera el editor oficial, pero se oscurece todo y te van enseñando paso a
+   paso para que no te abrume"; luego eligió «se va encendiendo» y mandó la maqueta.
+2. **Cuánto dura** → completo: 8 capítulos y la graduación (≈25 min), cada uno saltable, con la pausa para probar tras el 4.
+3. **Quién habla** → la voz neutra, que se llama **«el Sistema»**, en **ventana del Sistema**.
+4. **Mano fantasma** → en cada gesto nuevo; después, solo si te atascas.
+5. **Retos de fin de capítulo** → sí, con «Hazlo por mí» tras dos intentos; se pueden saltar.
+6. **Soltar una tarjeta encima de un cable la mete en medio** → sí, con aviso antes de soltar (el cable se ilumina y se
+   abre un hueco); Ctrl+Z lo deshace.
 
 ## 7. Qué se aprovecha
 - `public/js/lab/coach.js`: los pasos, las preguntas y los textos de «lo que ha cambiado» con números reales pasan a

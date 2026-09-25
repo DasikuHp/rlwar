@@ -31,10 +31,18 @@ const when = (ms) => (ms ? new Date(ms).toLocaleString('es-ES', { dateStyle: 'me
 
 // ---------- aviso ----------
 let toastTimer = null;
-function toast(msg, kind = 'info') {
+// action (opcional, sesión 12): {label, run} pone un botón en el aviso (p. ej., «Deshacer» al quitar un cable); el aviso
+// dura entonces 6 s para dar tiempo a pulsarlo
+function toast(msg, kind = 'info', action = null) {
   const el = $('toast');
-  el.textContent = msg; el.className = `show ${kind}`;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.className = ''; }, kind === 'error' ? 6000 : 2600);
+  el.textContent = msg; el.className = `show ${kind}${action ? ' act' : ''}`;
+  if (action) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'toast-act'; b.textContent = action.label;
+    b.addEventListener('click', () => { el.className = ''; action.run(); });
+    el.append(b);
+  }
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.className = ''; }, kind === 'error' || action ? 6000 : 2600);
 }
 
 // ---------- ajustes ----------

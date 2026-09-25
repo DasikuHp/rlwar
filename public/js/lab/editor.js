@@ -11,6 +11,7 @@ import * as Hn from './hints.js';
 import * as Bn from './bench.js';
 import * as Hi from './history.js';
 import * as Co from './coach.js';
+import * as P from './plug.js';
 import { emblemSVG } from './emblem.js';
 import { api, reasonOf } from './api.js';
 import { validate, repair, countParams, outDims, newGenome } from '/shared/genome.js';
@@ -68,7 +69,7 @@ export function mountEditor(root, { catalog, toast }) {
     nets: [], templates: [], panelTab: 'capa', genesTab: 'traits',
     netId: null, saved: null, base: null, genome: null, check: null, forPlay: null, dims: null, streams: {}, issues: null, params: null,
     coach: null, world: null, server: null, sel: null, pos: {}, zoom: 1, fit: true, dirty: false, pending: null, tplOpen: null, confirm: null,
-    hist: Hi.createHistory(null), menu: false, slotEl: null, palHover: null, link: null, folded: store.get('gw.ed.folded', false) === true,
+    hist: Hi.createHistory(null), menu: false, slotEl: null, palHover: null, link: null, hoverWire: null, folded: store.get('gw.ed.folded', false) === true,
     bench: { scene: 'abierto', custom: null, phase: 'shoot', seed: 1, now: null, saved: null, savedKey: null, sig: null, pick: null, busy: false },
     versions: { list: null, open: null, diff: null, ver: null, busy: false },
     probe: null,
@@ -82,6 +83,8 @@ export function mountEditor(root, { catalog, toast }) {
     <div class="ed-tools" id="edTools"></div>
     <div class="ed-board" id="edBoard" aria-label="Lienzo de la red"></div>
     <div class="ed-coach" id="edCoach" hidden></div>
+    <div class="wire-tools" id="edWireTools" hidden></div>
+    <div class="drop-tip" id="edDropTip" role="status" hidden></div>
     <div class="ed-split" id="edSplit" role="separator" aria-orientation="horizontal" aria-label="Arrastra para dar más sitio al lienzo o a los ajustes" tabindex="0"></div>
     <section class="ed-panel" id="edPanel" aria-label="La capa elegida y los genes"></section>
     <section class="ed-bench" id="edBench" aria-label="Banco de pruebas"></section>
@@ -119,11 +122,20 @@ export function mountEditor(root, { catalog, toast }) {
   }
   function afterChange(opts = {}) {
     S.dirty = S.genome !== S.base;
+    S.hoverWire = null; // los índices de los cables pueden haber cambiado
     S.server = null;
     recheck();
     if (opts.select !== undefined) S.sel = opts.select;
     if (opts.partial) { renderHead(); renderTools(); renderBoard(); } else render();
     scheduleBench();
+  }
+  // quitar un cable (✕ del cable, «Quitar cable», Supr, arrastrar su punta al vacío): el aviso ofrece deshacerlo
+  function unwire(i) {
+    const w = S.genome && S.genome.wires[i];
+    if (!w) return;
+    const r = P.drop(S.genome, catalog, { kind: 'end', index: i, from: w.from, to: w.to }, { node: null }, new Map());
+    commit(r.genome, { select: null, label: r.label });
+    toast(r.text, 'info', { label: 'Deshacer', run: undo });
   }
   function undo() { if (!Hi.canUndo(S.hist)) return; const l = Hi.undoLabel(S.hist); S.hist = Hi.undo(S.hist); S.genome = S.hist.present; afterChange(); toast(`Deshecho: ${l}`); }
   function redo() { if (!Hi.canRedo(S.hist)) return; const l = Hi.redoLabel(S.hist); S.hist = Hi.redo(S.hist); S.genome = S.hist.present; afterChange(); toast(`Rehecho: ${l}`); }
@@ -370,17 +382,14 @@ export function mountEditor(root, { catalog, toast }) {
     const nodes = S.genome.blocks.map((blk) => nodeHTML(blk, L.nodes[blk.id])).join('');
     const flags = S.genome.blocks.map((blk) => flagHTML(blk, L.nodes[blk.id])).join('');
     const missing = Hn.readiness(S.genome, catalog).filter((x) => x.required && !x.ok);
-    patch(b, `<div class="board-inner" data-key="inner" style="width:${L.width}px;height:${L.height}px;zoom:${z}">
+    patch(b, `<div class="board-inner" data-key="inner" style="width:${L.width}px;height:${L.height}px;zoom:${z};--z:${z}">
         ${heads}
         <svg class="wires" data-key="svg" width="${L.width}" height="${L.height}" aria-hidden="true">${wiresSVG(L)}<path id="edTmpWire" data-key="tmp" class="wire tmp" d=""/></svg>
         ${nodes}${flags}
-        ${S.sel && S.sel.kind === 'wire' ? `<button type="button" class="wire-plus" data-key="wplus" data-wireplus="${S.sel.index}" style="visibility:hidden" title="Añadir una capa en este cable" aria-label="Añadir una capa en este cable">＋</button>` : ''}
       </div>
       ${S.coach && S.coach.on ? '' : missing.length ? `<aside class="needs" data-key="needs" aria-label="Lo que le falta para poder jugar"><b>Para poder jugar le falta:</b><ul>${missing.map((x) => `<li>${esc(x.need)} ${readyButtons(x)}</li>`).join('')}</ul></aside>` : ''}`);
     b.scrollLeft = keep.left; b.scrollTop = keep.top;
-    // el ＋ del cable elegido, en la mitad de su recorrido de verdad (con los rodeos)
-    const plus = b.querySelector('.wire-plus'), path = plus && b.querySelector(`svg.wires path.hit[data-wire="${plus.dataset.wireplus}"]`);
-    if (plus && path) { const q = path.getPointAtLength(path.getTotalLength() / 2); plus.style.left = `${q.x}px`; plus.style.top = `${q.y}px`; plus.style.visibility = ''; }
+    renderWireTools();
     renderCoach();
   }
   function renderCoach() {
@@ -511,12 +520,12 @@ export function mountEditor(root, { catalog, toast }) {
     const lk = S.link ? (S.link.from === blk.id ? ' link-from' : S.link.ok.has(blk.id) ? ' link-ok' : ' link-no') : '';
     const lkWhy = S.link && S.link.why.get(blk.id);
     return `<button type="button" class="node g-${e.group}${sel ? ' sel' : ''}${err ? ' err' : ''}${warn ? ' warn' : ''}${lk}" data-key="n:${esc(blk.id)}" data-node="${esc(blk.id)}" style="left:${p.x}px;top:${p.y}px" aria-label="${esc(e.name)} ${esc(blk.id)}: ${esc(role)}${err ? ', con error' : warn ? ', con aviso' : ''}" ${lkWhy ? `title="${esc(lkWhy)}"` : ''}>
-      ${e.group === 'eyes' ? '' : '<span class="port in" aria-hidden="true"></span>'}
+      ${e.group === 'eyes' ? '' : `<span class="port in" data-portin="${esc(blk.id)}" aria-hidden="true" title="Arrastra desde aquí para enchufar (o, si ya tiene cable, para desenchufarlo). Alt + clic quita todos sus cables"></span>`}
       <span class="ico" aria-hidden="true">${esc(e.icon)}</span>
       <span class="nm">${esc(e.name)}${esc(val)} <span class="mono id">${esc(blk.id)}</span>${frozen ? ' <span class="frz" title="Congelado: no aprende">❄</span>' : ''}</span>
       <span class="role">${esc(role)}</span>
       <span class="dots" aria-hidden="true">${dotsHTML(blk.id)}</span>
-      ${e.group === 'hands' || e.group === 'feet' ? '' : `<span class="port out" data-port="${esc(blk.id)}" title="Arrastra hasta otro bloque para unirlos"></span>`}
+      ${e.group === 'hands' || e.group === 'feet' ? '' : `<span class="port out" data-port="${esc(blk.id)}" aria-hidden="true" title="Arrastra hasta otro bloque para unirlos. Alt + clic quita todos sus cables"></span>`}
     </button>`;
   }
   // neuronas del bloque: un punto por neurona (hasta 16), encendido según su valor en la escena del banco
@@ -572,13 +581,19 @@ export function mountEditor(root, { catalog, toast }) {
     return (S.genome.wires || []).map((w, i) => {
       const a = L.nodes[w.from], b = L.nodes[w.to];
       if (!a || !b) return '';
-      const d = wirePath(a, b, L, [w.from, w.to]);
+      // los cables no esquivan la tarjeta que arrastras: si no, huirían de ella y nunca podrías soltarla encima de uno
+      const d = wirePath(a, b, L, drag && drag.moved ? [w.from, w.to, drag.id] : [w.from, w.to]);
       const bad = (S.issues.byWire[i] || []).length;
       const sel = S.sel && S.sel.kind === 'wire' && S.sel.index === i;
+      // el cable cuya punta llevas en la mano no se dibuja: lo dibuja el cable provisional que sigue al ratón
+      const held = S.link && S.link.held.kind === 'end' && S.link.held.index === i ? ' held' : '';
+      // encima del cable: el ratón (se ilumina) o una tarjeta que se meterá en medio al soltarla (se abre un hueco)
+      const hov = S.hoverWire === i ? ' hov' : '';
+      const ins = drag && drag.wire === i ? (drag.tg.get(i) && drag.tg.get(i).ok ? ' ins-ok' : ' ins-no') : '';
       // nervios: la señal real del bloque de salida en la escena del banco (más señal, pulso más vivo y más rápido)
       const s = S.bench.sig && S.bench.sig[w.from];
       const nerve = s && !bad ? `<path class="nerve" data-key="nv:${i}" d="${d}" style="--lv:${s.level.toFixed(2)};animation-duration:${(2.6 - 1.9 * s.level).toFixed(2)}s"/>` : '';
-      return `<path data-key="w:${i}" class="wire g-${groupOf(w.from)} s-${S.streams[w.from] || 'ctx'}${sel ? ' sel' : ''}${bad ? ' bad' : ''}" d="${d}"/>${nerve}<path data-key="hw:${i}" class="hit" data-wire="${i}" d="${d}"><title>${esc(w.from)} → ${esc(w.to)}: lleva ${esc(STREAM[S.streams[w.from]] || '—')}${s ? ` · señal ${pct(s.level)} del bloque más activo` : ''}</title></path>`;
+      return `<path data-key="w:${i}" class="wire g-${groupOf(w.from)} s-${S.streams[w.from] || 'ctx'}${sel ? ' sel' : ''}${bad ? ' bad' : ''}${held}${hov}${ins}" d="${d}"/>${held ? '' : nerve}<path data-key="hw:${i}" class="hit" data-wire="${i}" d="${d}"><title>${esc(w.from)} → ${esc(w.to)}: lleva ${esc(STREAM[S.streams[w.from]] || '—')}${s ? ` · señal ${pct(s.level)} del bloque más activo` : ''}</title></path>`;
     }).join('');
   }
   function redrawWires() {
@@ -586,6 +601,43 @@ export function mountEditor(root, { catalog, toast }) {
     if (!svg) return;
     patch(svg, `${wiresSVG(layout())}<path id="edTmpWire" data-key="tmp" class="wire tmp" d=""/>`);
   }
+  // el cable bajo el ratón (o, si no, el elegido): «✕ Desenchufar» y «＋ Añadir capa» justo encima de su mitad, a tamaño
+  // de pantalla (sesión 12: dentro del lienzo, a 58 % de zoom, el ＋ medía 15 px). Encima y no en medio: pulsar el cable
+  // lo sigue eligiendo, sin riesgo de quitarlo
+  function renderWireTools() {
+    const el = $('edWireTools');
+    const i = S.link || (drag && drag.moved) ? null : S.hoverWire ?? (S.sel && S.sel.kind === 'wire' ? S.sel.index : null);
+    const bd = $('edBoard'), path = i !== null && S.genome && bd.querySelector(`svg.wires path.hit[data-wire="${i}"]`);
+    if (!path) { el.hidden = true; return; }
+    const w = S.genome.wires[i];
+    patch(el, `<button type="button" class="wt-x" data-unwire="${i}" title="Quita el cable ${esc(w.from)} → ${esc(w.to)} (también: Supr con el cable elegido, o arrastra su punta fuera de ${esc(w.to)})">✕<span class="t"> Desenchufar</span></button><button type="button" class="wire-plus" data-wireplus="${i}" title="Mete un bloque en medio: ${esc(w.from)} → nuevo → ${esc(w.to)}">＋<span class="t"> Añadir capa</span></button>`);
+    el.hidden = false;
+    // el primer sitio del cable (la mitad, y si no, hacia los lados), encima o debajo, donde no tapen ninguna tarjeta
+    const B = bd.getBoundingClientRect(), R = root.getBoundingClientRect(), m = path.getScreenCTM(), len = path.getTotalLength();
+    const cards = [...bd.querySelectorAll('[data-node]')].map((n) => n.getBoundingClientRect());
+    const cover = () => { const t = el.getBoundingClientRect(); return cards.reduce((s, c) => s + Math.max(0, Math.min(t.right, c.right) - Math.max(t.left, c.left)) * Math.max(0, Math.min(t.bottom, c.bottom) - Math.max(t.top, c.top)), 0); };
+    // con texto si cabe sin tapar nada; si no, compactos (✕ y ＋; el texto sale al pasar el ratón por cada uno)
+    let best = null;
+    for (const compact of [false, true]) {
+    el.classList.toggle('compact', compact);
+    for (const f of [0.5, 0.35, 0.65, 0.22, 0.78]) {
+      const q = path.getPointAtLength(len * f), x = q.x * m.a + m.e, y = q.y * m.d + m.f;
+      if (x < B.left + 20 || x > B.right - 20 || y < B.top + 40 || y > B.bottom - 4) continue;
+      for (const below of [false, true]) {
+        el.style.left = `${x - R.left}px`; el.style.top = `${y - R.top}px`; el.classList.toggle('below', below);
+        const c = cover();
+        if (!best || c < best.c) best = { x, y, below, c };
+        if (!c) break;
+      }
+      if (best && !best.c) break;
+    }
+    if (best && !best.c) break;
+    if (!compact) best = null;
+    }
+    if (!best) { el.hidden = true; return; }
+    el.style.left = `${best.x - R.left}px`; el.style.top = `${best.y - R.top}px`; el.classList.toggle('below', best.below);
+  }
+
 
   // "+ Añadir capa" sobre un cable (P6): los bloques de en medio que caben entre los dos y, plegados, los que no y por qué
   function insertHTML(index, w) {
@@ -1035,6 +1087,33 @@ export function mountEditor(root, { catalog, toast }) {
   root.addEventListener('focusout', (ev) => { if (palItem(ev.target) && !palItem(ev.relatedTarget)) { S.palHover = null; renderPalTip(); } });
   $('edRail').addEventListener('scroll', () => { if (S.palHover) renderPalTip(); }, { passive: true });
 
+  // pasar el ratón por un cable lo ilumina y saca sus botones (✕ Desenchufar, ＋ Añadir capa); se van 0,3 s después de
+  // salir del cable y de los botones, así da tiempo a llegar a ellos
+  let wireOff = null;
+  function hoverWire(i) {
+    clearTimeout(wireOff);
+    if (S.hoverWire === i) return;
+    const bd = $('edBoard'), mark = (k, on) => { if (k !== null) bd.querySelector(`svg.wires path.wire[data-key="w:${k}"]`)?.classList.toggle('hov', on); };
+    mark(S.hoverWire, false); mark(i, true);
+    S.hoverWire = i;
+    renderWireTools();
+  }
+  const WIRE_ZONE = 'path.hit[data-wire], #edWireTools';
+  root.addEventListener('pointerover', (ev) => {
+    if (S.link || drag || !ev.target.closest) return;
+    const hit = ev.target.closest('path.hit[data-wire]');
+    // 0,25 s quieto sobre el cable: cruzar un cable de paso no hace saltar sus botones
+    if (hit) { const i = Number(hit.dataset.wire); clearTimeout(wireOff); if (S.hoverWire !== i) wireOff = setTimeout(() => hoverWire(i), 250); }
+    else if (ev.target.closest('#edWireTools')) clearTimeout(wireOff);
+  });
+  root.addEventListener('pointerout', (ev) => {
+    if (!ev.target.closest || !ev.target.closest(WIRE_ZONE)) return;
+    const to = ev.relatedTarget;
+    if (to && to.closest && to.closest(WIRE_ZONE)) return;
+    clearTimeout(wireOff); wireOff = setTimeout(() => hoverWire(null), 300);
+  });
+  $('edBoard').addEventListener('scroll', () => { if (!$('edWireTools').hidden) renderWireTools(); }, { passive: true });
+
   // la cabecera vive en la de la etapa (fuera de root): sus eventos llegan por el mismo camino (ver slot())
   const mine = (el) => !!el && (root.contains(el) || (S.slotEl && S.slotEl.contains(el)));
   document.addEventListener('click', (ev) => { if (S.menu && !(ev.target.closest && ev.target.closest('.edh-more'))) { S.menu = false; renderHead(); } }, true);
@@ -1067,7 +1146,8 @@ export function mountEditor(root, { catalog, toast }) {
       toast(`${(M.entryOf(catalog, t.dataset.insert) || {}).name} (${r.id}) va ahora en medio del cable.`);
       return;
     }
-    if (t.dataset.wireplus) { S.panelTab = 'capa'; if (S.folded) fold(false); else renderPanel(); setTimeout(() => { const el = $('edInsert'); if (el) { el.scrollIntoView({ block: 'nearest' }); el.querySelector('button')?.focus(); } }, 60); return; }
+    if (t.dataset.unwire !== undefined) { unwire(Number(t.dataset.unwire)); return; }
+    if (t.dataset.wireplus) { const wi = Number(t.dataset.wireplus); if (!(S.sel && S.sel.kind === 'wire' && S.sel.index === wi)) { S.sel = { kind: 'wire', index: wi }; renderBoard(); } S.panelTab = 'capa'; if (S.folded) fold(false); else renderPanel(); setTimeout(() => { const el = $('edInsert'); if (el) { el.scrollIntoView({ block: 'nearest' }); el.querySelector('button')?.focus(); } }, 60); return; }
     if (t.dataset.wireup) { const [a, b] = t.dataset.wireup.split('|'); const r = M.connect(S.genome, a, b); if (r.error) { toast(r.error, 'error'); return; } commit(r.genome); return; }
     if (t.dataset.fix) { const f = Hn.fixes(S.genome, catalog, S.check).find((x) => x.key === t.dataset.fix); if (f) { commit(f.apply(S.genome), { label: f.label }); toast(`Arreglado: ${f.label}.`); } return; }
     if (t.dataset.node) {
@@ -1114,7 +1194,7 @@ export function mountEditor(root, { catalog, toast }) {
       case 'delete': S.menu = false; renderHead(); S.confirm = { kind: 'delete' }; showModal(); break;
       case 'tidy': S.pos = {}; store.del(LS.pos(S.netId)); renderBoard(); break;
       case 'remove': { const id = t.dataset.id; commit(M.removeBlock(S.genome, id), { select: null }); break; }
-      case 'unwire': commit(M.disconnect(S.genome, Number(t.dataset.index)), { select: null }); break;
+      case 'unwire': unwire(Number(t.dataset.index)); break;
       case 'probe': probeOpen(); break;
       case 'probe-close': probeClose(); break;
       case 'probe-go': probeStart(); break;
@@ -1220,7 +1300,7 @@ export function mountEditor(root, { catalog, toast }) {
     if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 's' && S.genome) { ev.preventDefault(); save(); return; }
     if (ev.key === 'Escape' && S.menu) { S.menu = false; renderHead(); return; }
     if (ev.key === 'Escape' && S.sel) { select(null); return; }
-    if (S.sel && S.sel.kind === 'wire' && (ev.key === 'Delete' || ev.key === 'Backspace') && !typing) { ev.preventDefault(); commit(M.disconnect(S.genome, S.sel.index), { select: null }); return; }
+    if (S.sel && S.sel.kind === 'wire' && (ev.key === 'Delete' || ev.key === 'Backspace') && !typing) { ev.preventDefault(); unwire(S.sel.index); return; }
     const node = ev.target.closest && ev.target.closest('[data-node]');
     if (!node || !S.genome) return;
     const id = node.dataset.node;
@@ -1247,64 +1327,148 @@ export function mountEditor(root, { catalog, toast }) {
   root.addEventListener('pointerdown', (ev) => {
     if (ev.target.id === 'edSplit') { if (S.folded) { S.folded = false; store.set('gw.ed.folded', false); renderPanel(); } split = { y: ev.clientY, h: parseFloat(getComputedStyle(root).getPropertyValue('--ed-bottom')) || 262 }; ev.target.setPointerCapture(ev.pointerId); return; }
     if (!S.genome || ev.button !== 0) return;
-    const port = ev.target.closest('[data-port]');
+    const port = ev.target.closest('[data-port], [data-portin]');
     const node = ev.target.closest('[data-node]');
     if (port) {
       ev.preventDefault(); ev.stopPropagation();
-      const o = Hn.connectOptions(S.genome, catalog, port.dataset.port);
-      S.link = { from: port.dataset.port, ok: new Set(o.to.filter((x) => x.ok).map((x) => x.id)), why: new Map(o.to.filter((x) => !x.ok).map((x) => [x.id, x.why])) };
+      const where = port.dataset.port ? { port: 'out', id: port.dataset.port } : { port: 'in', id: port.dataset.portin };
+      // Alt + clic (como en Unreal): quita todos los cables de ese punto
+      if (ev.altKey) {
+        const r = P.unplugAll(S.genome, catalog, where.id, where.port);
+        if (!r.removed.length) { toast('Ese punto no tiene cables.'); return; }
+        commit(r.genome, { select: null, label: r.text });
+        toast(r.text, 'info', { label: 'Deshacer', run: undo });
+        return;
+      }
+      const held = P.grab(S.genome, catalog, where);
+      if (!held) return;
+      const tg = P.targets(S.genome, catalog, held);
+      // la tarjeta de la que sale el cable (o a la que llega, si lo sacas al revés desde una entrada vacía)
+      const own = held.kind === 'to' ? held.to : held.from;
+      S.link = { held, tg, from: own, hot: null, res: null, ok: new Set([...tg].filter(([, t]) => t.ok).map(([id]) => id)), why: new Map([...tg].filter(([, t]) => !t.ok).map(([id, t]) => [id, t.why])) };
+      S.hoverWire = null;
       renderBoard();
+      linkMove(ev);
       $('edBoard').setPointerCapture(ev.pointerId);
       return;
     }
     if (node) {
       const p = layout().nodes[node.dataset.node];
-      drag = { id: node.dataset.node, sx: ev.clientX, sy: ev.clientY, ox: p.x, oy: p.y, moved: false, el: node };
+      drag = { id: node.dataset.node, sx: ev.clientX, sy: ev.clientY, ox: p.x, oy: p.y, moved: false, el: node, wire: null, tg: null };
       node.setPointerCapture(ev.pointerId);
     }
   });
+  // la tarjeta donde caería lo que llevas: la que está bajo el ratón o, si no, la más cercana que valga a menos de 40 px
+  // (imán: no hace falta acertar a la tarjeta)
+  function linkHot(ev) {
+    const under = document.elementFromPoint(ev.clientX, ev.clientY);
+    const t = under && under.closest && under.closest('[data-node]');
+    if (t && $('edBoard').contains(t)) return t.dataset.node;
+    let best = null, bd = 40;
+    for (const n of $('edBoard').querySelectorAll('[data-node]')) {
+      if (!S.link.ok.has(n.dataset.node) && !(S.link.tg.get(n.dataset.node) || {}).back) continue;
+      const r = n.getBoundingClientRect();
+      const d = Math.hypot(Math.max(r.left - ev.clientX, 0, ev.clientX - r.right), Math.max(r.top - ev.clientY, 0, ev.clientY - r.bottom));
+      if (d < bd) { bd = d; best = n.dataset.node; }
+    }
+    return best;
+  }
+  // el cartel que sigue al ratón mientras arrastras: qué pasará si sueltas ahí
+  function dropTip(ev, text, kind = '') {
+    const el = $('edDropTip');
+    if (!text) { el.hidden = true; return; }
+    el.textContent = text; el.className = `drop-tip${kind ? ` ${kind}` : ''}`; el.hidden = false;
+    const R = root.getBoundingClientRect();
+    el.style.left = `${Math.max(4, Math.min(ev.clientX - R.left + 16, R.width - el.offsetWidth - 6))}px`;
+    el.style.top = `${Math.max(4, Math.min(ev.clientY - R.top + 18, R.height - el.offsetHeight - 6))}px`;
+  }
+  const portAt = (id, side) => { const L = layout(), a = L.nodes[id]; return a && { x: side === 'out' ? a.x + CARD.w : a.x, y: a.y + CARD.h / 2 }; };
+  const bez = (a, b) => `M${a.x},${a.y} C${a.x + 60},${a.y} ${b.x - 60},${b.y} ${b.x},${b.y}`;
+  function linkMove(ev) {
+    const { held } = S.link, p = boardPoint(ev);
+    const hot = linkHot(ev);
+    if (hot !== S.link.hot || !S.link.res) {
+      const bd = $('edBoard');
+      if (S.link.hot) bd.querySelector(`[data-node="${CSS.escape(S.link.hot)}"]`)?.classList.remove('link-hot');
+      if (hot) bd.querySelector(`[data-node="${CSS.escape(hot)}"]`)?.classList.add('link-hot');
+      S.link.hot = hot;
+      S.link.res = P.drop(S.genome, catalog, held, { node: hot }, S.link.tg);
+    }
+    const tmp = $('edBoard').querySelector('#edTmpWire');
+    // con el imán, la punta ya se pega al punto de la tarjeta; si no, sigue al ratón
+    if (tmp) {
+      const d = held.kind === 'to'
+        ? bez(hot && hot !== held.to ? portAt(hot, 'out') : p, portAt(held.to, 'in'))
+        : bez(portAt(held.from, 'out'), hot && hot !== held.from ? portAt(hot, 'in') : p);
+      tmp.setAttribute('d', d);
+      tmp.classList.toggle('no', !!S.link.res.why);
+    }
+    const r = S.link.res;
+    const idle = held.kind === 'end' ? 'Suéltalo en el vacío para desenchufar, o en otra tarjeta verde para cambiarlo de sitio.' : 'Llévalo hasta una tarjeta verde y suelta. Las grises no valen: pasa por encima y te digo por qué.';
+    dropTip(ev, r.will || idle, r.why ? 'no' : r.action === 'remove' ? 'rm' : r.action !== 'nada' ? 'ok' : '');
+  }
   root.addEventListener('pointermove', (ev) => {
     if (split) { const h = Math.max(180, Math.min(620, split.h - (ev.clientY - split.y))); root.style.setProperty('--ed-bottom', `${h}px`); return; }
     if (S.link) {
-      const L = layout(), a = L.nodes[S.link.from], p = boardPoint(ev);
-      const tmp = $('edBoard').querySelector('#edTmpWire');
       // cerca del borde de arriba o de abajo, el lienzo se desplaza solo: así llegas a los bloques que no se ven
       const bd = $('edBoard'), br = bd.getBoundingClientRect();
       if (ev.clientY > br.bottom - 28) bd.scrollTop += 14; else if (ev.clientY < br.top + 28) bd.scrollTop -= 14;
-      if (tmp && a) tmp.setAttribute('d', `M${a.x + CARD.w},${a.y + CARD.h / 2} C${a.x + CARD.w + 60},${a.y + CARD.h / 2} ${p.x - 60},${p.y} ${p.x},${p.y}`);
+      linkMove(ev);
       return;
     }
     if (!drag) return;
     const dx = (ev.clientX - drag.sx) / S.zoom, dy = (ev.clientY - drag.sy) / S.zoom;
     if (!drag.moved && Math.hypot(dx, dy) < 4) return;
+    // sin la transición de la posición mientras se arrastra: la tarjeta va pegada al ratón (con ella se quedaba atrás)
+    if (!drag.moved) drag.el.classList.add('dragging');
     drag.moved = true;
     const x = Math.max(0, drag.ox + dx), y = Math.max(56, drag.oy + dy);
     S.pos = { ...S.pos, [drag.id]: { x, y } };
     drag.el.style.left = `${x}px`; drag.el.style.top = `${y}px`;
+    // una tarjeta sin cables encima de un cable se meterá en medio al soltarla (como en Blender): el cable se ilumina y se
+    // abre un hueco con los dos tramos que quedarían
+    if (!drag.tg) { drag.tg = P.targets(S.genome, catalog, { kind: 'card', id: drag.id }); S.hoverWire = null; renderWireTools(); }
+    let wi = null;
+    if (drag.tg.size) {
+      const r = drag.el.getBoundingClientRect();
+      const hit = document.elementsFromPoint(r.left + r.width / 2, r.top + r.height / 2).find((e) => e.matches && e.matches('path.hit[data-wire]'));
+      wi = hit ? Number(hit.dataset.wire) : null;
+    }
+    drag.wire = wi;
     redrawWires();
+    if (wi !== null) {
+      const w = S.genome.wires[wi], res = P.drop(S.genome, catalog, { kind: 'card', id: drag.id }, { wire: wi }, drag.tg);
+      if (res.action === 'insert') $('edBoard').querySelector('#edTmpWire')?.setAttribute('d', `${bez(portAt(w.from, 'out'), { x, y: y + CARD.h / 2 })} ${bez({ x: x + CARD.w, y: y + CARD.h / 2 }, portAt(w.to, 'in'))}`);
+      dropTip(ev, res.will, res.action === 'insert' ? 'ok' : 'no');
+    } else dropTip(ev, '');
   });
   root.addEventListener('pointerup', (ev) => {
     if (split) { split = null; store.set(LS.bottom, parseFloat(root.style.getPropertyValue('--ed-bottom'))); S.fit && renderBoard(); return; }
     if (S.link) {
       const L = S.link;
       S.link = null;
-      const under = document.elementFromPoint(ev.clientX, ev.clientY);
-      const target = under && under.closest && under.closest('[data-node]');
-      if (!target || target.dataset.node === L.from) { renderBoard(); return; }
-      const why = L.why.get(target.dataset.node);
-      if (why) {
-        // no se une: dice por qué y qué haría falta
-        const o = Hn.connectOptions(S.genome, catalog, L.from).to.find((x) => x.id === target.dataset.node);
-        toast(`${why}${o && o.hint ? ` ${o.hint}` : ''}`, 'error'); renderBoard(); return;
-      }
-      const r = M.connect(S.genome, L.from, target.dataset.node);
-      if (r.error) { toast(r.error, 'error'); renderBoard(); return; }
-      commit(r.genome, { select: { kind: 'block', id: target.dataset.node } });
+      dropTip(ev, '');
+      // lo mismo que enseñaba el cartel: la tarjeta bajo el ratón o la del imán
+      const r = P.drop(S.genome, catalog, L.held, { node: L.hot }, L.tg);
+      if (r.action === 'nada') { if (r.why) toast(r.why, 'error'); renderBoard(); return; }
+      const sel = r.action === 'remove' ? null : { kind: 'block', id: L.held.kind === 'to' ? L.held.to : L.hot };
+      commit(r.genome, { select: sel, label: r.label });
+      toast(r.text, 'info', r.action === 'remove' || r.action === 'move' ? { label: 'Deshacer', run: undo } : null);
       return;
     }
     if (drag) {
-      if (drag.moved) { store.set(LS.pos(S.netId), S.pos); suppressClick = true; renderBoard(); focusNode(drag.id); }
+      const d = drag;
       drag = null;
+      dropTip(ev, '');
+      if (!d.moved) return;
+      store.set(LS.pos(S.netId), S.pos); suppressClick = true;
+      const r = d.wire !== null ? P.drop(S.genome, catalog, { kind: 'card', id: d.id }, { wire: d.wire }, d.tg) : null;
+      if (r && r.action === 'insert') {
+        commit(r.genome, { select: { kind: 'block', id: d.id }, label: r.label });
+        toast(r.text, 'info', { label: 'Deshacer', run: undo });
+        popIn($('edBoard').querySelector(`[data-node="${CSS.escape(d.id)}"]`));
+      } else { if (r && r.why) toast(r.why, 'error'); renderBoard(); }
+      focusNode(d.id);
     }
   });
   window.addEventListener('beforeunload', (ev) => { if (S.dirty) { ev.preventDefault(); ev.returnValue = ''; } });

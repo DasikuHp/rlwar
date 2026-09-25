@@ -116,7 +116,7 @@ ul { list-style: none; }
 .wire.s-mix, .wire.bad { stroke: var(--bad); opacity: 1; }
 .wire.sel { stroke-width: 4; opacity: 1; }
 .wire.tmp { stroke: var(--cyan); stroke-dasharray: 4 4; opacity: 1; }
-.hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; cursor: pointer; }
+.hit { fill: none; stroke: transparent; stroke-width: calc(16px / var(--z, 1)); pointer-events: stroke; cursor: pointer; }
 .wires { pointer-events: none; } .wires .hit { pointer-events: stroke; }
 .node { position: absolute; width: 156px; height: 46px; display: grid; grid-template-columns: 22px 1fr; grid-template-rows: auto auto; align-content: center; column-gap: 6px;
   padding: 0 12px 0 10px; text-align: left; border-radius: 6px; border: 1px solid color-mix(in srgb, var(--g) 50%, transparent);
@@ -128,10 +128,14 @@ ul { list-style: none; }
 .node.sel { outline: 2px solid var(--g); outline-offset: 2px; }
 .node.err { border: 1px dashed var(--bad); }
 .node.warn::after { content: '!'; position: absolute; top: -8px; right: -8px; width: 16px; height: 16px; border-radius: 50%; background: var(--warn); color: #1a1000; font: 700 11px/16px var(--ui); text-align: center; }
-.port { position: absolute; top: 50%; width: 10px; height: 10px; margin-top: -5px; border-radius: 50%; background: var(--plane); border: 2px solid var(--g); }
-.port.in { left: -6px; }
-.port.out { right: -7px; width: 13px; height: 13px; margin-top: -6.5px; background: var(--g); cursor: crosshair; }
-.port.out:hover { transform: scale(1.25); }
+/* sesión 12: cada punto de enchufe atrapa el ratón en un círculo de 28 px en pantalla con cualquier zoom (a 58 % medía
+   7,5 px); lo que se ve es el punto de dentro (::after), que crece al pasar por encima */
+.port { position: absolute; top: 50%; width: calc(28px / var(--z, 1)); height: calc(28px / var(--z, 1)); margin-top: calc(-14px / var(--z, 1)); border-radius: 50%; z-index: 1; }
+.port::after { content: ''; position: absolute; left: 50%; top: 50%; box-sizing: border-box; width: 14px; height: 14px; border-radius: 50%; background: var(--plane); border: 2px solid var(--g); transform: translate(-50%, -50%); transition: transform .12s; }
+.port.in { left: calc(-14px / var(--z, 1)); cursor: grab; }
+.port.out { right: calc(-14px / var(--z, 1)); cursor: crosshair; }
+.port.out::after { width: 17px; height: 17px; background: var(--g); }
+.port:hover::after { transform: translate(-50%, -50%) scale(1.5); box-shadow: 0 0 10px var(--g); }
 .flag { position: absolute; z-index: 2; max-width: 280px; padding: 6px 9px; font-size: 12px; background: #1d0f18; border: 1px solid #5a2231; border-left: 3px solid var(--bad); border-radius: 4px; }
 .flag .eg, .explain .eg, .issues .eg { display: block; margin-top: 3px; font-family: var(--mono); font-size: 11.5px; color: #9fb0cf; }
 .flag .more { display: block; color: var(--dim); margin-top: 3px; }
@@ -182,7 +186,9 @@ p.bad { color: var(--bad); }
 #toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); max-width: min(720px, 90vw); padding: 8px 14px; border-radius: 6px; background: #13233a; border: 1px solid var(--cyan); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 30; }
 #toast.show { opacity: 1; }
 #toast.error { border-color: var(--bad); background: #2a1119; }
-@media (prefers-reduced-motion: reduce) { #toast { transition: none; } .port.out:hover { transform: none; } }
+@media (prefers-reduced-motion: reduce) { #toast { transition: none; } .port::after { transition: none; } }
+#toast.act { pointer-events: auto; }
+#toast .toast-act { margin-left: 12px; padding: 2px 10px; font-size: 12.5px; }
 @media (max-width: 1360px) { .lab-ed { grid-template-columns: 240px minmax(0, 1fr); } .ed-status { max-width: 200px; } .cols2 { grid-template-columns: 1fr; gap: 8px; } }
 
 /* ---------- inicio del laboratorio ---------- */

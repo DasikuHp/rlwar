@@ -10,8 +10,11 @@ const marked = (sel) => [...sel.querySelectorAll('option')].findIndex((o) => o.h
 
 export function patch(root, html) {
   const tpl = root.ownerDocument.createElement('template');
-  tpl.innerHTML = html;
-  patchChildren(root, tpl.content);
+  // dentro de un <svg>, lo que llega se lee como SVG (sesión 12: leído como HTML, un <path> era un elemento que ni se pinta
+  // ni se puede tocar, y además no casaba con el de antes: al mover una tarjeta, sus cables se rompían)
+  const svg = root.namespaceURI === 'http://www.w3.org/2000/svg';
+  tpl.innerHTML = svg ? `<svg>${html}</svg>` : html;
+  patchChildren(root, svg ? tpl.content.firstChild : tpl.content);
 }
 
 function patchChildren(from, to) {

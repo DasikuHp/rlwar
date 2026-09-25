@@ -4,7 +4,8 @@ export const mk = ({ ev, send, sleep }) => {
   const rect = (sel) => ev(`(()=>{const e=document.querySelector(${JSON.stringify(sel)}); if(!e) return null; const r=e.getBoundingClientRect(); return {x:r.x,y:r.y,w:r.width,h:r.height}})()`);
   // qué hay encima del centro del elemento: si no es él ni un hijo suyo, está tapado
   const cover = (sel) => ev(`(()=>{const e=document.querySelector(${JSON.stringify(sel)}); if(!e) return 'NO EXISTE'; const r=e.getBoundingClientRect(); const x=r.x+r.width/2,y=r.y+r.height/2; if(x<0||y<0||x>innerWidth||y>innerHeight) return 'FUERA DE PANTALLA '+Math.round(x)+','+Math.round(y); const t=document.elementFromPoint(x,y); if(!t) return 'nada en el punto'; if(t===e||e.contains(t)) return 'ok'; return 'TAPADO por '+t.tagName+'.'+String(t.className.baseVal??t.className).split(' ')[0]})()`);
-  const mouse = async (type, x, y, buttons = 1) => send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons, clickCount: type === 'mouseMoved' ? 0 : 1 });
+  // modifiers: 1 = Alt, 2 = Ctrl, 4 = Meta, 8 = Mayús (como en CDP)
+  const mouse = async (type, x, y, buttons = 1, modifiers = 0) => send('Input.dispatchMouseEvent', { type, x, y, button: 'left', buttons, modifiers, clickCount: type === 'mouseMoved' ? 0 : 1 });
   const clickAt = async (x, y) => { await mouse('mouseMoved', x, y, 0); await mouse('mousePressed', x, y); await mouse('mouseReleased', x, y, 0); };
   const click = async (sel, label = sel) => {
     let c = await cover(sel);
@@ -20,6 +21,13 @@ export const mk = ({ ev, send, sleep }) => {
     for (let k = 1; k <= 8; k++) { await mouse('mouseMoved', x0 + (x1 - x0) * k / 8, y0 + (y1 - y0) * k / 8, 1); await sleep(20); }
     await mouse('mouseReleased', x1, y1, 0); return true;
   };
+  // arrastrar entre dos puntos de pantalla en `steps` pasos; `mid` (opcional) mira qué pasa antes de soltar
+  const dragXY = async (x0, y0, x1, y1, mid = null, steps = 10) => {
+    await mouse('mouseMoved', x0, y0, 0); await mouse('mousePressed', x0, y0);
+    for (let k = 1; k <= steps; k++) { await mouse('mouseMoved', x0 + (x1 - x0) * k / steps, y0 + (y1 - y0) * k / steps, 1); await sleep(25); }
+    const seen = mid ? await mid() : null;
+    await mouse('mouseReleased', x1, y1, 0); return seen;
+  };
   const key = async (k, mods = 0, code) => {
     const c = code || (k.length === 1 ? 'Key' + k.toUpperCase() : k);
     await send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code: c, modifiers: mods, windowsVirtualKeyCode: k.length === 1 ? k.toUpperCase().charCodeAt(0) : 0 });
@@ -27,5 +35,5 @@ export const mk = ({ ev, send, sleep }) => {
   };
   // cajas que se solapan: a contra una lista
   const overlaps = (a, list) => ev(`(()=>{const A=document.querySelector(${JSON.stringify(a)}); if(!A||A.hidden) return 'sin '+${JSON.stringify(a)}; const r=A.getBoundingClientRect(); const out=[]; for(const e of document.querySelectorAll(${JSON.stringify(list)})){const s=e.getBoundingClientRect(); const ix=Math.min(r.right,s.right)-Math.max(r.left,s.left), iy=Math.min(r.bottom,s.bottom)-Math.max(r.top,s.top); if(ix>2&&iy>2) out.push((e.dataset.node||e.className.baseVal||e.className)+' '+Math.round(ix)+'x'+Math.round(iy));} return out.join(' | ')||'ninguno'})()`);
-  return { rect, cover, clickAt, click, drag, key, overlaps, mouse };
+  return { rect, cover, clickAt, click, drag, dragXY, key, overlaps, mouse };
 };

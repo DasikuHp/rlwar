@@ -53,10 +53,13 @@ body.game .ed2 { display: grid; grid-template-columns: 236px minmax(0, 1fr) 410p
 .tpl2-head b { font-weight: 600; font-size: 13.5px; }
 .tpl2-head small { color: var(--dim); font-size: 11.5px; }
 .tpl2-body { padding: 0 10px 10px; font-size: 12.5px; color: #b3bed6; display: grid; gap: 6px; }
-.pal-hint { border: 1px dashed var(--line-2); border-radius: 8px; padding: 8px 10px; font-size: 12px; min-height: 72px; color: #b3bed6; background: #0a1224; }
-.pal-hint b { color: var(--text); }
-.pal-hint .why { display: block; margin-top: 5px; color: var(--cyan); }
-.pal-hint.no .why { color: var(--warn); }
+.pal-hint { border: 1px dashed var(--line-2); border-radius: 8px; padding: 8px 10px; font-size: 12px; color: #b3bed6; background: #0a1224; }
+/* sesión 11: la explicación del bloque flota al lado del raíl (antes crecía dentro y empujaba la lista bajo el ratón) */
+.ed2 .pal-tip { position: absolute; z-index: 30; width: 280px; padding: 9px 12px; font-size: 12.5px; line-height: 1.45; color: #b3bed6; pointer-events: none;
+  background: #0b1428f7; border: 1px solid var(--line-2); border-radius: 10px; box-shadow: 0 14px 36px #000a, var(--glow-c); }
+.ed2 .pal-tip b { color: var(--text); }
+.ed2 .pal-tip .why { display: block; margin-top: 6px; color: var(--cyan); }
+.ed2 .pal-tip.no .why { color: var(--warn); }
 .ed2 h4.grp { font-size: 12px; font-weight: 600; margin: 12px 0 5px; display: flex; align-items: baseline; gap: 8px; border-left: 3px solid var(--g); padding-left: 7px; }
 .ed2 h4.grp small { color: var(--dim); font-weight: 400; }
 .ed2 .pal-item { display: grid; grid-template-columns: 22px minmax(0, 1fr); grid-template-rows: auto auto; column-gap: 6px; text-align: left; padding: 4px 8px; }
@@ -189,6 +192,9 @@ body.reduce .ed2 .nerve { animation: none; stroke-dasharray: none; stroke-width:
 .b-scenes button[aria-checked="true"] { border-color: var(--cyan); color: var(--text); box-shadow: var(--glow-c); }
 .b-explain { font-size: 12px; color: #b3bed6; }
 .bench-svg { width: 100%; height: auto; aspect-ratio: 500 / 300; flex-shrink: 0; display: block; border: 1px solid var(--line); border-radius: 8px; background: #081022; touch-action: none; }
+/* sesión 11: a 1280 × 800 solo asomaban 95 px de la escena (y el soldado, en el borde). Ahora cabe entera en el alto del
+   panel (cabecera y botones de escena: ~112 px) y crece si arrastras la raya; su texto va debajo */
+.ed2 .bench-svg { width: min(100%, max(220px, calc((var(--ed-bottom, 262px) - 112px) * 5 / 3))); align-self: center; }
 .bench-svg.editable { cursor: crosshair; }
 .b-plane { fill: #081022; } .b-axis { stroke: #1d2b4d; stroke-width: 1; }
 .b-obs { fill: #1c2647; stroke: #43538a; stroke-width: 1; }
@@ -273,8 +279,12 @@ body.reduce .ed2 .nerve { animation: none; stroke-dasharray: none; stroke-width:
 .ed2 .insert .ins-no { font-size: 12px; color: var(--dim); }
 .ed2 .insert .ins-no li { margin: 3px 0; }
 /* guía «Tu primera red» (P6, sesión 10): tarjeta arriba a la derecha del lienzo; lo que pide el paso, iluminado */
-.ed2 .ed-coach { grid-column: 2 / 4; grid-row: 2; justify-self: end; align-self: start; width: min(350px, 40%); max-height: calc(100% - 16px); overflow-y: auto; margin: 8px 12px; z-index: 5; }
-.ed2 .coach { display: grid; gap: 7px; padding: 12px 14px; border: 1px solid var(--line-2); border-left: 3px solid var(--cyan); border-radius: 10px; background: #0b1428f5; box-shadow: 0 12px 34px #000a, var(--glow-c); font-size: 12.5px; }
+/* sesión 11: a 1280 × 800 el lienzo mide ~320 px y la tarjeta entera no cabía: lo que hay que hacer (👉 y sus botones)
+   quedaba cortado abajo. Ahora solo se encoge (con su propio scroll) el recuadro verde de lo que ha cambiado */
+.ed2 .ed-coach { grid-column: 2 / 4; grid-row: 2; justify-self: end; align-self: start; width: min(350px, 40%); max-height: calc(100% - 16px); display: flex; flex-direction: column; overflow: hidden; margin: 8px 12px; z-index: 5; }
+.ed2 .coach > * { flex-shrink: 0; }
+.ed2 .coach .coach-after { flex-shrink: 1; min-height: 4.5em; overflow-y: auto; }
+.ed2 .coach { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; gap: 7px; padding: 12px 14px; border: 1px solid var(--line-2); border-left: 3px solid var(--cyan); border-radius: 10px; background: #0b1428f5; box-shadow: 0 12px 34px #000a, var(--glow-c); font-size: 12.5px; }
 .ed2 .coach header { display: flex; align-items: center; gap: 8px; }
 .ed2 .coach header b { white-space: nowrap; letter-spacing: .12em; text-transform: uppercase; font-size: 11px; color: var(--cyan); font-weight: 600; }
 .ed2 .coach header .mono { color: var(--dim); font-size: 11px; white-space: nowrap; }

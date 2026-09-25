@@ -73,11 +73,12 @@ export function mountEditor(root, { catalog, toast }) {
     versions: { list: null, open: null, diff: null, ver: null, busy: false },
     probe: null,
   };
-  let drag = null, suppressClick = false, benchTimer = null;
+  let drag = null, suppressClick = false, benchTimer = null, coachShown = null;
 
   root.innerHTML = `
     <div class="ed-slot-fallback" id="edHead"></div>
     <aside class="ed-rail" id="edRail" aria-label="Plantillas y bloques"></aside>
+    <div class="pal-tip" id="edPalTip" role="tooltip" hidden></div>
     <div class="ed-tools" id="edTools"></div>
     <div class="ed-board" id="edBoard" aria-label="Lienzo de la red"></div>
     <div class="ed-coach" id="edCoach" hidden></div>
@@ -287,16 +288,30 @@ export function mountEditor(root, { catalog, toast }) {
         <ul class="pal">${g.blocks.map((b) => {
           const a = Hn.advice(S.genome, catalog, b.type);
           const short = String(b.explain).split(/[.:]/)[0];
-          return `<li data-key="p:${esc(b.type)}"><button type="button" class="pal-item g-${g.key}${a.can ? '' : ' no'}${a.missing ? ' missing' : ''}" data-add="${esc(b.type)}" ${a.can ? '' : 'aria-disabled="true"'} aria-describedby="palHint"><span class="ico" aria-hidden="true">${esc(b.icon)}</span><span class="pn">${esc(b.name)}</span><small>${esc(short)}</small></button></li>`;
+          return `<li data-key="p:${esc(b.type)}"><button type="button" class="pal-item g-${g.key}${a.can ? '' : ' no'}${a.missing ? ' missing' : ''}" data-add="${esc(b.type)}" ${a.can ? '' : 'aria-disabled="true"'} aria-describedby="edPalTip"><span class="ico" aria-hidden="true">${esc(b.icon)}</span><span class="pn">${esc(b.name)}</span><small>${esc(short)}</small></button></li>`;
         }).join('')}</ul>`).join('');
       const hidden = catalog.blocks.length - M.palette(catalog, S.level).reduce((s, g) => s + g.blocks.length, 0);
-      const hov = S.palHover && M.entryOf(catalog, S.palHover);
-      const a = hov && Hn.advice(S.genome, catalog, S.palHover);
+      // sesión 11: la explicación iba aquí y, al crecer con el ratón encima, empujaba la lista y el clic caía en otro
+      // bloque; ahora sale al lado (renderPalTip) y este texto no cambia nunca
       pal = `<h3>Nuevo bloque <small>pulsa para añadirlo</small></h3>
-        <p class="pal-hint${a && !a.can ? ' no' : ''}" id="palHint" aria-live="polite">${hov ? `<b>${esc(hov.icon)} ${esc(hov.name)}</b>: ${esc(hov.explain)}<span class="why">${esc(a.why)}</span>` : 'Pasa el ratón (o el foco) por un bloque: aquí verás qué hace y dónde irá en tu red.'}</p>
+        <p class="pal-hint">Pasa el ratón (o el foco) por un bloque: al lado verás qué hace y dónde irá en tu red.</p>
         ${groups}${hidden ? `<p class="hint">${hidden} bloques más en ${S.level === 'aprendiz' ? 'Artesano y Científico' : 'Científico'}: cambia la vista arriba del lienzo (nada se bloquea).</p>` : ''}`;
     }
     patch($('edRail'), `<h3>Plantillas <small>para empezar</small></h3><ul class="tpls2">${tpls}</ul>${pal}`);
+    renderPalTip();
+  }
+  // qué hace el bloque bajo el ratón (o con el foco) y dónde iría: flota a la derecha del raíl, a su altura
+  function renderPalTip() {
+    const tip = $('edPalTip'), hov = S.genome && S.palHover && M.entryOf(catalog, S.palHover);
+    const item = hov && $('edRail').querySelector(`[data-add="${CSS.escape(S.palHover)}"]`);
+    if (!item) { tip.hidden = true; return; }
+    const a = Hn.advice(S.genome, catalog, S.palHover);
+    tip.className = `pal-tip${a.can ? '' : ' no'}`;
+    patch(tip, `<b>${esc(hov.icon)} ${esc(hov.name)}</b>: ${esc(hov.explain)}<span class="why">${esc(a.why)}</span>`);
+    tip.hidden = false;
+    const R = root.getBoundingClientRect(), r = item.getBoundingClientRect(), rail = $('edRail').getBoundingClientRect();
+    tip.style.left = `${rail.right - R.left + 8}px`;
+    tip.style.top = `${Math.max(4, Math.min(R.height - tip.offsetHeight - 4, r.top - R.top))}px`;
   }
 
   // barra del lienzo: nivel de vista, datos, estado (con lo que le falta), leyenda y zoom
@@ -437,7 +452,18 @@ export function mountEditor(root, { catalog, toast }) {
     if (st.step.target === 'port') { const c = id('eye.candidates') || id('eye.simulator'); el = c && root.querySelector(`[data-node="${CSS.escape(c)}"] .port.out`); }
     else if (st.step.target === 'wire') { const ch = id('hand.choose'); const i = g.wires.findIndex((w) => w.to === ch && ['eye.candidates', 'eye.simulator'].includes((g.blocks.find((b) => b.id === w.from) || {}).type)); el = i >= 0 && root.querySelector(`svg.wires path.wire[data-key="w:${i}"]`); }
     else el = root.querySelector(st.step.target);
-    if (el) el.classList.add('coach-target');
+    if (!el) return;
+    el.classList.add('coach-target');
+    // lo que pide un paso nuevo se trae a la vista una vez (a 1280 × 800, Candidatos quedaba cortado al pie del raíl)
+    const shownKey = `${st.step.key}:${S.coach.hint}`;
+    if (coachShown === shownKey) return;
+    coachShown = shownKey;
+    const box = el.closest('#edRail, #edBench, #edBoard');
+    if (box) {
+      const r = el.getBoundingClientRect(), b = box.getBoundingClientRect();
+      if (r.bottom > b.bottom - 8) box.scrollTop += r.bottom - b.bottom + 48;
+      else if (r.top < b.top + 8) box.scrollTop -= b.top - r.top + 48;
+    }
   }
   // "Hazlo por mí": el mismo cambio que harías tú, de una vez (se deshace con Ctrl+Z)
   function coachHelp() {
@@ -840,8 +866,8 @@ export function mountEditor(root, { catalog, toast }) {
     const tools = sc.key === 'mia' ? `<div class="b-tools" role="group" aria-label="Editar tu escena"><button type="button" class="mini" data-bench="enemy">+ enemigo</button><button type="button" class="mini" data-bench="ally">+ aliada</button><button type="button" class="mini" data-bench="rock">+ roca</button>${B.picked ? `<button type="button" class="mini danger" data-bench="del">Quitar ${esc(B.picked.kind === 'rock' ? 'la roca' : B.picked.id)}</button>` : ''}</div>` : '';
     patch(el, `<header><h3>Banco de pruebas</h3><button type="button" class="primary mini" data-act="probe" title="Una partida de verdad (x10) contra otra red, aquí mismo">Probar ya</button></header>
       <div class="b-scenes" role="radiogroup" aria-label="Escena">${[...Bn.BENCH_SCENES, { key: 'mia', name: 'Tu escena' }].map((x) => `<button type="button" role="radio" aria-checked="${B.scene === x.key}" data-scene="${x.key}" title="${esc(x.explain || 'Tu propia escena: empieza como la que tengas elegida y la cambias arrastrando.')}">${esc(x.name)}</button>`).join('')}</div>
-      <p class="b-explain">${esc(sc.explain)}</p>
       ${benchSVG(sc, now)}${tools}
+      <p class="b-explain">${esc(sc.explain)}</p>
       <div class="b-row"><span class="seg2" role="radiogroup" aria-label="Qué decide"><button type="button" role="radio" data-phase="shoot" aria-checked="${B.phase === 'shoot'}">Disparar</button><button type="button" role="radio" data-phase="move" aria-checked="${B.phase === 'move'}">Moverse</button></span>
         <label class="seed">Semilla <input class="numin mono" type="number" min="0" step="1" value="${esc(B.seed)}" data-bseed title="La misma semilla sortea igual: si la elección cambia, es por tus cambios"></label></div>
       <div class="b-out" aria-live="polite">${!now ? '<p class="dim">Calculando…</p>' : !now.ok ? `<p class="warn-text">${esc(now.error)}</p>` : `
@@ -1002,8 +1028,12 @@ export function mountEditor(root, { catalog, toast }) {
     toast(`${(M.entryOf(catalog, type) || {}).name} (${r.id}) añadido. ${a.why}`);
   }
 
-  root.addEventListener('mouseover', (ev) => { const t = ev.target.closest && ev.target.closest('[data-add]'); if (t && root.querySelector('#edRail').contains(t) && S.palHover !== t.dataset.add) { S.palHover = t.dataset.add; renderRail(); } });
-  root.addEventListener('focusin', (ev) => { const t = ev.target.closest && ev.target.closest('.pal [data-add]'); if (t && S.palHover !== t.dataset.add) { S.palHover = t.dataset.add; renderRail(); } });
+  const palItem = (el) => el && el.closest && el.closest('.pal [data-add]');
+  root.addEventListener('mouseover', (ev) => { const t = palItem(ev.target); if (t && S.palHover !== t.dataset.add) { S.palHover = t.dataset.add; renderPalTip(); } });
+  root.addEventListener('mouseout', (ev) => { if (palItem(ev.target) && !palItem(ev.relatedTarget) && document.activeElement !== palItem(ev.target)) { S.palHover = null; renderPalTip(); } });
+  root.addEventListener('focusin', (ev) => { const t = palItem(ev.target); if (t && S.palHover !== t.dataset.add) { S.palHover = t.dataset.add; renderPalTip(); } });
+  root.addEventListener('focusout', (ev) => { if (palItem(ev.target) && !palItem(ev.relatedTarget)) { S.palHover = null; renderPalTip(); } });
+  $('edRail').addEventListener('scroll', () => { if (S.palHover) renderPalTip(); }, { passive: true });
 
   // la cabecera vive en la de la etapa (fuera de root): sus eventos llegan por el mismo camino (ver slot())
   const mine = (el) => !!el && (root.contains(el) || (S.slotEl && S.slotEl.contains(el)));

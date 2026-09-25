@@ -413,12 +413,20 @@ export function mountEditor(root, { catalog, toast }) {
     const cards = Object.entries(L.nodes).filter(([id]) => !ends.includes(id)).map(([, p]) => ({ l: p.x - G, r: p.x + CARD.w + G, t: p.y - G, b: p.y + CARD.h + G }))
       .filter((c) => c.l > x1 - 1 && c.r < x2 + 1).sort((p, q) => p.l - q.l);
     const inside = (y, c0) => cards.some((o) => o !== c0 && o.r > c0.l && o.l < c0.r && y > o.t && y < o.b);
+    // altura de la curva directa (la misma Bézier de seg) desde (xa, ya) hasta (xb, yb) en la abscisa X; x(t) es monótona
+    const yOn = (xa, ya, xb, yb, X) => {
+      const dx = Math.max(xb > xa ? 24 : 48, Math.abs(xb - xa) / 2), bx = (t) => (1 - t) ** 3 * xa + 3 * (1 - t) ** 2 * t * (xa + dx) + 3 * (1 - t) * t * t * (xb - dx) + t ** 3 * xb;
+      let lo = 0, hi = 1;
+      for (let i = 0; i < 24; i++) { const m = (lo + hi) / 2; if (bx(m) < X) lo = m; else hi = m; }
+      const t = (lo + hi) / 2;
+      return (1 - t) ** 3 * ya + 3 * (1 - t) ** 2 * t * ya + 3 * (1 - t) * t * t * yb + t ** 3 * yb;
+    };
     let d = `M${x1},${y1}`, px = x1, py = y1;
     for (const c of cards) {
       if (c.l < px) continue;
-      const u = Math.min(1, Math.max(0, ((c.l + c.r) / 2 - px) / Math.max(1, x2 - px)));
-      const yAt = py + (y2 - py) * u * u * (3 - 2 * u); // la curva directa desde aquí al final, a la altura de la tarjeta
-      if (yAt <= c.t || yAt >= c.b) continue;
+      // la tarjeta se cruza si la curva, en todo su ancho (no solo en el centro: sesión 10, c → cd pasaba por g), entra en su alto
+      const yl = yOn(px, py, x2, y2, c.l), yr = yOn(px, py, x2, y2, c.r), yAt = yOn(px, py, x2, y2, (c.l + c.r) / 2);
+      if (Math.max(yl, yr) <= c.t || Math.min(yl, yr) >= c.b) continue;
       let up = c.t, down = c.b;
       while (inside(up, c)) up -= 12;
       while (inside(down, c)) down += 12;
@@ -1061,6 +1069,9 @@ export function mountEditor(root, { catalog, toast }) {
     }
   };
   root.addEventListener('keydown', onKey);
+  // sesión 10: tras un clic en el fondo del lienzo, o un cambio que rehace el panel (el Tipo), el foco queda en <body> y
+  // Ctrl+Z/Y/S no llegaban al editor
+  document.addEventListener('keydown', (ev) => { if (ev.target === document.body && root.isConnected && !root.closest('[hidden]') && root.offsetParent !== null) onKey(ev); });
 
   // arrastrar: desde el punto de salida hace un cable (y marca dónde vale y dónde no, con el porqué); desde el bloque,
   // lo mueve; la raya entre el lienzo y el panel cambia su altura

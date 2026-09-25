@@ -74,6 +74,16 @@ export function connect(genome, from, to) {
 
 export const disconnect = (genome, index) => ({ ...genome, wires: (genome.wires || []).filter((_, i) => i !== index) });
 
+// "+ Añadir capa" sobre un cable A → B (P6): A → nuevo → B. El cable nuevo → B ocupa el sitio del de antes, así B sigue
+// juntando sus entradas en el mismo orden
+export function insertOnWire(genome, index, type, catalog) {
+  const w = (genome.wires || [])[index];
+  if (!w) return { genome, id: null, error: 'Ese cable ya no existe.' };
+  const r = addBlock(genome, type, catalog);
+  const wires = r.genome.wires.map((x, i) => (i === index ? { from: r.id, to: w.to } : x));
+  return { genome: { ...r.genome, wires: [...wires, { from: w.from, to: r.id }] }, id: r.id, error: null };
+}
+
 // ---------- ajustes ----------
 // convierte lo que llega de un control (texto, número, casilla, lista) al tipo del parámetro del catálogo;
 // si no se puede, devuelve `current` (el control vuelve a su valor)

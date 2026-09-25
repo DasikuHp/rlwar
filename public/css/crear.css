@@ -264,3 +264,32 @@ body.reduce .ed2 .nerve { animation: none; stroke-dasharray: none; stroke-width:
 .tpl2-head { flex-wrap: wrap; row-gap: 1px; }
 .tpl2-head small { flex-basis: 100%; padding-left: 27px; white-space: normal; overflow: visible; line-height: 1.25; }
 @media (max-width: 1500px) { .ed2 .ed-panel .tabs .legend2 { display: none; } }
+/* "+ Añadir capa" sobre un cable (P6): el ＋ en la mitad del cable elegido y la lista del panel */
+.ed2 .wire-plus { position: absolute; transform: translate(-50%, -50%); width: 26px; height: 26px; padding: 0; border-radius: 50%; font-size: 15px; line-height: 1; background: var(--panel); border: 1px solid var(--cyan); color: var(--cyan); box-shadow: var(--glow-c); z-index: 3; }
+.ed2 .wire-plus:hover, .ed2 .wire-plus:focus-visible { background: var(--cyan); color: #06101f; }
+.ed2 .insert { margin-top: 10px; }
+.ed2 .insert .ins-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.ed2 .insert .ins-list .pal-item { width: auto; padding: 5px 10px; }
+.ed2 .insert .ins-no { font-size: 12px; color: var(--dim); }
+.ed2 .insert .ins-no li { margin: 3px 0; }
+/* guía «Tu primera red» (P6, sesión 10): tarjeta arriba a la derecha del lienzo; lo que pide el paso, iluminado */
+.ed2 .ed-coach { grid-column: 2 / 4; grid-row: 2; justify-self: end; align-self: start; width: min(350px, 40%); max-height: calc(100% - 16px); overflow-y: auto; margin: 8px 12px; z-index: 5; }
+.ed2 .coach { display: grid; gap: 7px; padding: 12px 14px; border: 1px solid var(--line-2); border-left: 3px solid var(--cyan); border-radius: 10px; background: #0b1428f5; box-shadow: 0 12px 34px #000a, var(--glow-c); font-size: 12.5px; }
+.ed2 .coach header { display: flex; align-items: center; gap: 8px; }
+.ed2 .coach header b { white-space: nowrap; letter-spacing: .12em; text-transform: uppercase; font-size: 11px; color: var(--cyan); font-weight: 600; }
+.ed2 .coach header .mono { color: var(--dim); font-size: 11px; white-space: nowrap; }
+.ed2 .coach header { flex-wrap: wrap; }
+.ed2 .coach header .x { margin-left: auto; padding: 1px 7px; }
+.ed2 .coach .dots { display: inline-flex; gap: 3px; } .ed2 .coach .dots i { width: 7px; height: 7px; border-radius: 50%; background: #243457; }
+.ed2 .coach .dots i.ok { background: var(--good); } .ed2 .coach .dots i.now { background: var(--cyan); box-shadow: var(--glow-c); }
+.ed2 .coach h3 { font-size: 15px; font-weight: 500; }
+.ed2 .coach .ask { color: #cfd9ee; } .ed2 .coach .todo { color: #fff; font-weight: 500; }
+.ed2 .coach .coach-after { padding: 7px 9px; border-radius: 7px; background: #0f2a22cc; border: 1px solid #1f5a45; }
+.ed2 .coach .coach-after b { color: var(--good); } .ed2 .coach .coach-after p { margin-top: 3px; color: #d6efe5; }
+.ed2 .coach .row { display: flex; flex-wrap: wrap; gap: 6px; }
+.ed2 .coach-open[aria-pressed="true"] { border-color: var(--cyan); color: var(--text); box-shadow: var(--glow-c); }
+.coach-target { outline: 2px solid var(--cyan) !important; outline-offset: 3px; animation: coachPulse 1.3s ease-in-out infinite; }
+path.coach-target { outline: 0 !important; stroke: var(--cyan) !important; stroke-width: 4 !important; }
+.port.coach-target { outline-offset: 2px; border-radius: 50%; }
+@keyframes coachPulse { 50% { outline-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { .coach-target { animation: none; } }

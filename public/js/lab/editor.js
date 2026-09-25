@@ -10,6 +10,7 @@ import * as M from './model.js';
 import * as Hn from './hints.js';
 import * as Bn from './bench.js';
 import * as Hi from './history.js';
+import * as Co from './coach.js';
 import { emblemSVG } from './emblem.js';
 import { api, reasonOf } from './api.js';
 import { validate, repair, countParams, outDims, newGenome } from '/shared/genome.js';
@@ -58,6 +59,7 @@ const COLTITLE = { eyes: ['Entradas', '¿Qué ve?'], instinct: ['Instinto', '¿C
 // medidas del lienzo: tarjetas más altas que las de model.js (llevan qué hacen y sus neuronas); se escala su colocación
 const CARD = { w: 176, h: 70 }, COL_W = 232, ROW_K = 92 / 66, PAD = { x: 24, y: 78 };
 const GENES = [['traits', 'Carácter'], ['reward', 'Recompensa'], ['learning', 'Aprendizaje'], ['imagination', 'Imaginación']];
+const LEVEL_WORLD = { aprendiz: 'A', artesano: 'B', cientifico: 'C' };
 const PTABS = [['capa', 'Capa'], ['genes', 'Genes'], ['ve', 'Qué ve tu red'], ['versiones', 'Versiones'], ['avisos', 'Avisos']];
 
 export function mountEditor(root, { catalog, toast }) {
@@ -65,7 +67,7 @@ export function mountEditor(root, { catalog, toast }) {
     level: M.LEVELS.includes(store.get(LS.level, 'aprendiz')) ? store.get(LS.level, 'aprendiz') : 'aprendiz',
     nets: [], templates: [], panelTab: 'capa', genesTab: 'traits',
     netId: null, saved: null, base: null, genome: null, check: null, forPlay: null, dims: null, streams: {}, issues: null, params: null,
-    server: null, sel: null, pos: {}, zoom: 1, fit: true, dirty: false, pending: null, tplOpen: null, confirm: null,
+    coach: null, world: null, server: null, sel: null, pos: {}, zoom: 1, fit: true, dirty: false, pending: null, tplOpen: null, confirm: null,
     hist: Hi.createHistory(null), menu: false, slotEl: null, palHover: null, link: null, folded: store.get('gw.ed.folded', false) === true,
     bench: { scene: 'abierto', custom: null, phase: 'shoot', seed: 1, now: null, saved: null, savedKey: null, sig: null, pick: null, busy: false },
     versions: { list: null, open: null, diff: null, ver: null, busy: false },
@@ -78,6 +80,7 @@ export function mountEditor(root, { catalog, toast }) {
     <aside class="ed-rail" id="edRail" aria-label="Plantillas y bloques"></aside>
     <div class="ed-tools" id="edTools"></div>
     <div class="ed-board" id="edBoard" aria-label="Lienzo de la red"></div>
+    <div class="ed-coach" id="edCoach" hidden></div>
     <div class="ed-split" id="edSplit" role="separator" aria-orientation="horizontal" aria-label="Arrastra para dar más sitio al lienzo o a los ajustes" tabindex="0"></div>
     <section class="ed-panel" id="edPanel" aria-label="La capa elegida y los genes"></section>
     <section class="ed-bench" id="edBench" aria-label="Banco de pruebas"></section>
@@ -147,6 +150,7 @@ export function mountEditor(root, { catalog, toast }) {
     S.hist = Hi.createHistory(S.genome);
     S.pos = store.get(LS.pos(netId), {}) || {};
     S.fit = true; S.menu = false;
+    S.coach = store.get(`gw.coach.${netId}`, null);
     S.bench.saved = null; S.bench.savedKey = null; S.versions = { list: null, open: null, diff: null, ver: null, busy: false };
     recheck();
     if (location.hash !== `#crear/${netId}`) history.replaceState(null, '', `#crear/${netId}`);
@@ -181,7 +185,8 @@ export function mountEditor(root, { catalog, toast }) {
     S.tplOpen = null;
     await loadNets();
     await open(r.body.id);
-    toast(`Red en blanco creada: ${genome.name}. Empieza por los Ojos (qué ve).`);
+    coachStart();
+    toast(`Red en blanco creada: ${genome.name}. La guía te lleva paso a paso (arriba a la derecha del lienzo).`);
   }
   async function createFromTemplate(key, name) {
     if (key === 'blank') { await createBlank(name); return; }
@@ -304,7 +309,8 @@ export function mountEditor(root, { catalog, toast }) {
       <p class="ed-facts" title="${esc(g.id)}"><span>gen ${gen}</span><span>${g.blocks.length} bloques</span><span>${S.params === null ? 'pesos: —' : `${S.params.toLocaleString('es-ES')} pesos`}</span>${net && net.stats && Number.isFinite(net.stats.games) ? `<span>${net.stats.games} partidas</span>` : ''}${net && net.isQueen ? '<span class="tag queen">reina</span>' : ''}${net && net.training ? '<span class="tag busy">entrenando</span>' : ''}</p>
       <button type="button" class="ed-status ${st.cls}" data-ptab="avisos" title="Ver qué le falta y los avisos">${esc(st.text)}</button>
       ${S.dirty ? '<span class="dirty" title="Guarda para que juegue así">cambios sin guardar</span>' : ''}
-      <span class="zoom" role="group" aria-label="Zoom"><button type="button" data-zoom="-1" aria-label="Alejar">−</button><span class="mono" id="edZoom">${Math.round(S.zoom * 100)} %</span><button type="button" data-zoom="1" aria-label="Acercar">+</button><button type="button" data-zoom="fit" aria-pressed="${S.fit}" title="Que la red entera quepa en el lienzo">Encajar</button><button type="button" data-act="tidy" title="Vuelve a colocar los bloques por columnas">Ordenar</button></span>`);
+      <span class="zoom" role="group" aria-label="Zoom"><button type="button" data-zoom="-1" aria-label="Alejar">−</button><span class="mono" id="edZoom">${Math.round(S.zoom * 100)} %</span><button type="button" data-zoom="1" aria-label="Acercar">+</button><button type="button" data-zoom="fit" aria-pressed="${S.fit}" title="Que la red entera quepa en el lienzo">Encajar</button><button type="button" data-act="tidy" title="Vuelve a colocar los bloques por columnas">Ordenar</button></span>
+      <button type="button" class="coach-open" data-coach="open" aria-pressed="${!!(S.coach && S.coach.on)}" title="Guía paso a paso: monta una red entendiendo qué hace cada pieza">Guía</button>`);
   }
 
   // ---------- lienzo ----------
@@ -335,12 +341,13 @@ export function mountEditor(root, { catalog, toast }) {
       patch(b, `<div class="board-empty"><h2>Elige una red o crea una</h2><p>A la izquierda tienes las plantillas: <b>Desde cero</b> si quieres montarla tú, bloque a bloque, o una ya montada para cambiarla.</p><p class="dim">Aquí verás sus bloques unidos por cables, de los ojos (lo que ve) a las manos (lo que hace).</p></div>`);
       return;
     }
-    if (!S.genome.blocks.length) { patch(b, startHTML()); return; }
+    if (!S.genome.blocks.length) { patch(b, S.coach && S.coach.on ? '<div class="board-empty coach-only" data-key="start"><p class="dim">Aquí irá tu red, de izquierda a derecha: lo que ve → cómo piensa → lo que hace. Sigue la guía.</p></div>' : startHTML()); renderCoach(); return; }
     const keep = { left: b.scrollLeft, top: b.scrollTop };
     const L = layout();
     // encajar: la red entera cabe en el lienzo, a lo ancho y a lo alto (entre 55 % y 100 %); si ni así, lo que sobra se
     // recorre con la rueda (sesión 9: a 1280×800 un cuarto de Tortuga quedaba escondido bajo el panel)
-    if (S.fit) S.zoom = Math.max(0.55, Math.min(1, (b.clientWidth - 16) / (L.width + 12), (b.clientHeight - 12) / (L.height + 8)));
+    const coachW = S.coach && S.coach.on ? Math.min(360, b.clientWidth * 0.4) : 0; // la guía tapa ese trozo del lienzo
+    if (S.fit) S.zoom = Math.max(0.55, Math.min(1, (b.clientWidth - 16 - coachW) / (L.width + 12), (b.clientHeight - 12) / (L.height + 8)));
     const z = S.zoom;
     const zl = $('edTools').querySelector('#edZoom');
     if (zl) zl.textContent = `${Math.round(z * 100)} %`;
@@ -352,13 +359,110 @@ export function mountEditor(root, { catalog, toast }) {
         ${heads}
         <svg class="wires" data-key="svg" width="${L.width}" height="${L.height}" aria-hidden="true">${wiresSVG(L)}<path id="edTmpWire" data-key="tmp" class="wire tmp" d=""/></svg>
         ${nodes}${flags}
+        ${S.sel && S.sel.kind === 'wire' ? `<button type="button" class="wire-plus" data-key="wplus" data-wireplus="${S.sel.index}" style="visibility:hidden" title="Añadir una capa en este cable" aria-label="Añadir una capa en este cable">＋</button>` : ''}
       </div>
-      ${missing.length ? `<aside class="needs" data-key="needs" aria-label="Lo que le falta para poder jugar"><b>Para poder jugar le falta:</b><ul>${missing.map((x) => `<li>${esc(x.need)} ${readyButtons(x)}</li>`).join('')}</ul></aside>` : ''}`);
+      ${S.coach && S.coach.on ? '' : missing.length ? `<aside class="needs" data-key="needs" aria-label="Lo que le falta para poder jugar"><b>Para poder jugar le falta:</b><ul>${missing.map((x) => `<li>${esc(x.need)} ${readyButtons(x)}</li>`).join('')}</ul></aside>` : ''}`);
     b.scrollLeft = keep.left; b.scrollTop = keep.top;
+    // el ＋ del cable elegido, en la mitad de su recorrido de verdad (con los rodeos)
+    const plus = b.querySelector('.wire-plus'), path = plus && b.querySelector(`svg.wires path.hit[data-wire="${plus.dataset.wireplus}"]`);
+    if (plus && path) { const q = path.getPointAtLength(path.getTotalLength() / 2); plus.style.left = `${q.x}px`; plus.style.top = `${q.y}px`; plus.style.visibility = ''; }
+    renderCoach();
+  }
+  function renderCoach() {
+    const el = $('edCoach'), on = !!(S.coach && S.coach.on && S.genome);
+    el.hidden = !on;
+    patch(el, on ? coachHTML() : '');
+    coachMark();
   }
   function readyButtons(x) {
     return `${(x.add || []).map((t) => `<button type="button" class="mini" data-add="${esc(t)}">Añadir ${esc((M.entryOf(catalog, t) || { name: t }).name)}</button>`).join(' ')}${x.wire ? ` <button type="button" class="mini" data-wireup="${esc(x.wire[0])}|${esc(x.wire[1])}">Unir ${esc(x.wire[0])} → ${esc(x.wire[1])}</button>` : ''}`;
   }
+  // ---------- guía «Tu primera red» (coach.js): una tarjeta sobre el lienzo que pregunta, pide una cosa y explica lo que
+  // ha cambiado con los números del banco. Se guarda por red (y el avance, en el mundo, para el tutorial de P10) ----------
+  function coachSave() {
+    if (!S.netId || !S.coach) return;
+    store.set(`gw.coach.${S.netId}`, S.coach);
+    if (S.world && S.world.meta) {
+      const tutorial = { ...(S.world.meta.tutorial || {}), primeraRed: { net: S.netId, done: S.coach.marked, bet: S.coach.bet, on: S.coach.on } };
+      S.world.meta = { ...S.world.meta, tutorial };
+      api(`/api/worlds/${S.world.n}/meta`, 'PUT', { tutorial }).catch(() => {});
+    }
+  }
+  function coachStart() { S.coach = { on: true, marked: [], bet: null, probed: false, hint: false }; coachSave(); render(); }
+  function coachCtx() {
+    const g = S.genome, d = S.bench.now && S.bench.now.ok ? S.bench.now.decision : null;
+    const cand = g.blocks.find((b) => b.type === 'eye.candidates' || b.type === 'eye.simulator');
+    const ch = g.blocks.find((b) => b.type === 'hand.choose');
+    const think = ch && g.wires.filter((w) => w.to === ch.id).map((w) => g.blocks.find((b) => b.id === w.from)).find((b) => b && b.type === 'dense');
+    return {
+      readiness: Hn.readiness(g, catalog), scene: S.bench.scene, bet: S.coach && S.coach.bet,
+      saved: !S.dirty && !!S.saved && S.saved.blocks.length > 0, probed: !!(S.coach && S.coach.probed),
+      cands: d && d.phase !== 'move' && Array.isArray(d.candidates) ? d.candidates.length : (g.imagination && g.imagination.n) || null,
+      candDim: cand && S.dims && S.dims[cand.id] ? S.dims[cand.id].dim : null,
+      pick: d && d.phase !== 'move' ? Bn.pick(d) : null,
+      think: think && think.params ? think.params.units : null,
+    };
+  }
+  // la guía en este momento; si un paso acaba de cumplirse, lo apunta
+  function coachNow() {
+    const x = coachCtx(), st = Co.coachState(S.genome, x, S.coach.marked);
+    if (st.doneKeys.length !== S.coach.marked.length) { S.coach.marked = st.doneKeys; S.coach.hint = false; coachSave(); }
+    return { st, x };
+  }
+  function coachHTML() {
+    if (!S.coach || !S.coach.on || !S.genome) return '';
+    const { st, x } = coachNow(), N = Co.STEPS.length;
+    const prev = st.i > 0 ? Co.STEPS[st.i - 1] : null;
+    const dots = Co.STEPS.map((k, j) => `<i class="${j < st.i ? 'ok' : j === st.i ? 'now' : ''}" title="${esc(k.title)}"></i>`).join('');
+    const after = prev ? `<div class="coach-after"><b>✓ ${esc(prev.title)}</b><p>${esc(prev.after(x))}</p></div>` : '';
+    if (st.finished) {
+      return `<aside class="coach done" data-key="coach" aria-label="Guía: tu primera red" aria-live="polite"><header><b>Tu primera red</b><span class="dots">${dots}</span><button type="button" class="x" data-coach="close" aria-label="Cerrar la guía">✕</button></header>
+        ${after}<p class="coach-end">Has montado una red entera sabiendo qué hace cada pieza. Ahora es tuya: cambia lo que quieras (la Guía sigue arriba, en la barra).</p>
+        <p class="row"><button type="button" class="primary mini" data-coach="close">Cerrar la guía</button><button type="button" class="mini" data-coach="restart">Empezar de nuevo</button></p></aside>`;
+    }
+    const k = st.step, help = Co.helpOffered(st.i) || S.coach.hint;
+    const bet = k.bet ? `<p class="coach-bet row"><button type="button" class="mini" data-coach="bet:si">Sí, apunta</button><button type="button" class="mini" data-coach="bet:no">No, es al azar</button><button type="button" class="mini" data-coach="bet:nose">Ni idea</button></p>` : '';
+    return `<aside class="coach" data-key="coach" aria-label="Guía: tu primera red" aria-live="polite"><header><b>Tu primera red</b><span class="mono">paso ${st.i + 1} de ${N}</span><span class="dots">${dots}</span><button type="button" class="x" data-coach="close" aria-label="Cerrar la guía">✕</button></header>
+      ${after}<h3>${esc(k.title)}</h3><p class="ask">${esc(k.ask)}</p><p class="todo">👉 ${esc(k.todo)}</p>${bet}
+      <p class="row">${k.help && help ? '<button type="button" class="mini" data-coach="help" title="Lo hace por ti; mira qué cambia">Hazlo por mí</button>' : ''}${!help && k.help ? '<button type="button" class="mini" data-coach="hint">No lo encuentro</button>' : ''}</p></aside>`;
+  }
+  // ilumina lo que pide el paso (en los primeros, siempre; después, solo si se pide la pista)
+  function coachMark() {
+    for (const el of root.querySelectorAll('.coach-target')) el.classList.remove('coach-target');
+    if (!S.coach || !S.coach.on || !S.genome) return;
+    const st = Co.coachState(S.genome, coachCtx(), S.coach.marked);
+    if (!st.step || !(Co.helpOffered(st.i) || S.coach.hint)) return;
+    const g = S.genome, id = (t) => (g.blocks.find((b) => b.type === t) || {}).id;
+    let el = null;
+    if (st.step.target === 'port') { const c = id('eye.candidates') || id('eye.simulator'); el = c && root.querySelector(`[data-node="${CSS.escape(c)}"] .port.out`); }
+    else if (st.step.target === 'wire') { const ch = id('hand.choose'); const i = g.wires.findIndex((w) => w.to === ch && ['eye.candidates', 'eye.simulator'].includes((g.blocks.find((b) => b.id === w.from) || {}).type)); el = i >= 0 && root.querySelector(`svg.wires path.wire[data-key="w:${i}"]`); }
+    else el = root.querySelector(st.step.target);
+    if (el) el.classList.add('coach-target');
+  }
+  // "Hazlo por mí": el mismo cambio que harías tú, de una vez (se deshace con Ctrl+Z)
+  function coachHelp() {
+    const st = Co.coachState(S.genome, coachCtx(), S.coach.marked), h = st.step && st.step.help;
+    if (!h) return;
+    if (h.scene) { S.bench.scene = h.scene; scheduleBench(0); render(); return; }
+    let g = S.genome;
+    const id = (t) => (g.blocks.find((b) => b.type === t) || {}).id;
+    const thinkId = () => { const ch = id('hand.choose'); const w = g.wires.find((x) => x.to === ch && (g.blocks.find((z) => z.id === x.from) || {}).type === 'dense'); return w && w.from; };
+    const wire = (a, b) => {
+      const A = id(a), B = b === 'dense' ? thinkId() : id(b);
+      if (!A || !B || g.wires.some((w) => w.from === A && w.to === B)) return;
+      const r = M.connect(g, A, B);
+      if (!r.error) g = r.genome;
+    };
+    for (const t of h.add || []) if (!id(t)) g = M.addBlock(g, t, catalog).genome;
+    if (h.wire) wire(h.wire[0], h.wire[1]);
+    if (h.wire2) wire(h.wire2[0], h.wire2[1]);
+    if (h.insert) {
+      const ch = id('hand.choose'), i = g.wires.findIndex((w) => w.to === ch && ['eye.candidates', 'eye.simulator'].includes((g.blocks.find((b) => b.id === w.from) || {}).type));
+      if (i >= 0) g = M.insertOnWire(g, i, h.insert, catalog).genome;
+    }
+    if (g !== S.genome) commit(g, { select: null, label: `Guía: ${st.step.title.toLowerCase()}` });
+  }
+
   // red sin bloques: por dónde empezar, explicado
   function startHTML() {
     const r = Hn.readiness(S.genome, catalog);
@@ -366,7 +470,8 @@ export function mountEditor(root, { catalog, toast }) {
       <h2>Tu red está vacía: empieza por aquí</h2>
       <p>Una red va de izquierda a derecha, como la señal: <b class="c-eyes">Ojos</b> (qué ve) → <b class="c-instinct">Instinto</b> y <b class="c-memory">Memoria</b> (cómo piensa y qué recuerda) → <b class="c-hands">Manos</b> y <b class="c-feet">Pies</b> (qué hace). Para poder jugar necesita, como mínimo, estas tres cosas:</p>
       <ol>${r.filter((x) => x.required).map((x) => `<li class="${x.ok ? 'ok' : ''}"><b>${esc(x.text)}</b><span>${esc(x.need)}</span>${x.ok ? '<i>hecho</i>' : readyButtons(x)}</li>`).join('')}</ol>
-      <p class="dim">También puedes añadir cualquier bloque desde la lista de la izquierda y unirlo arrastrando desde su punto de salida (el círculo de la derecha) hasta otro bloque.</p></div>`;
+      <p class="dim">También puedes añadir cualquier bloque desde la lista de la izquierda y unirlo arrastrando desde su punto de salida (el círculo de la derecha) hasta otro bloque.</p>
+      <p><button type="button" class="primary" data-coach="open">Guía paso a paso</button> <span class="dim">nueve pasos: qué hace cada pieza, viéndolo en el banco de pruebas</span></p></div>`;
   }
   function nodeHTML(blk, p) {
     const e = M.entryOf(catalog, blk.type) || { name: blk.type, icon: '?', group: 'instinct', params: [] };
@@ -456,6 +561,17 @@ export function mountEditor(root, { catalog, toast }) {
     patch(svg, `${wiresSVG(layout())}<path id="edTmpWire" data-key="tmp" class="wire tmp" d=""/>`);
   }
 
+  // "+ Añadir capa" sobre un cable (P6): los bloques de en medio que caben entre los dos y, plegados, los que no y por qué
+  function insertHTML(index, w) {
+    const opts = Hn.insertOptions(S.genome, catalog, index, S.level);
+    const ok = opts.filter((o) => o.ok), no = opts.filter((o) => !o.ok);
+    const btn = (o) => `<button type="button" class="pal-item g-${o.group}" data-insert="${esc(o.type)}" data-index="${index}" title="${esc(`${w.from} → ${o.name} → ${w.to}`)}"><span class="ico" aria-hidden="true">${esc(o.icon)}</span><span class="pn">${esc(o.name)}</span></button>`;
+    return `<section class="insert" id="edInsert"><h3>＋ Añadir una capa en este cable</h3>
+      <p class="explain">Mete un bloque entre ${esc(w.from)} y ${esc(w.to)}: la señal pasará por él (${esc(w.from)} → nuevo → ${esc(w.to)}). Por ejemplo, un 🧠 Instinto entre Candidatos y Elegir hace que la red <i>piense</i> cada tiro antes de puntuarlo.</p>
+      ${ok.length ? `<div class="ins-list">${ok.map(btn).join('')}</div>` : '<p class="hint">Aquí no cabe ningún bloque de en medio.</p>'}
+      ${no.length ? `<details class="ins-no"><summary>${no.length} no caben aquí (por qué)</summary><ul>${no.map((o) => `<li><b>${esc(o.icon)} ${esc(o.name)}</b>: ${esc(o.why)}</li>`).join('')}</ul></details>` : ''}</section>`;
+  }
+
   // ---------- panel de abajo: la capa elegida, los genes, lo que ve, versiones y avisos ----------
   function control(param, value, attrs, compact = false) {
     const id = `c-${attrs.replace(/[^a-z0-9]/gi, '-')}`;
@@ -503,7 +619,8 @@ export function mountEditor(root, { catalog, toast }) {
         <p>Lleva ${esc(d ? `${STREAM[d.stream]} (${d.dim} números${d.stream === 'cand' ? ' por cada tiro imaginado' : d.stream === 'move' ? ' por cada sitio adonde moverse' : ''})` : STREAM[S.streams[w.from]] || '—')} de <button type="button" class="link" data-goto="${esc(w.from)}">${esc(w.from)}</button> a <button type="button" class="link" data-goto="${esc(w.to)}">${esc(w.to)}</button>. Si un bloque recibe varios cables, los junta en el orden en que se conectaron.</p>
         ${s ? `<p class="dim">En la escena del banco pasa una señal del ${pct(s.level)} de la del bloque más activo: por eso late ${s.level > 0.6 ? 'deprisa' : s.level > 0.25 ? 'a ritmo normal' : 'despacio'}.</p>` : ''}
         <ul class="issues">${(S.issues.byWire[S.sel.index] || []).map(issueRow).join('')}</ul>
-        <button type="button" data-act="unwire" data-index="${S.sel.index}">Quitar cable</button></section></div>`;
+        <button type="button" data-act="unwire" data-index="${S.sel.index}">Quitar cable</button></section>
+        ${insertHTML(S.sel.index, w)}</div>`;
     }
     const blk = S.sel && S.sel.kind === 'block' && S.genome.blocks.find((b) => b.id === S.sel.id);
     if (!blk) return netSummary();
@@ -817,6 +934,7 @@ export function mountEditor(root, { catalog, toast }) {
     return busy;
   }
   async function probeOpen(rival0 = null) {
+    if (S.coach && S.coach.on && !S.coach.probed) { S.coach.probed = true; coachSave(); renderCoach(); }
     const busy = await probeBusy();
     const rivals = S.nets.filter((n) => n.id !== S.netId && !busy.has(n.id));
     const q = rivals.find((n) => n.id === rival0) || rivals.find((n) => n.isQueen) || rivals.find((n) => n.id === 'vidente-1') || rivals[0];
@@ -894,13 +1012,32 @@ export function mountEditor(root, { catalog, toast }) {
     const t = ev.target.closest('button, a, [data-wire]');
     if (!t || !mine(t)) return;
     if (t.dataset.ficha) { S.menu = false; renderHead(); return; } // lo abre la ficha (main.js escucha data-ficha en todo el documento)
-    if (t.dataset.level) { S.level = t.dataset.level; store.set(LS.level, S.level); render(); return; }
+    if (t.dataset.level) { S.level = t.dataset.level; store.set(LS.level, S.level); if (S.world) api(`/api/worlds/${S.world.n}/meta`, 'PUT', { level: LEVEL_WORLD[S.level] }).catch(() => {}); render(); return; }
     if (t.dataset.zoom) { if (t.dataset.zoom === 'fit') S.fit = true; else { S.fit = false; S.zoom = Math.max(0.4, Math.min(1.5, Math.round((S.zoom + 0.1 * Number(t.dataset.zoom)) * 10) / 10)); } renderTools(); renderBoard(); return; }
     if (t.dataset.ptab) { S.panelTab = t.dataset.ptab; S.menu = false; renderHead(); if (S.folded) fold(false); else renderPanel(); return; }
     if (t.dataset.genes) { S.genesTab = t.dataset.genes; renderPanel(); return; }
     if (t.dataset.open) { S.menu = false; open(t.dataset.open); return; }
     if (t.dataset.tpl) { S.tplOpen = S.tplOpen === t.dataset.tpl ? null : t.dataset.tpl; renderRail(); const f = root.querySelector('.tpl-form input'); if (f) f.select(); return; }
     if (t.dataset.add) { if (!S.genome) return; addBlock(t.dataset.add); return; }
+    if (t.dataset.coach) {
+      const c = t.dataset.coach;
+      if (c === 'open') { if (!S.genome) return; if (!S.coach) coachStart(); else { S.coach.on = !S.coach.on; coachSave(); render(); } return; }
+      if (c === 'close') { if (S.coach) { S.coach.on = false; coachSave(); render(); } return; }
+      if (c === 'restart') { coachStart(); return; }
+      if (c === 'hint') { S.coach.hint = true; renderBoard(); return; }
+      if (c === 'help') { coachHelp(); return; }
+      if (c.startsWith('bet:')) { S.coach.bet = c.slice(4); coachSave(); renderBoard(); return; }
+      return;
+    }
+    if (t.dataset.insert) {
+      const r = M.insertOnWire(S.genome, Number(t.dataset.index), t.dataset.insert, catalog);
+      if (r.error) { toast(r.error, 'error'); return; }
+      commit(r.genome, { select: { kind: 'block', id: r.id }, label: `${(M.entryOf(catalog, t.dataset.insert) || {}).name} (${r.id}) en medio de un cable` });
+      focusNode(r.id); popIn($('edBoard').querySelector(`[data-node="${CSS.escape(r.id)}"]`));
+      toast(`${(M.entryOf(catalog, t.dataset.insert) || {}).name} (${r.id}) va ahora en medio del cable.`);
+      return;
+    }
+    if (t.dataset.wireplus) { S.panelTab = 'capa'; if (S.folded) fold(false); else renderPanel(); setTimeout(() => { const el = $('edInsert'); if (el) { el.scrollIntoView({ block: 'nearest' }); el.querySelector('button')?.focus(); } }, 60); return; }
     if (t.dataset.wireup) { const [a, b] = t.dataset.wireup.split('|'); const r = M.connect(S.genome, a, b); if (r.error) { toast(r.error, 'error'); return; } commit(r.genome); return; }
     if (t.dataset.fix) { const f = Hn.fixes(S.genome, catalog, S.check).find((x) => x.key === t.dataset.fix); if (f) { commit(f.apply(S.genome), { label: f.label }); toast(`Arreglado: ${f.label}.`); } return; }
     if (t.dataset.node) {
@@ -1147,6 +1284,12 @@ export function mountEditor(root, { catalog, toast }) {
     async start(netId) {
       const t = await api('/api/lab/templates');
       S.templates = t.ok ? t.body : [];
+      // el nivel de vista es el del mundo abierto (GET/PUT /api/worlds/:n/meta; A/B/C = Aprendiz/Artesano/Científico)
+      const w = await api('/api/worlds');
+      if (w.ok && w.body.active) {
+        const m = await api(`/api/worlds/${w.body.active}/meta`);
+        if (m.ok) { S.world = { n: w.body.active, meta: m.body }; const lv = Object.keys(LEVEL_WORLD).find((k) => LEVEL_WORLD[k] === m.body.level); if (lv) { S.level = lv; store.set(LS.level, lv); } }
+      }
       await loadNets();
       if (netId && S.nets.some((n) => n.id === netId)) await open(netId, { force: true });
       else render();

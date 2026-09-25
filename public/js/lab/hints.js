@@ -120,6 +120,18 @@ export function connectOptions(genome, catalog, id) {
   return { from, to };
 }
 
+// ---------- "+ Añadir capa" sobre un cable: qué bloques caben en medio y, si no, por qué ----------
+// [{type, name, icon, group, ok, why}] con los bloques de en medio (Instinto y Memoria) que se ven en `level`
+export function insertOptions(genome, catalog, index, level = 'cientifico') {
+  const w = (genome.wires || [])[index];
+  if (!w) return [];
+  return catalog.blocks.filter((e) => (e.group === 'instinct' || e.group === 'memory') && M.atLevel(e.level, level)).map((e) => {
+    const r = M.insertOnWire(genome, index, e.type, catalog);
+    const errs = r.error ? [{ message: r.error }] : newErrors(genome, r.genome);
+    return { type: e.type, name: e.name, icon: e.icon, group: e.group, ok: !errs.length, why: errs.length ? errs[0].message : '' };
+  });
+}
+
 // ---------- ¿puede jugar? la lista de lo imprescindible y de lo recomendable, con qué añadir ----------
 // [{key, ok, required, text, need, add: [tipos], wire: [from, to] | null}]
 export function readiness(genome, catalog) {

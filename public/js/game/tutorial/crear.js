@@ -70,6 +70,8 @@ export function applyGenome(genome, h, catalog) {
   for (const t of h.remove || []) { const id = idOf(g, t); if (id) g = M.removeBlock(g, id); }
   if (h.unwire) { const i = wireIndex(g, h.unwire[0], h.unwire[1]); if (i >= 0) g = M.disconnect(g, i); }
   if (h.unwireInto) { const id = idOf(g, h.unwireInto); if (id) g = { ...g, wires: g.wires.filter((w) => w.to !== id) }; }
+  // «Hazlo por mí» de un reto también pone lo que el reto da por hecho (s14: tras recargar sin guardar, o si se borró)
+  if (h.think) g = think(g, catalog);
   for (const t of h.add || []) if (!has(g, t)) g = M.addBlock(g, t, catalog).genome;
   for (const w of [h.wire, h.wire2, h.wire3]) if (w) link(w[0], w[1]);
   if (h.insert) { const i = wireIndex(g, h.insert.on[0], h.insert.on[1]); if (i >= 0) g = M.insertOnWire(g, i, h.insert.type, catalog).genome; }
@@ -155,7 +157,7 @@ export const CHAPTERS = [
       setup: { unwire: ['eye.candidates', 'hand.choose'], add: ['eye.features'], wire: ['eye.features', 'hand.choose'], resetHistory: true },
       text: 'El Sistema ha cambiado tu red: ahora Elegir recibe Rasgos (números sobre la partida), no los tiros imaginados. Esta red no puede jugar.',
       todo: 'Arréglala para que pueda jugar.', gesture: { name: 'arrastrar-cable', from: (x) => S.port(x, 'eye.candidates'), to: (x) => S.node(x, 'hand.choose') },
-      done: (x) => x.canPlay, help: { wire: ['eye.candidates', 'hand.choose'] },
+      done: (x) => x.canPlay, help: { add: ['eye.candidates', 'hand.choose'], wire: ['eye.candidates', 'hand.choose'] },
       after: () => '¡Arreglada! Elegir necesita los tiros imaginados (Candidatos); lo demás que le llegue se junta con cada tiro.' },
   ] },
 
@@ -181,7 +183,7 @@ export const CHAPTERS = [
     { key: 'reto', kind: 'reto', target: RED, room: CARDS, lit: ['grupo-instinct', 'insertar', 'cable-mas'], present: ['grupo-instinct'], title: 'Reto: que piense dos veces',
       text: 'Una capa detrás de otra combina lo que ya combinó la primera. Vale el ＋ del cable, o sacar un Instinto del grupo Instinto de «Nuevo bloque» y soltarlo encima del cable.', todo: 'Pon otro 🧠 Instinto entre tu Instinto y Elegir.',
       gesture: { name: 'capa', at: (x) => (x.insertOpen ? '#edInsert [data-insert="dense"]' : x.hoverWire !== null && x.hoverWire !== undefined ? '.wire-plus' : S.wire(x, 'think', 'hand.choose')) },
-      setup: { resetHistory: true }, done: (x) => chain2(x.g), help: { insert: { type: 'dense', on: ['think', 'hand.choose'] } },
+      setup: { resetHistory: true }, done: (x) => chain2(x.g), help: { think: true, insert: { type: 'dense', on: ['think', 'hand.choose'] } },
       after: () => 'Dos capas seguidas: también puedes arrastrar una tarjeta sin cables encima de un cable y soltarla, y se mete en medio.' },
   ] },
 
@@ -208,8 +210,9 @@ export const CHAPTERS = [
       gesture: { name: 'escena', at: (x) => (x.scene === 'mia' ? null : '[data-scene="mia"]'), from: (x) => (x.scene === 'mia' ? '#benchSvg .b-s.right' : null), to: { dx: -40, dy: -30 } },
       done: (x, b) => x.scene === 'mia' && more(x, b, 'bench'), help: { scene: 'mia', benchMove: true },
       after: () => 'La red decide otra vez con tu escena, al momento.' },
-    { key: 'pausa', kind: 'pause', target: 'probar', lit: ['probar-panel'], present: ['probar', 'probar-panel'], title: 'Tu red ya juega',
-      text: '¿La pruebas de verdad? «Probar ya» juega 6 partidas (x10) contra Vidente aquí mismo, sin cambiarla ni que aprenda. Así ves cómo juega hoy: casi al azar. O sigue con el tutorial.' },
+    // abierto, el panel de Probar ya tapa el banco (y su botón): entonces lo iluminado es el panel
+    { key: 'pausa', kind: 'pause', target: (x) => (x.probeOpen ? 'probar-panel' : 'probar'), lit: (x) => (x.probeOpen ? [] : ['probar-panel']), present: ['probar', 'probar-panel'], title: 'Tu red ya juega',
+      text: '¿La pruebas de verdad? «Probar ya» juega 6 partidas (x10) contra Vidente aquí mismo, sin cambiarla ni que aprenda. Así ves cómo juega hoy: casi al azar. Al acabar, «Ver otra vez» repite cada partida aquí mismo, tiro a tiro. O sigue con el tutorial.' },
   ] },
 
   { key: 'mover', title: 'Que se mueva', ask: 'Tras disparar, ¿adónde va?', ensure: play, steps: [
@@ -229,7 +232,7 @@ export const CHAPTERS = [
     { key: 'reto', kind: 'reto', target: RED, room: CARDS, title: 'Reto: que se mueva',
       setup: { unwireInto: 'foot.move', resetHistory: true }, text: 'El Sistema ha quitado el cable que llega a Moverse: tu red dispara, pero se queda quieta.',
       todo: 'Haz que esta red se mueva.', gesture: { name: 'arrastrar-cable', from: (x) => S.port(x, 'eye.moves'), to: (x) => S.node(x, 'foot.move') },
-      done: (x) => { const m = idOf(x.g, 'foot.move'); return !!m && ins(x.g, m).length > 0; }, help: { wire: ['eye.moves', 'foot.move'] },
+      done: (x) => { const m = idOf(x.g, 'foot.move'); return !!m && ins(x.g, m).length > 0; }, help: { add: ['eye.moves', 'foot.move'], wire: ['eye.moves', 'foot.move'] },
       after: () => 'Se mueve otra vez.' },
   ] },
 
@@ -291,7 +294,7 @@ export const CHAPTERS = [
       setup: { remove: ['echo'], save: true },
       text: 'El Sistema ha quitado la memoria (Eco) de tu red y la ha guardado así. Las versiones guardadas se pueden recuperar.',
       todo: 'Vuelve a la versión de antes, la que tenía memoria.', gesture: { name: 'clic', at: (x) => (x.panelTab === 'versiones' ? '#edPanel [data-vback]' : '.tabs [data-ptab="versiones"]') },
-      done: (x) => (x.g.blocks || []).some((b) => MEMORY.includes(b.type)), help: { restore: 'latest' },
+      done: (x) => (x.g.blocks || []).some((b) => MEMORY.includes(b.type)), help: { restore: 'latest', think: true, add: ['eye.features', 'echo'], wire: ['eye.features', 'echo'], wire2: ['echo', 'think'] },
       after: () => 'Recuperada. La que no tenía memoria también quedó guardada como versión: nada se pierde.' },
   ] },
 

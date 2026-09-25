@@ -122,6 +122,7 @@ try {
   results.push(await run('interfaz: guía «Tu primera red» y añadir capa sobre un cable (P6, s10)', [join(ROOT, 'test', 'ui-coach.spec.mjs')]));
   results.push(await run('interfaz: enchufar y desenchufar cables (P6, s12)', [join(ROOT, 'test', 'ui-enchufe.spec.mjs')]));
   results.push(await run('interfaz: tutorial en el editor que se va encendiendo (P6, s13)', [join(ROOT, 'test', 'ui-tutorial.spec.mjs')]));
+  results.push(await run('moviola en el mismo sitio: curvas rehechas contra el SSE (P6, s14)', [join(ROOT, 'test', 'ui-moviola.spec.mjs')]));
   results.push(await run('interfaz: cirugía (lógica)', [join(ROOT, 'test', 'ui-cirugia.spec.mjs')]));
   results.push(await run('interfaz: ayudas de arranque, ¿qué pasaría si…? y primeros pasos (lógica)', [join(ROOT, 'test', 'ui-arranque.spec.mjs')]));
   results.push(await run('auditoría P0: una sola conexión SSE por URL', [join(ROOT, 'test', 'ui-sse.spec.mjs')]));

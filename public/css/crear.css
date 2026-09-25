@@ -37,7 +37,7 @@ body.game .ed2 { display: grid; grid-template-columns: 236px minmax(0, 1fr) 410p
 .ed2 .ed-panel { grid-column: 2; grid-row: 4; border-top: 0; }
 .ed2 .ed-bench { grid-column: 3; grid-row: 4; border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 8px 12px 12px; display: flex; flex-direction: column; gap: 6px; }
 .ed2 .ed-bench > * { flex-shrink: 0; } /* sesión 10: en rejilla, la escena medía 2 px de alto y el texto la tapaba */
-.ed2 .ed-probe { grid-column: 2 / 4; grid-row: 2; z-index: 8; background: #050a15f2; backdrop-filter: blur(3px); display: grid; }
+.ed2 .ed-probe { grid-column: 2 / 4; grid-row: 2 / 5; z-index: 8; background: #050a15f2; backdrop-filter: blur(3px); display: grid; }
 @media (min-width: 1700px) { body.game .ed2 { grid-template-columns: 260px minmax(0, 1fr) 480px; } }
 
 /* ---------- raíl: plantillas y bloques ---------- */
@@ -232,6 +232,22 @@ body.reduce .ed2 .nerve { animation: none; stroke-dasharray: none; stroke-width:
 .ed-probe .pr-live header { padding: 8px 14px; border-bottom: 1px solid var(--line); }
 .ed-probe canvas { width: 100%; height: 100%; display: block; min-height: 0; }
 .pr-end { padding: 10px 14px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.pr-end p { margin: 0; }
+/* moviola en el mismo sitio (s14): las partidas del duelo y los mandos, en la misma franja */
+.pr-end .mv-bar { flex-basis: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+.mv-lab { font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim); }
+.mv-games, .mv-ctl, .mv-speed { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mv-ctl { flex: 1 1 520px; }
+.mv-more { display: flex; gap: 6px; margin-left: auto; }
+.mv-game { min-width: 72px; }
+.mv-game b { font-weight: 600; margin-right: 4px; }
+.mv-game.win { border-color: #3ddc8a88; } .mv-game.lose { border-color: #ff6b6b88; } .mv-game.tie { border-color: var(--line-2); }
+.mv-game[aria-pressed="true"] { background: #1a2743; box-shadow: var(--glow-c); color: var(--text); }
+.mv-ctl .mv-play { min-width: 150px; }
+.mv-ctl input[type="range"] { flex: 1 1 120px; min-width: 100px; accent-color: var(--cyan); }
+.mv-n { font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--dim); }
+.mv-speed button { padding-inline: 8px; }
+.mv-speed button[aria-pressed="true"] { border-color: var(--cyan); color: var(--text); }
 .warn-text { color: var(--warn); }
 
 @media (max-width: 1400px) {

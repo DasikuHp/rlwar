@@ -9,7 +9,7 @@ Evento: `{ id, t, game, turn, type, actor: {playerId, soldierId, netId?}, target
 `id` = entero creciente por partida; `t` = ms; `turn` = nº de disparo de la partida (0 al inicio).
 | `type` | `data` |
 |---|---|
-| `game.start` | `{seed, map:{name, biome}, soldiers, players:[{playerId, name, netId?, agentType, team}]}` |
+| `game.start` | `{seed, map:{name, biome, obstacles}, soldiers, players:[{playerId, name, netId?, agentType, team}], positions:[{id, playerId, team, x, y}]}` (`positions` desde la sesión 14: la moviola del editor rehace la partida con ellas) |
 | `map.renew` | `{map, remaps}` |
 | `decision` | el registro de spec/03 §7 completo (sin `points` si `speed: turbo`) |
 | `shot` | `{mode, expr, exprLocal?, family?, params?, angle, result:{type, soldierId, x, y}, minDist, pointsCount}` |
@@ -116,7 +116,8 @@ no borren la unidad). Evento `neuron.name` con `corr`, `feature`, `m` (para la f
   `challenge`, `exam`) con `refs`, más reciente primero.
 - Cronista (`GET /api/lab/chronicle`): frases de temporada (reinados, defensas, generaciones de
   dinastías) con `refs` a `evo/log.jsonl`.
-- Moviola (`GET /api/lab/games/:id`): `{meta, events}` completos; `GET .../turns/:n/brain` →
+- Moviola (`GET /api/lab/games/:id`): `{meta, events}` completos (`?solo=jugadas`: solo `game.start`, `shot`, `move`, `say`,
+  `death` y el final, con `points` y `exact` en cada `shot`, rehechos en el servidor por `shared/moviola.js`; s14); `GET .../turns/:n/brain` →
   activaciones completas de la `decision` del turno `n` (recalculadas desde `obs` y el genoma de
   entonces: se guarda `netSha` en `game.start` y una copia del genoma en `evo/games/<id>.nets.json`
   solo para duelos de trono; para el resto, se recalcula con la red actual y se marca `approx:true`).

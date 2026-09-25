@@ -13,6 +13,7 @@ import { loadGame, appendLog, readLog, loadLogEntry, listGames, saveGame, loadGa
 import { nameNeurons, diaryPhrase, memoryOf } from './truth.js';
 import { runBulletin } from './exam.js';
 import { compile } from '../shared/nn.js';
+import { withCurves } from '../shared/moviola.js';
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { mutate, mutationConfig, slugify, DEFAULT_MUTATION } from './mutate.js';
@@ -185,6 +186,8 @@ function neuronSamples(netId, limit = 500) {
 }
 const DIARY_KINDS = new Set(['lesson', 'milestone', 'reign.start', 'reign.end', 'challenge', 'exam']);
 const CHRONICLE_KINDS = new Set(['reign.start', 'reign.end', 'challenge', 'dynasty']);
+// los eventos con los que la moviola rehace una partida (public/js/game/moviola.js)
+const PLAY_EVENTS = new Set(['game.start', 'shot', 'move', 'say', 'death', 'win', 'lose', 'draw']);
 function diaryEntries(filter) {
   const out = [];
   for (const e of readLog()) {
@@ -501,7 +504,11 @@ export async function labApi(req, res, parts, url) {
   }
   if (seg[0] === 'games' && seg.length === 2 && method === 'GET') {
     const g = loadGame(seg[1]);
-    return g ? json(res, 200, g) : bad(404, 'Partida no encontrada');
+    if (!g) return bad(404, 'Partida no encontrada');
+    // ?solo=jugadas: lo que necesita la moviola del editor (P6, s14), sin las decisiones ni las trayectorias (pesan megas)
+    // y con la curva de cada tiro rehecha aquí: en Node sale exacta; en el navegador, no (shared/moviola.js)
+    if (url.searchParams.get('solo') === 'jugadas') return json(res, 200, { meta: g.meta, events: withCurves(g.events.filter((e) => PLAY_EVENTS.has(e.type))) });
+    return json(res, 200, g);
   }
   if (seg[0] === 'duels') {
     if (seg.length === 1 && method === 'GET') return json(res, 200, { duels: withSaved([...duels.values()].map((d) => duelView(d.rec)), 'duels') });

@@ -209,6 +209,20 @@ check('recorrido entero con «Hazlo por mí», desde una red vacía hasta la gra
   for (const t of ['eye.candidates', 'hand.choose', 'dense', 'eye.moves', 'foot.move', 'eye.features', 'echo']) assert.ok(g.blocks.some((b) => b.type === t), t);
   for (const k of ['traits', 'reward', 'learning', 'imagination']) assert.ok(F.ui.ev[`gene:${k}`] >= 1, `cambió un gen de ${k}`);
 });
+// sesión 14: con ratón real, «Hazlo por mí» no cumplía tres retos si faltaba lo construido antes en su capítulo (recargar
+// sin guardar a mitad, o borrar bloques durante el reto): la ayuda pone también lo que el reto da por hecho
+check('cada reto se cumple con «Hazlo por mí» aunque falte lo que construyó su capítulo (desde lo que exige el capítulo y desde una red vacía)', () => {
+  for (const [ci, c] of CH.entries()) for (const s of c.steps) {
+    if (s.kind !== 'reto') continue;
+    for (const [how, g0] of [['lo que exige el capítulo', T.ensureFor(ci, blank(), CAT)], ['una red vacía', blank()]]) {
+      const F = fakeEditor(); F.st.g = fix(g0); F.ui.netId = 'mi-red'; F.st.savedG = F.st.g;
+      F.setup(s.setup || {});
+      F.help(s.help, {});
+      assert.ok(s.done(F.ctx(), { ev: {} }, { answers: {}, data: {} }), `${c.key}/${s.key}, desde ${how}`);
+    }
+  }
+});
+
 check('recorrido: los textos se componen con el estado real (números del banco) y el camino «Sé de RL» invita a saltar', () => {
   const x = T.buildCtx(null, { path: 'rl', ev: {} }, CAT);
   assert.match(CH[0].steps[0].text(x), /saltarlo/);

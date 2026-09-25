@@ -114,6 +114,14 @@ export function startShot(shot) {
   pushFn(R.bq, { soldierId: shot.soldierId, text: fnText(shot), team: shot.shooterTeam }, Date.now());
 }
 
+// la moviola para la curva a medias (y la retoma donde se quedó)
+export function pauseShot(on) {
+  const c = R.current;
+  if (!c) return;
+  if (on && c.pausedAt == null) c.pausedAt = performance.now();
+  if (!on && c.pausedAt != null) { c.t0 += performance.now() - c.pausedAt; c.pausedAt = null; }
+}
+
 export function shotFinished(shot) {
   R.shots.push({ points: shot.points, team: shot.shooterTeam, ts: Date.now() });
   if (R.shots.length > MAX_TRAILS) R.shots.shift();
@@ -304,7 +312,7 @@ function drawBubbles(st, labels, [x0, y0, x1, y1]) {
 
 function animateCurrent() {
   const pts = R.current.points;
-  const elapsed = (performance.now() - R.current.t0) / 1000;
+  const elapsed = ((R.current.pausedAt ?? performance.now()) - R.current.t0) / 1000;
   const spd = SHOT_SPEED * speedOf(); // a x10 la sala espera 10 veces menos: la curva se traza 10 veces más deprisa
   let n = 0, dist = 0;
   while (n < pts.length - 1 && dist < elapsed * spd) {

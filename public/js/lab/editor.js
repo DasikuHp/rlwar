@@ -21,6 +21,8 @@ import { patch } from '../ui/patch.js';
 import { popIn, drawIn } from '../ui/fx/anim.js';
 import { R, fnText, TEAM_COLOR, prettyExpr } from '../render.js';
 import { roomWatch } from '../game/sala.js';
+import { replay, shotText } from '/shared/moviola.js';
+import { moviolaPlayer } from '../game/moviola-play.js';
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const num = (v) => (typeof v === 'number' ? (Number.isInteger(v) ? String(v) : String(Math.round(v * 1e6) / 1e6)) : String(v));
@@ -908,8 +910,62 @@ export function mountEditor(root, { catalog, toast }) {
     }
     patch(el.querySelector('#prWho'), `${esc(nameOf(d ? d.a : S.netId))} contra ${esc(nameOf(d ? d.b : P.rival))}`);
     patch(el.querySelector('#prScore'), d ? `${d.games.length}/6 partidas · ${d.wins[d.a] ?? 0} – ${d.wins[d.b] ?? 0}` : 'empezando…');
-    patch(el.querySelector('#prEnd'), res ? `<div class="pr-end">${res}<p class="dim">Para ver cada decisión con calma, abre la moviola de su ficha:</p><button type="button" data-ficha="${esc(S.netId)}" data-ficha-tab="historia">Moviola de ${esc(nameOf(S.netId))}</button> <button type="button" data-act="probe-again">Otra vez</button></div>` : '');
+    if (!res) { patch(el.querySelector('#prEnd'), ''); return; }
+    patch(el.querySelector('#prEnd'), `<div class="pr-end"><div class="mv-bar">${res}<span class="mv-lab">Ver otra vez</span><div class="mv-games" role="group" aria-label="Partidas del duelo">${d.games.map((g, k) => mvChip(g, k)).join('')}</div></div>
+      <div class="mv-ctl" id="mvCtl"></div><div class="mv-more"><button type="button" data-act="probe-again">Otra vez</button><button type="button" data-ficha="${esc(S.netId)}" data-ficha-tab="historia" title="La moviola de su ficha: qué vio y qué pensó tu red en cada decisión">Qué pensó en cada tiro</button></div></div>`);
+    renderMv();
   }
+  // ---------- la moviola en el mismo sitio (P6, sesión 14): cada partida otra vez, en este plano, tiro a tiro ----------
+  const MV_SPEEDS = [[0.5, 'x½', 'a cámara lenta'], [1, 'x1', 'a la velocidad del juego original'], [3, 'x3', 'tres veces más deprisa'], [10, 'x10', 'como en el duelo']];
+  const MV_MOVE = { far: 'demasiado lejos', edge: 'fuera del plano', terrain: 'dentro de una roca', soldier: 'pegado a otro soldado', wall: 'al otro lado de una roca' };
+  function mvChip(g, k) {
+    const mv = S.probe.mv, side = g.left === S.netId ? 'izquierda (azul)' : 'derecha (naranja)';
+    const out = g.winner == null ? ['empate', 'tie'] : g.winner === S.netId ? ['ganó', 'win'] : ['perdió', 'lose'];
+    return `<button type="button" class="mv-game ${out[1]}" data-act="mv-game" data-k="${k}" aria-pressed="${!!mv && mv.k === k}" ${g.gameId ? '' : 'disabled'} title="Partida ${k + 1}: tu red a la ${side} · ${out[0]}${g.gameId ? '' : ' · no se guardó: no se puede ver'}"><b>${k + 1}</b> ${out[0]}</button>`;
+  }
+  // los controles, la barra de la función y el marcador: se repinta en cada tiro (onChange del reproductor)
+  function renderMv() {
+    const P = S.probe, el = $('edProbe'), ctl = el.querySelector('#mvCtl');
+    if (!P || !ctl) return;
+    const mv = P.mv, pl = mv && mv.player;
+    if (!mv) { patch(ctl, '<span class="dim">Elige una partida y se ve otra vez aquí: ▶ la reproduce, ⏸ la para (también a mitad de curva), ⏮ y ⏭ van tiro a tiro.</span>'); return; }
+    if (!pl) { patch(ctl, mv.err ? `<span class="warn-text">${esc(mv.err)}</span>` : '<span class="dim">Cargando la partida…</span>'); return; }
+    const { at, n } = pl, end = at >= n && pl.shown === n - 1, start = at === 0 && pl.shown < 0;
+    const label = pl.playing ? '⏸ Pausa' : end ? '▶ Desde el principio' : start ? '▶ Ver' : '▶ Seguir';
+    patch(ctl, `<button type="button" data-act="mv-back" aria-label="Tiro anterior" title="Tiro anterior: quita el último tiro trazado" ${start ? 'disabled' : ''}>⏮</button><button type="button" class="primary mv-play" data-act="mv-play">${label}</button><button type="button" data-act="mv-step" aria-label="Siguiente tiro" title="Siguiente tiro: lo traza y se para (si se está trazando, lo acaba de golpe)" ${end ? 'disabled' : ''}>⏭</button>
+      <input type="range" data-mv-at min="0" max="${n}" step="1" value="${at}" aria-label="Ir al tiro" title="Arrastra para ir a cualquier tiro"><span class="mv-n">tiro ${Math.max(0, pl.shown + 1)} de ${n}</span>
+      <span class="mv-speed" role="group" aria-label="Velocidad">${MV_SPEEDS.map(([v, t, why]) => `<button type="button" data-act="mv-speed" data-v="${v}" aria-pressed="${pl.speed === v}" title="${t}: ${why}">${t}</button>`).join('')}</span>`);
+    // marcador: qué partida, qué mapa, de qué color es tu red y las bajas hasta el tiro que se ve
+    const g = P.duel.games[mv.k], mineLeft = g.left === S.netId, kills = { left: 0, right: 0 };
+    for (const f of mv.rp.frames.slice(0, Math.max(0, pl.shown + 1))) kills[f.team] += f.result.kills;
+    patch(el.querySelector('#prScore'), `Partida ${mv.k + 1} de ${P.duel.games.length} · ${esc(mv.rp.map.name || '')} · tu red: <b style="color:${TEAM_COLOR[mineLeft ? 'left' : 'right']}">${mineLeft ? 'azul, a la izquierda' : 'naranja, a la derecha'}</b> · bajas ${kills[mineLeft ? 'left' : 'right']} – ${kills[mineLeft ? 'right' : 'left']}`);
+    // la función del tiro que se ve, lo que pasó y adónde se movió
+    const fn = el.querySelector('#prFn'), f = mv.rp.frames[pl.shown];
+    if (!f) { patch(fn, `<span class="dim">${mv.rp.approx ? 'Partida de antes de hoy: la posición de salida se deduce de su primer movimiento. ' : ''}Aún no ha disparado nadie.</span>`); return; }
+    const who = mv.rp.players.find((p) => p.id === f.playerId), c = TEAM_COLOR[f.team] || '#fff';
+    const nameOfSoldier = (id) => { const s = f.soldiers.find((q) => q.id === id), p = s && mv.rp.players.find((q) => q.id === s.ownerId); return p ? p.name : '?'; };
+    const m = f.move;
+    const moved = !m ? '' : m.reason === 'blocked' ? ` · quiso moverse ${MV_MOVE[m.why] || 'a un sitio imposible'} y se queda` : m.stayed ? ' · se queda quieto' : ` · se mueve ${Math.hypot(m.to.x - m.from.x, m.to.y - m.from.y).toFixed(1).replace('.', ',')} u`;
+    patch(fn, `<b class="fn-who" style="color:${c};border-color:${c}">${esc(who ? who.name : '?')}</b><span class="fn-expr mono" style="color:${c}">${esc(fnText(f))}</span><span class="fn-res">${pl.shown < at ? `${esc(shotText(f, nameOfSoldier))}${moved}${f.exact ? '' : ' · <span class="warn-text" title="La curva rehecha no acaba como la de la partida: lo que cuenta es lo de la partida">≠ no cuadra</span>'}` : '<span class="dim">trazando…</span>'}</span>`);
+  }
+  async function mvOpen(k) {
+    const P = S.probe, g = P && P.duel && P.duel.games[k];
+    if (!g || !g.gameId) return;
+    mvStop();
+    P.mv = { k, player: null, rp: null, err: null };
+    renderProbe();
+    const r = await api(`/api/lab/games/${encodeURIComponent(g.gameId)}?solo=jugadas`);
+    if (S.probe !== P || !P.mv || P.mv.k !== k) return;
+    const rp = r.ok ? replay(r.body) : { ok: false, why: `No se pudo cargar la partida: ${reasonOf(r)}` };
+    if (!rp.ok) { P.mv.err = rp.why; renderMv(); return; }
+    // el plano pasa a la moviola: la sala del duelo (ya acabada) deja de pintar en él
+    PW.take(); PW.stop();
+    P.mv.rp = rp;
+    P.mv.player = moviolaPlayer($('edProbe').querySelector('#prCanvas'), rp, { onChange: renderMv, speed: P.mvSpeed || 1 });
+    renderProbe();
+    P.mv.player.play();
+  }
+  function mvStop() { const P = S.probe; if (P && P.mv && P.mv.player) P.mv.player.stop(); if (P) P.mv = null; }
   // la sala en directo: la misma escucha que el duelo (game/sala.js); al abrirla aquí, el duelo deja de pintar la suya
   const probeFn = (shot, landed) => {
     const el = $('edProbe').querySelector('#prFn');
@@ -955,6 +1011,7 @@ export function mountEditor(root, { catalog, toast }) {
   }
   function probeClose() {
     clearInterval(probePoll);
+    mvStop();
     PW.stop();
     if (S.probe && S.probe.duelId && S.probe.duel && S.probe.duel.status === 'running') api(`/api/lab/duels/${encodeURIComponent(S.probe.duelId)}/stop`, 'POST', {});
     S.probe = null; $('edProbe').innerHTML = ''; renderProbe();
@@ -1110,6 +1167,11 @@ export function mountEditor(root, { catalog, toast }) {
       case 'probe-go': probeStart(); break;
       case 'probe-save-go': await save(); if (!S.dirty) probeStart(); break;
       case 'probe-again': { const rival = S.probe.rival; probeClose(); probeOpen(rival); break; }
+      case 'mv-game': mvOpen(Number(t.dataset.k)); break;
+      case 'mv-play': if (S.probe.mv && S.probe.mv.player) S.probe.mv.player.toggle(); else mvOpen(0); break;
+      case 'mv-step': S.probe.mv.player.step(); break;
+      case 'mv-back': S.probe.mv.player.back(); break;
+      case 'mv-speed': S.probe.mvSpeed = Number(t.dataset.v); S.probe.mv.player.setSpeed(S.probe.mvSpeed); break;
       default: break;
     }
   };
@@ -1177,12 +1239,16 @@ export function mountEditor(root, { catalog, toast }) {
     }
     return null;
   }
-  const onInput = (ev) => { if (ev.target.type === 'range' || ev.target.id === 'edName') onControl(ev, true); };
+  const onInput = (ev) => {
+    if (ev.target.dataset.mvAt !== undefined) { const pl = S.probe && S.probe.mv && S.probe.mv.player; if (pl) pl.go(Number(ev.target.value)); return; }
+    if (ev.target.type === 'range' || ev.target.id === 'edName') onControl(ev, true);
+  };
   root.addEventListener('input', onInput);
   const onChange = (ev) => {
     const el = ev.target;
     if (el.dataset.bseed !== undefined) { S.bench.seed = Math.max(0, Math.round(Number(el.value) || 0)); bump('seed'); scheduleBench(0); return; }
     if (el.dataset.prival !== undefined) { S.probe.rival = el.value; return; }
+    if (el.dataset.mvAt !== undefined) return;
     if (el.dataset.import !== undefined && el.files && el.files[0]) { S.menu = false; importFile(el.files[0]); el.value = ''; return; }
     if (el.dataset.connect) {
       const r = M.connect(S.genome, el.value, el.dataset.connect);

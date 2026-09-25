@@ -55,8 +55,10 @@ reproducible; `state.config.seed` la expone siempre) y `speed` (`1` | `10`; una 
 - **Obstáculos**: círculos `{kind:'circle', x, y, r}` (los mapas nuevos solo generan círculos) o rectángulos `{x, y, w, h}`.
 - **Bocados**: `state.bites[] = {x, y, r}`. Cada tiro explota donde acaba y, si toca terreno, le arranca un bocado de
   0,78 u. Un punto es sólido si está dentro de algún obstáculo y fuera de todos los bocados (`isSolid` en
-  `shared/geometry.js`). El evento `game.start` trae los obstáculos del mapa (`map.obstacles`) y cada evento `shot`, su
-  `bite` (o `null`): con eso se rehace el terreno de cualquier turno.
+  `shared/geometry.js`). El evento `game.start` trae los obstáculos del mapa (`map.obstacles`) y dónde empieza cada
+  soldado (`positions: [{id, playerId, team, x, y}]`); cada evento `shot`, su `bite` (o `null`), y cada `move`, su
+  `from`/`to`: con eso se rehace cualquier turno (`shared/moviola.js`). `GET /api/lab/games/:id?solo=jugadas` da solo esos
+  eventos, con la curva de cada tiro ya rehecha en el servidor (`points`, un punto cada 0,1 u) y `exact`.
 - **El tiro atraviesa**: mata a **todos** los soldados que toca, en orden, y solo se para en terreno, borde o valor
   inválido. `fire` devuelve `result: {type, end, hits, soldierId, x, y, firstHit}`: `hits` son los alcanzados en orden;
   `end` dice por qué se paró; `type` es `kill` si alcanzó a algún enemigo, `suicide` si solo a aliados, y si no, `end`.

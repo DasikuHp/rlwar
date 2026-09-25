@@ -223,7 +223,8 @@ export class Room {
     for (const p of this.players) {
       if (p.isBot) this.agents[p.id] = this.makeAgent(p);
     }
-    this.emit('game.start', { playerId: null, soldierId: null, netId: null }, { seed: this.seed, map: { name: map.name, biome: map.biome, obstacles: this.obstacles.map((o) => ({ ...o })) }, soldiers: n, players: this.players.map((p) => ({ playerId: p.id, name: p.name, netId: p.netId || null, agentType: p.agentType || null, team: p.team })) });
+    // `positions`: dónde empieza cada soldado; con eso, los obstáculos y cada `shot` y `move`, la moviola rehace la partida
+    this.emit('game.start', { playerId: null, soldierId: null, netId: null }, { seed: this.seed, map: { name: map.name, biome: map.biome, obstacles: this.obstacles.map((o) => ({ ...o })) }, soldiers: n, players: this.players.map((p) => ({ playerId: p.id, name: p.name, netId: p.netId || null, agentType: p.agentType || null, team: p.team })), positions: this.soldiers.map((s) => ({ id: s.id, playerId: s.ownerId, team: s.team, x: s.x, y: s.y })) });
     // orden de turnos intercalando equipos
     const L = this.players.filter((p) => p.team === C.TEAMS.LEFT);
     const R = this.players.filter((p) => p.team === C.TEAMS.RIGHT);

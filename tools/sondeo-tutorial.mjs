@@ -113,7 +113,8 @@ export default async (ctx) => {
       await u.click('[data-act="probe"]', 'Probar ya'); await sleep(1500);
       const pi = await info();
       ok(await ev(`!document.getElementById('edProbe').hidden`), 'en la pausa, «Probar ya» abre su panel');
-      ok(pi.lit.length >= 2 && await u.cover('[data-act="probe-close"]') === 'ok', 'y el panel se ilumina y se puede cerrar', await u.cover('[data-act="probe-close"]'));
+      const panel = await u.rect('#edProbe');
+      ok(pi.lit.length === 1 && Math.abs(pi.lit[0].x - panel.x) < 2 && Math.abs(pi.lit[0].w - panel.w) < 2 && await u.cover('[data-act="probe-close"]') === 'ok', 'y lo iluminado es el panel (no el botón que tapa), que se puede cerrar', `${JSON.stringify(pi.lit.map((r) => [Math.round(r.x), Math.round(r.y), Math.round(r.w), Math.round(r.h)]))} · ${await u.cover('[data-act="probe-close"]')}`);
       await u.click('[data-act="probe-close"]', 'cerrar Probar ya'); await sleep(700);
       continue;
     }

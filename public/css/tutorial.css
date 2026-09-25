@@ -1,0 +1,84 @@
+/* Tutorial (spec/12 §4.1, maqueta REFERENCIATUTORIAL.png): penumbra con máscara, halo azul que late, ventana del
+   Sistema (azul translúcido, borde que brilla, «◆ SISTEMA», botón redondo →), línea con un punto brillante, barra de
+   capítulos arriba y mano fantasma. La capa entera deja pasar el ratón; solo la ventana y la barra lo reciben. */
+.tut-layer { position: fixed; inset: 0; z-index: 50; pointer-events: none; }
+.tut-layer[hidden] { display: none; }
+.tut-dim, .tut-link { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.tut-shade { fill: rgba(2, 5, 13, .85); }
+.tut-halo { fill: none; stroke: #3fd0ff; stroke-width: 2; filter: drop-shadow(0 0 5px #3fd0ff) drop-shadow(0 0 14px #3fd0ffaa); animation: tutHalo 1.6s ease-in-out infinite; }
+@keyframes tutHalo { 50% { stroke-opacity: .4; } }
+.tut-link line { stroke: #3fd0ff; stroke-width: 1.6; filter: drop-shadow(0 0 4px #3fd0ff); }
+.tut-link circle { fill: #eafaff; filter: drop-shadow(0 0 5px #3fd0ff) drop-shadow(0 0 10px #3fd0ff); }
+
+/* la ventana del Sistema */
+.tut-win { position: absolute; width: 350px; max-height: calc(100vh - 70px); overflow-y: auto; pointer-events: auto; display: grid; gap: 8px;
+  padding: 14px 16px 14px; border-radius: 14px; color: #dce8ff; font-size: 13.5px; line-height: 1.5;
+  background: linear-gradient(180deg, #0c1d3cf2, #081328f2); border: 1.5px solid #3fd0ff;
+  box-shadow: 0 0 0 1px #3fd0ff33, 0 0 22px #3fd0ff55, inset 0 0 18px #3fd0ff1c, 0 18px 50px #000c;
+  transition: left .28s cubic-bezier(.2, .8, .2, 1), top .28s cubic-bezier(.2, .8, .2, 1); }
+.tut-win header { display: flex; align-items: center; gap: 8px; }
+.tut-win header b { color: #3fd0ff; letter-spacing: .22em; font-size: 11px; font-weight: 600; }
+.tut-win header .mono { margin-left: auto; color: #6f86b3; font-size: 11px; }
+.tut-win .tut-ch { font-size: 12px; color: #9fb4dc; border-bottom: 1px solid #1e3560; padding-bottom: 6px; }
+.tut-win .tut-ch i { color: #cfe0ff; }
+.tut-win h3 { font-size: 17px; font-weight: 600; color: #fff; display: flex; align-items: baseline; gap: 10px; }
+.tut-win h3 em { font-style: normal; color: #3fd0ff; font-weight: 500; font-size: 18px; text-shadow: 0 0 10px #3fd0ff88; }
+.tut-win .tut-after { padding: 7px 10px; border-radius: 8px; background: #0f2a22d9; border: 1px solid #1f5a45; color: #d6efe5; font-size: 12.5px; }
+.tut-win .tut-after b { color: #5ee6a8; font-weight: 600; }
+.tut-win .tut-after .n { color: #fff; font-weight: 600; }
+.tut-win .tut-todo { color: #fff; font-weight: 600; padding: 7px 10px; border-left: 3px solid #3fd0ff; background: #0d2447cc; border-radius: 0 8px 8px 0; }
+.tut-win .tut-note { color: #8fa6cf; font-size: 12px; }
+.tut-win .tut-zone { font-size: 16px; color: #cfe0ff; }
+.tut-win .tut-zone b { color: #fff; }
+.tut-win .tut-ask { display: flex; flex-wrap: wrap; gap: 6px; }
+.tut-win .tut-ask button { padding: 6px 12px; border-radius: 8px; border: 1px solid #2c5a9a; background: #0f2446; color: #eaf3ff; }
+.tut-win .tut-ask button:hover, .tut-win .tut-ask button:focus-visible { border-color: #3fd0ff; box-shadow: 0 0 10px #3fd0ff66; outline: none; }
+.tut-win footer { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+.tut-dots { display: inline-flex; gap: 7px; margin-right: auto; }
+.tut-dots i { width: 8px; height: 8px; border-radius: 50%; background: #2a4f86; }
+.tut-dots i.ok { background: #3fd0ff88; }
+.tut-dots i.now { background: #fff; box-shadow: 0 0 8px #3fd0ff; }
+.tut-win .tut-do { padding: 6px 12px; border-radius: 8px; border: 1px solid #3fd0ff; background: #0f2a4d; color: #fff; }
+.tut-next { min-width: 46px; height: 46px; border-radius: 23px; border: 0; padding: 0 14px; color: #fff; font-size: 21px; line-height: 1; cursor: pointer;
+  background: radial-gradient(circle at 35% 30%, #4fb2ff, #1c6fe6 70%); box-shadow: 0 0 16px #2f8fffaa, inset 0 0 0 1px #9fd6ff55; }
+.tut-next.wide { font-size: 14px; font-weight: 600; letter-spacing: .02em; }
+.tut-next:hover, .tut-next:focus-visible { box-shadow: 0 0 22px #3fd0ffdd, inset 0 0 0 2px #cfefff; outline: none; }
+.tut-win.nudge { animation: tutNudge .42s ease-in-out; }
+@keyframes tutNudge { 20% { transform: translateX(-6px); } 45% { transform: translateX(5px); } 70% { transform: translateX(-3px); } }
+
+/* la barra de capítulos: sobre la barra de etapas, que durante el tutorial no responde */
+.tut-bar { position: absolute; top: 7px; left: 50%; transform: translateX(-50%); height: 38px; pointer-events: auto; display: flex; align-items: center; gap: 12px;
+  padding: 0 8px 0 14px; border-radius: 19px; background: #07102af5; border: 1px solid #2b5da8; box-shadow: 0 0 16px #3fd0ff33; font-size: 12.5px; white-space: nowrap; }
+.tut-brand { color: #3fd0ff; letter-spacing: .22em; font-size: 11px; }
+.tut-where { color: #cfe0ff; }
+.tut-chs { display: inline-flex; gap: 5px; }
+.tut-chs button { width: 12px; height: 12px; padding: 0; border-radius: 50%; border: 1px solid #3a6cb8; background: #10244a; cursor: pointer; }
+.tut-chs button.done { background: #3fd0ff99; border-color: #3fd0ff; }
+.tut-chs button.now { background: #fff; border-color: #fff; box-shadow: 0 0 8px #3fd0ff; }
+.tut-chs button:focus-visible { outline: 2px solid #3fd0ff; outline-offset: 2px; }
+.tut-bar > button { padding: 4px 11px; border-radius: 14px; font-size: 12px; border: 1px solid #2b5da8; background: #0d1d3d; color: #dce8ff; }
+.tut-bar > button:hover, .tut-bar > button:focus-visible { border-color: #3fd0ff; color: #fff; outline: none; }
+
+/* la mano fantasma (su punta está en el 0,0) */
+.tut-hand { position: absolute; left: 0; top: 0; pointer-events: none; filter: drop-shadow(0 0 6px #3fd0ff) drop-shadow(0 2px 3px #000); will-change: transform; }
+.tut-hand svg { display: block; }
+.tut-hand.still::after { content: ''; position: absolute; left: -9px; top: -9px; width: 18px; height: 18px; border-radius: 50%; border: 2px solid #3fd0ff; }
+
+/* lo que va encima de la penumbra: el aviso (con «Deshacer»), el diálogo del editor, la ficha y los carteles del ratón */
+#toast, body.game #toast { z-index: 70; }
+.ed-modal { z-index: 66; }
+.ficha { z-index: 62; }
+.ed2 .drop-tip { z-index: 58; }
+.ed2 .pal-tip { z-index: 57; }
+
+/* efectos: chispas al acertar y el cable que se dibuja */
+.fx-burst { position: fixed; z-index: 80; pointer-events: none; }
+.fx-burst i { position: absolute; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: #9ff0ff; box-shadow: 0 0 8px #3fd0ff; }
+.fx-draw { position: fixed; inset: 0; width: 100vw; height: 100vh; z-index: 56; pointer-events: none; overflow: visible; }
+.fx-draw path { fill: none; stroke: #b8f5ff; stroke-width: 3.5; stroke-linecap: round; filter: drop-shadow(0 0 6px #3fd0ff); }
+
+@media (min-width: 1700px) { .tut-win { width: 380px; font-size: 14px; } }
+@media (prefers-reduced-motion: reduce) { .tut-halo { animation: none; } .tut-win { transition: none; } .tut-win.nudge { animation: none; } }
+body.reduce .tut-halo { animation: none; }
+body.reduce .tut-win { transition: none; }
+body.reduce .tut-win.nudge { animation: none; }

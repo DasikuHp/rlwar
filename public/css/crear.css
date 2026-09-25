@@ -300,25 +300,5 @@ body.reduce .ed2 .nerve { animation: none; stroke-dasharray: none; stroke-width:
 /* guía «Tu primera red» (P6, sesión 10): tarjeta arriba a la derecha del lienzo; lo que pide el paso, iluminado */
 /* sesión 11: a 1280 × 800 el lienzo mide ~320 px y la tarjeta entera no cabía: lo que hay que hacer (👉 y sus botones)
    quedaba cortado abajo. Ahora solo se encoge (con su propio scroll) el recuadro verde de lo que ha cambiado */
-.ed2 .ed-coach { grid-column: 2 / 4; grid-row: 2; justify-self: end; align-self: start; width: min(350px, 40%); max-height: calc(100% - 16px); display: flex; flex-direction: column; overflow: hidden; margin: 8px 12px; z-index: 5; }
-.ed2 .coach > * { flex-shrink: 0; }
-.ed2 .coach .coach-after { flex-shrink: 1; min-height: 4.5em; overflow-y: auto; }
-.ed2 .coach { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; gap: 7px; padding: 12px 14px; border: 1px solid var(--line-2); border-left: 3px solid var(--cyan); border-radius: 10px; background: #0b1428f5; box-shadow: 0 12px 34px #000a, var(--glow-c); font-size: 12.5px; }
-.ed2 .coach header { display: flex; align-items: center; gap: 8px; }
-.ed2 .coach header b { white-space: nowrap; letter-spacing: .12em; text-transform: uppercase; font-size: 11px; color: var(--cyan); font-weight: 600; }
-.ed2 .coach header .mono { color: var(--dim); font-size: 11px; white-space: nowrap; }
-.ed2 .coach header { flex-wrap: wrap; }
-.ed2 .coach header .x { margin-left: auto; padding: 1px 7px; }
-.ed2 .coach .dots { display: inline-flex; gap: 3px; } .ed2 .coach .dots i { width: 7px; height: 7px; border-radius: 50%; background: #243457; }
-.ed2 .coach .dots i.ok { background: var(--good); } .ed2 .coach .dots i.now { background: var(--cyan); box-shadow: var(--glow-c); }
-.ed2 .coach h3 { font-size: 15px; font-weight: 500; }
-.ed2 .coach .ask { color: #cfd9ee; } .ed2 .coach .todo { color: #fff; font-weight: 500; }
-.ed2 .coach .coach-after { padding: 7px 9px; border-radius: 7px; background: #0f2a22cc; border: 1px solid #1f5a45; }
-.ed2 .coach .coach-after b { color: var(--good); } .ed2 .coach .coach-after p { margin-top: 3px; color: #d6efe5; }
-.ed2 .coach .row { display: flex; flex-wrap: wrap; gap: 6px; }
-.ed2 .coach-open[aria-pressed="true"] { border-color: var(--cyan); color: var(--text); box-shadow: var(--glow-c); }
-.coach-target { outline: 2px solid var(--cyan) !important; outline-offset: 3px; animation: coachPulse 1.3s ease-in-out infinite; }
-path.coach-target { outline: 0 !important; stroke: var(--cyan) !important; stroke-width: 4 !important; }
-.port.coach-target { outline-offset: 2px; border-radius: 50%; }
-@keyframes coachPulse { 50% { outline-color: transparent; } }
-@media (prefers-reduced-motion: reduce) { .coach-target { animation: none; } }
+.ed2 .guide-open[aria-pressed="true"] { border-color: var(--cyan); color: var(--text); box-shadow: var(--glow-c); }
+.ed2 .ed-sp { flex: 1; }

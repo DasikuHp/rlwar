@@ -131,3 +131,79 @@ export async function smoothScroll(wrapper, content) {
   const lenis = new L({ wrapper, content: content || wrapper.firstElementChild || wrapper, autoRaf: true, smoothWheel: true, lerp: 0.12 });
   return () => lenis.destroy();
 }
+
+// ---------- tutorial (spec/12 §4.4): texto línea a línea, mano fantasma, ráfaga, cable que se dibuja, números ----------
+// el texto entra línea a línea (SplitText); luego se deshace el partido para que el texto quede normal
+export async function lines(el) {
+  if (!el || reduced()) return;
+  const g = await getGsap();
+  if (!g || !window.SplitText || !el.isConnected) return;
+  const split = new window.SplitText(el, { type: 'lines' });
+  g.from(split.lines, { opacity: 0, y: 8, duration: 0.45, stagger: 0.09, ease: 'power2.out', onComplete: () => split.revert() });
+}
+// la mano fantasma: un cursor que hace el gesto (clic, arrastrar o quedarse encima) en bucle hasta que lo hagas.
+// `el` es un elemento fijo con la punta del cursor en su (0, 0). Con «reducir movimiento», queda quieta señalando.
+// Devuelve stop()
+export async function ghost(el, { kind = 'clic', from, to = null }) {
+  if (!el || !from) return () => {};
+  const off = () => { el.hidden = true; el.classList.remove('still'); };
+  el.hidden = false;
+  const g = reduced() ? null : await getGsap();
+  if (!g) { el.classList.add('still'); el.style.transform = `translate(${(to || from).x}px, ${(to || from).y}px)`; return off; }
+  el.classList.remove('still'); el.style.transform = '';
+  g.set(el, { x: from.x + 46, y: from.y + 54, opacity: 0, scale: 1 });
+  const tl = g.timeline({ repeat: -1, repeatDelay: 0.6 });
+  tl.to(el, { opacity: 1, x: from.x, y: from.y, duration: 0.55, ease: 'power2.out' });
+  if (kind === 'drag' && to) {
+    const mid = { x: (from.x + to.x) / 2, y: Math.min(from.y, to.y) - 36 };
+    tl.to(el, { scale: 0.82, duration: 0.14 })
+      .to(el, window.MotionPathPlugin ? { motionPath: { path: [from, mid, to], curviness: 1.1 }, duration: 1.15, ease: 'power1.inOut' } : { x: to.x, y: to.y, duration: 1.15, ease: 'power1.inOut' })
+      .to(el, { scale: 1, duration: 0.14 }).to(el, { opacity: 0, duration: 0.35, delay: 0.35 });
+  } else if (kind === 'hover') {
+    tl.to(el, { x: from.x + 3, y: from.y - 2, duration: 0.5, yoyo: true, repeat: 3, ease: 'sine.inOut' }).to(el, { opacity: 0, duration: 0.35 });
+  } else {
+    tl.to(el, { scale: 0.8, duration: 0.12, yoyo: true, repeat: 1 }).to(el, { opacity: 0, duration: 0.35, delay: 0.45 });
+  }
+  return () => { tl.kill(); off(); };
+}
+// ráfaga corta de chispas al acertar, en un punto de la pantalla
+export async function burst(x, y, { n = 16 } = {}) {
+  if (!hasDOM || reduced()) return;
+  const g = await getGsap();
+  if (!g) return;
+  const box = document.createElement('div');
+  box.className = 'fx-burst'; box.style.left = `${x}px`; box.style.top = `${y}px`;
+  for (let i = 0; i < n; i++) box.appendChild(document.createElement('i'));
+  document.body.appendChild(box);
+  g.to(box.children, {
+    x: (i) => Math.cos((i / n) * Math.PI * 2) * (38 + (i % 3) * 16), y: (i) => Math.sin((i / n) * Math.PI * 2) * (38 + (i % 3) * 16),
+    opacity: 0, scale: 0.3, duration: 0.8, ease: 'power2.out', onComplete: () => box.remove(),
+  });
+}
+// un cable recién enchufado se dibuja de punta a punta: una copia brillante encima (en una capa fija, porque el lienzo se
+// repinta y le quitaría el estilo a mitad)
+export async function drawIn(path) {
+  if (!path || !hasDOM || reduced() || !path.getScreenCTM) return;
+  const g = await getGsap();
+  if (!g || !window.DrawSVGPlugin || !path.isConnected) return;
+  const m = path.getScreenCTM();
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('class', 'fx-draw');
+  const cp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  cp.setAttribute('d', path.getAttribute('d'));
+  cp.setAttribute('transform', `matrix(${m.a} ${m.b} ${m.c} ${m.d} ${m.e} ${m.f})`);
+  svg.appendChild(cp); document.body.appendChild(svg);
+  g.fromTo(cp, { drawSVG: '0%' }, { drawSVG: '100%', duration: 0.6, ease: 'power2.out', onComplete: () => g.to(svg, { opacity: 0, duration: 0.35, onComplete: () => svg.remove() }) });
+}
+// los números de un texto (marcados con .n) cuentan desde 0 hasta su valor, con los decimales que traían
+export async function countUp(el) {
+  if (!el || reduced()) return;
+  const g = await getGsap();
+  if (!g) return;
+  for (const s of el.querySelectorAll('.n')) {
+    const txt = s.textContent, v = Number(txt.replace(',', '.'));
+    if (!Number.isFinite(v)) continue;
+    const dec = (txt.split(/[.,]/)[1] || '').length, o = { v: 0 };
+    g.to(o, { v, duration: 0.8, ease: 'power2.out', onUpdate: () => { s.textContent = o.v.toFixed(dec).replace('.', ','); }, onComplete: () => { s.textContent = txt; } });
+  }
+}

@@ -1,6 +1,7 @@
 # 12 — Tutorial «Tu primera red» en el editor que se va encendiendo, y enchufar y desenchufar cables
 
-> Propuesta de la sesión 11 (2026-09-25), **aprobada con cambios en la sesión 12** (respuestas en §6 y en plan2, fila
+> **Hecho en la sesión 13** (código en `public/js/game/tutorial/`, pruebas en `test/ui-tutorial.spec.mjs` y
+> `tools/sondeo-tutorial.mjs`; plan2, fila «Sesión 13»). Propuesta de la sesión 11 (2026-09-25), **aprobada con cambios en la sesión 12** (respuestas en §6 y en plan2, fila
 > «Sesión 12»). El cambio grande: no hay «modo taller» que construya el editor pieza a pieza, sino **el editor oficial en
 > penumbra que se va encendiendo** (§4.1, idea y maqueta del usuario). Sustituye a la guía de la sesión 10 (una tarjeta en
 > la esquina del editor, `public/js/lab/coach.js`), pero aprovecha su lógica pura.

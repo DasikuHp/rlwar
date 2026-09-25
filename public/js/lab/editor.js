@@ -10,14 +10,15 @@ import * as M from './model.js';
 import * as Hn from './hints.js';
 import * as Bn from './bench.js';
 import * as Hi from './history.js';
-import * as Co from './coach.js';
+import * as TC from '../game/tutorial/crear.js';
+import { mountTutorial } from '../game/tutorial/overlay.js';
 import * as P from './plug.js';
 import { emblemSVG } from './emblem.js';
 import { api, reasonOf } from './api.js';
 import { validate, repair, countParams, outDims, newGenome } from '/shared/genome.js';
 import { makeRng } from '/shared/rng.js';
 import { patch } from '../ui/patch.js';
-import { popIn } from '../ui/fx/anim.js';
+import { popIn, drawIn } from '../ui/fx/anim.js';
 import { R, fnText, TEAM_COLOR, prettyExpr } from '../render.js';
 import { roomWatch } from '../game/sala.js';
 
@@ -68,27 +69,29 @@ export function mountEditor(root, { catalog, toast }) {
     level: M.LEVELS.includes(store.get(LS.level, 'aprendiz')) ? store.get(LS.level, 'aprendiz') : 'aprendiz',
     nets: [], templates: [], panelTab: 'capa', genesTab: 'traits',
     netId: null, saved: null, base: null, genome: null, check: null, forPlay: null, dims: null, streams: {}, issues: null, params: null,
-    coach: null, world: null, server: null, sel: null, pos: {}, zoom: 1, fit: true, dirty: false, pending: null, tplOpen: null, confirm: null,
+    tut: null, ev: {}, world: null, server: null, sel: null, pos: {}, zoom: 1, fit: true, dirty: false, pending: null, tplOpen: null, confirm: null,
     hist: Hi.createHistory(null), menu: false, slotEl: null, palHover: null, link: null, hoverWire: null, folded: store.get('gw.ed.folded', false) === true,
     bench: { scene: 'abierto', custom: null, phase: 'shoot', seed: 1, now: null, saved: null, savedKey: null, sig: null, pick: null, busy: false },
     versions: { list: null, open: null, diff: null, ver: null, busy: false },
     probe: null,
   };
-  let drag = null, suppressClick = false, benchTimer = null, coachShown = null;
+  let drag = null, suppressClick = false, benchTimer = null, tut = null;
+  // cuántas veces se ha hecho cada cosa (deshacer, quitar un cable, guardar…): el tutorial mira si has hecho algo desde
+  // que empezó el paso
+  const bump = (k) => { S.ev = { ...S.ev, [k]: (S.ev[k] || 0) + 1 }; };
 
   root.innerHTML = `
     <div class="ed-slot-fallback" id="edHead"></div>
     <aside class="ed-rail" id="edRail" aria-label="Plantillas y bloques"></aside>
-    <div class="pal-tip" id="edPalTip" role="tooltip" hidden></div>
+    <div class="pal-tip" id="edPalTip" data-tut="ficha-bloque" role="tooltip" hidden></div>
     <div class="ed-tools" id="edTools"></div>
-    <div class="ed-board" id="edBoard" aria-label="Lienzo de la red"></div>
-    <div class="ed-coach" id="edCoach" hidden></div>
+    <div class="ed-board" id="edBoard" data-tut="lienzo" aria-label="Lienzo de la red"></div>
     <div class="wire-tools" id="edWireTools" hidden></div>
     <div class="drop-tip" id="edDropTip" role="status" hidden></div>
-    <div class="ed-split" id="edSplit" role="separator" aria-orientation="horizontal" aria-label="Arrastra para dar más sitio al lienzo o a los ajustes" tabindex="0"></div>
-    <section class="ed-panel" id="edPanel" aria-label="La capa elegida y los genes"></section>
-    <section class="ed-bench" id="edBench" aria-label="Banco de pruebas"></section>
-    <div class="ed-probe" id="edProbe" hidden></div>
+    <div class="ed-split" id="edSplit" data-tut="separador" role="separator" aria-orientation="horizontal" aria-label="Arrastra para dar más sitio al lienzo o a los ajustes" tabindex="0"></div>
+    <section class="ed-panel" id="edPanel" data-tut="panel" aria-label="La capa elegida y los genes"></section>
+    <section class="ed-bench" id="edBench" data-tut="banco" aria-label="Banco de pruebas"></section>
+    <div class="ed-probe" id="edProbe" data-tut="probar-panel" hidden></div>
     <div class="ed-modal" id="edModal" hidden></div>`;
   const $ = (id) => root.querySelector('#' + id);
   // alto del panel de abajo: lo último que elegiste, o un tercio de la ventana; plegado, solo sus pestañas
@@ -128,17 +131,19 @@ export function mountEditor(root, { catalog, toast }) {
     if (opts.select !== undefined) S.sel = opts.select;
     if (opts.partial) { renderHead(); renderTools(); renderBoard(); } else render();
     scheduleBench();
+    tutUpdate();
   }
   // quitar un cable (✕ del cable, «Quitar cable», Supr, arrastrar su punta al vacío): el aviso ofrece deshacerlo
   function unwire(i) {
     const w = S.genome && S.genome.wires[i];
     if (!w) return;
     const r = P.drop(S.genome, catalog, { kind: 'end', index: i, from: w.from, to: w.to }, { node: null }, new Map());
+    bump('unwire');
     commit(r.genome, { select: null, label: r.label });
     toast(r.text, 'info', { label: 'Deshacer', run: undo });
   }
-  function undo() { if (!Hi.canUndo(S.hist)) return; const l = Hi.undoLabel(S.hist); S.hist = Hi.undo(S.hist); S.genome = S.hist.present; afterChange(); toast(`Deshecho: ${l}`); }
-  function redo() { if (!Hi.canRedo(S.hist)) return; const l = Hi.redoLabel(S.hist); S.hist = Hi.redo(S.hist); S.genome = S.hist.present; afterChange(); toast(`Rehecho: ${l}`); }
+  function undo() { if (!Hi.canUndo(S.hist)) return; const l = Hi.undoLabel(S.hist); S.hist = Hi.undo(S.hist); S.genome = S.hist.present; bump('undo'); afterChange(); toast(`Deshecho: ${l}`); }
+  function redo() { if (!Hi.canRedo(S.hist)) return; const l = Hi.redoLabel(S.hist); S.hist = Hi.redo(S.hist); S.genome = S.hist.present; bump('redo'); afterChange(); toast(`Rehecho: ${l}`); }
   // bloques que ya existían y estrenan pesos al guardar (cambió su forma): lo aprendido en ellos se pierde
   function freshBlocks() {
     if (!S.saved || !S.genome) return [];
@@ -163,13 +168,13 @@ export function mountEditor(root, { catalog, toast }) {
     S.hist = Hi.createHistory(S.genome);
     S.pos = store.get(LS.pos(netId), {}) || {};
     S.fit = true; S.menu = false;
-    S.coach = store.get(`gw.coach.${netId}`, null);
     S.bench.saved = null; S.bench.savedKey = null; S.versions = { list: null, open: null, diff: null, ver: null, busy: false };
     recheck();
     if (location.hash !== `#crear/${netId}`) history.replaceState(null, '', `#crear/${netId}`);
     render();
     scheduleBench(0);
     if (S.panelTab === 'versiones') loadVersions();
+    tutUpdate();
   }
   async function save() {
     if (!S.genome) return;
@@ -178,7 +183,8 @@ export function mountEditor(root, { catalog, toast }) {
     if (r.ok) {
       S.saved = clone(S.genome); S.base = S.genome; S.dirty = false; S.server = { warnings: r.body.warnings || [] };
       S.bench.saved = null; S.bench.savedKey = null; S.versions.list = null;
-      await loadNets(); render(); scheduleBench(0); toast(r.body.version ? `Red guardada. La de antes queda como versión ${r.body.version} (Versiones).` : 'Red guardada.');
+      bump('save');
+      await loadNets(); render(); tutUpdate(); scheduleBench(0); toast(r.body.version ? `Red guardada. La de antes queda como versión ${r.body.version} (Versiones).` : 'Red guardada.');
       if (S.panelTab === 'versiones') loadVersions();
     } else {
       S.server = { status: r.status, error: reasonOf(r), errors: (r.body && r.body.errors) || [] };
@@ -187,7 +193,7 @@ export function mountEditor(root, { catalog, toast }) {
   }
   // desde cero: una red sin ningún bloque (válida para guardar; para jugar le faltará Elegir, y el editor lo dice)
   const slug = (s) => String(s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 28);
-  async function createBlank(name) {
+  async function createBlank(name, { quiet = false } = {}) {
     const base = slug(name).length >= 3 ? slug(name) : 'mi-red';
     const taken = new Set(S.nets.map((n) => n.id));
     let id = base;
@@ -197,9 +203,9 @@ export function mountEditor(root, { catalog, toast }) {
     if (!r.ok) { toast(reasonOf(r), 'error'); return; }
     S.tplOpen = null;
     await loadNets();
+    if (tut && tut.active()) tut.set({ net: r.body.id });
     await open(r.body.id);
-    coachStart();
-    toast(`Red en blanco creada: ${genome.name}. La guía te lleva paso a paso (arriba a la derecha del lienzo).`);
+    if (!quiet) toast(`Red en blanco creada: ${genome.name}.`);
   }
   async function createFromTemplate(key, name) {
     if (key === 'blank') { await createBlank(name); return; }
@@ -260,17 +266,17 @@ export function mountEditor(root, { catalog, toast }) {
     const g = S.genome;
     const u = Hi.undoLabel(S.hist), r = Hi.redoLabel(S.hist);
     patch(h, `<div class="edh">
-      <span class="edh-em" title="Emblema: sale de la semilla ${esc(g.emblem)}">${emblemSVG(g.emblem, 34)}</span>
-      <label class="edh-name"><small>Nombre de la red</small><input id="edName" value="${esc(g.name)}" maxlength="32" spellcheck="false"></label>
-      <span class="edh-undo" role="group" aria-label="Deshacer y rehacer">
+      <span class="edh-em" data-tut="emblema" title="Emblema: sale de la semilla ${esc(g.emblem)}">${emblemSVG(g.emblem, 34)}</span>
+      <label class="edh-name" data-tut="nombre"><small>Nombre de la red</small><input id="edName" value="${esc(g.name)}" maxlength="32" spellcheck="false"></label>
+      <span class="edh-undo" data-tut="deshacer" role="group" aria-label="Deshacer y rehacer">
         <button type="button" data-act="undo" ${u ? '' : 'disabled'} title="${esc(u ? `Deshacer: ${u} (Ctrl+Z)` : 'Nada que deshacer')}" aria-label="Deshacer">↶</button>
         <button type="button" data-act="redo" ${r ? '' : 'disabled'} title="${esc(r ? `Rehacer: ${r} (Ctrl+Y)` : 'Nada que rehacer')}" aria-label="Rehacer">↷</button></span>
-      <button type="button" class="primary" data-act="save" ${S.check.ok ? '' : 'aria-disabled="true"'} title="Guarda la red (Ctrl+S). La de antes queda en Versiones.">Guardar</button>
+      <button type="button" class="primary" data-act="save" data-tut="guardar" ${S.check.ok ? '' : 'aria-disabled="true"'} title="Guarda la red (Ctrl+S). La de antes queda en Versiones.">Guardar</button>
       ${menuHTML()}</div>`);
   }
   function menuHTML() {
     const others = S.nets.filter((n) => n.id !== S.netId);
-    return `<span class="edh-more"><button type="button" data-act="menu" aria-expanded="${S.menu}" aria-label="Más: abrir otra red, exportar, importar, versiones, borrar">⋯</button>
+    return `<span class="edh-more" data-tut="menu"><button type="button" data-act="menu" aria-expanded="${S.menu}" aria-label="Más: abrir otra red, exportar, importar, versiones, borrar">⋯</button>
       <div class="menu" ${S.menu ? '' : 'hidden'} role="menu">
         ${others.length ? `<p class="menu-h">Abrir otra red</p>${others.map((n) => `<button type="button" role="menuitem" data-open="${esc(n.id)}"><span class="net-em" aria-hidden="true">${emblemSVG(n.emblem, 20)}</span>${esc(n.name)}<small>gen ${esc(n.generation ?? 0)}${n.isQueen ? ' · reina' : ''}</small></button>`).join('')}` : ''}
         ${S.genome ? `<p class="menu-h">Esta red</p>
@@ -287,7 +293,7 @@ export function mountEditor(root, { catalog, toast }) {
     const tpls = [BLANK, ...S.templates].map((t) => {
       const ico = /^\S+/.exec(t.name)[0], nm = t.name.replace(/^\S+\s/, '');
       const opened = S.tplOpen === t.key;
-      return `<li class="tpl2${opened ? ' open' : ''}" data-key="t:${esc(t.key)}">
+      return `<li class="tpl2${opened ? ' open' : ''}" data-key="t:${esc(t.key)}"${t.key === 'blank' ? ' data-tut="desde-cero"' : ''}>
         <button type="button" class="tpl2-head" data-tpl="${esc(t.key)}" aria-expanded="${opened}"><span class="ti" aria-hidden="true">${esc(ico)}</span><b>${esc(nm)}</b><small>${esc(t.short || TPL_SHORT[t.key] || '')}</small></button>
         ${opened ? `<div class="tpl2-body"><p>${esc(t.why)}</p><p class="dim">${t.paramCount ? `${t.paramCount.toLocaleString('es-ES')} pesos` : 'sin bloques ni pesos'}</p>
           <form class="tpl-form" data-create="${esc(t.key)}"><label>Nombre <input name="name" value="${esc(t.key === 'blank' ? 'Mi red' : nm)}" maxlength="32" required></label><button class="primary" type="submit">Crear red</button></form></div>` : ''}
@@ -295,21 +301,21 @@ export function mountEditor(root, { catalog, toast }) {
     }).join('');
     let pal = '';
     if (S.genome) {
-      const groups = M.palette(catalog, S.level).map((g) => `
+      const groups = M.palette(catalog, S.level).map((g) => `<div class="pal-grp" data-tut="grupo-${esc(g.key)}">
         <h4 class="grp g-${g.key}">${esc(g.name)}<small>${esc(g.ask)}</small></h4>
         <ul class="pal">${g.blocks.map((b) => {
           const a = Hn.advice(S.genome, catalog, b.type);
           const short = String(b.explain).split(/[.:]/)[0];
           return `<li data-key="p:${esc(b.type)}"><button type="button" class="pal-item g-${g.key}${a.can ? '' : ' no'}${a.missing ? ' missing' : ''}" data-add="${esc(b.type)}" ${a.can ? '' : 'aria-disabled="true"'} aria-describedby="edPalTip"><span class="ico" aria-hidden="true">${esc(b.icon)}</span><span class="pn">${esc(b.name)}</span><small>${esc(short)}</small></button></li>`;
-        }).join('')}</ul>`).join('');
+        }).join('')}</ul></div>`).join('');
       const hidden = catalog.blocks.length - M.palette(catalog, S.level).reduce((s, g) => s + g.blocks.length, 0);
       // sesión 11: la explicación iba aquí y, al crecer con el ratón encima, empujaba la lista y el clic caía en otro
       // bloque; ahora sale al lado (renderPalTip) y este texto no cambia nunca
-      pal = `<h3>Nuevo bloque <small>pulsa para añadirlo</small></h3>
+      pal = `<section data-tut="paleta" data-key="paleta"><h3>Nuevo bloque <small>pulsa para añadirlo</small></h3>
         <p class="pal-hint">Pasa el ratón (o el foco) por un bloque: al lado verás qué hace y dónde irá en tu red.</p>
-        ${groups}${hidden ? `<p class="hint">${hidden} bloques más en ${S.level === 'aprendiz' ? 'Artesano y Científico' : 'Científico'}: cambia la vista arriba del lienzo (nada se bloquea).</p>` : ''}`;
+        ${groups}${hidden ? `<p class="hint">${hidden} bloques más en ${S.level === 'aprendiz' ? 'Artesano y Científico' : 'Científico'}: cambia la vista arriba del lienzo (nada se bloquea).</p>` : ''}</section>`;
     }
-    patch($('edRail'), `<h3>Plantillas <small>para empezar</small></h3><ul class="tpls2">${tpls}</ul>${pal}`);
+    patch($('edRail'), `<section data-tut="plantillas" data-key="plantillas"><h3>Plantillas <small>para empezar</small></h3><ul class="tpls2">${tpls}</ul></section>${pal}`);
     renderPalTip();
   }
   // qué hace el bloque bajo el ratón (o con el foco) y dónde iría: flota a la derecha del raíl, a su altura
@@ -329,15 +335,17 @@ export function mountEditor(root, { catalog, toast }) {
   // barra del lienzo: nivel de vista, datos, estado (con lo que le falta), leyenda y zoom
   function renderTools() {
     const lv = M.LEVELS.map((l) => `<button type="button" data-level="${l}" aria-pressed="${S.level === l}">${M.LEVEL_NAMES[l]}</button>`).join('');
-    if (!S.genome) { patch($('edTools'), `<div class="ed-levels" role="group" aria-label="Nivel de vista">${lv}</div>`); return; }
+    const tutOn = !!(tut && tut.active());
+    const guide = `<button type="button" class="guide-open" data-act="guide" data-tut="guia" aria-pressed="${tutOn}" title="El tutorial paso a paso: te devuelve donde lo dejaste">Guía</button>`;
+    if (!S.genome) { patch($('edTools'), `<div class="ed-levels" data-tut="niveles" role="group" aria-label="Nivel de vista">${lv}</div><span class="ed-sp"></span>${guide}`); return; }
     const g = S.genome, st = statusOf(), gen = g.lineage && Number.isInteger(g.lineage.generation) ? g.lineage.generation : 0;
     const net = S.nets.find((n) => n.id === S.netId);
-    patch($('edTools'), `<div class="ed-levels" role="group" aria-label="Nivel de vista: cuánto se ve (nada se bloquea)">${lv}</div>
-      <p class="ed-facts" title="${esc(g.id)}"><span>gen ${gen}</span><span>${g.blocks.length} bloques</span><span>${S.params === null ? 'pesos: —' : `${S.params.toLocaleString('es-ES')} pesos`}</span>${net && net.stats && Number.isFinite(net.stats.games) ? `<span>${net.stats.games} partidas</span>` : ''}${net && net.isQueen ? '<span class="tag queen">reina</span>' : ''}${net && net.training ? '<span class="tag busy">entrenando</span>' : ''}</p>
-      <button type="button" class="ed-status ${st.cls}" data-ptab="avisos" title="Ver qué le falta y los avisos">${esc(st.text)}</button>
-      ${S.dirty ? '<span class="dirty" title="Guarda para que juegue así">cambios sin guardar</span>' : ''}
-      <span class="zoom" role="group" aria-label="Zoom"><button type="button" data-zoom="-1" aria-label="Alejar">−</button><span class="mono" id="edZoom">${Math.round(S.zoom * 100)} %</span><button type="button" data-zoom="1" aria-label="Acercar">+</button><button type="button" data-zoom="fit" aria-pressed="${S.fit}" title="Que la red entera quepa en el lienzo">Encajar</button><button type="button" data-act="tidy" title="Vuelve a colocar los bloques por columnas">Ordenar</button></span>
-      <button type="button" class="coach-open" data-coach="open" aria-pressed="${!!(S.coach && S.coach.on)}" title="Guía paso a paso: monta una red entendiendo qué hace cada pieza">Guía</button>`);
+    patch($('edTools'), `<div class="ed-levels" data-tut="niveles" role="group" aria-label="Nivel de vista: cuánto se ve (nada se bloquea)">${lv}</div>
+      <p class="ed-facts" data-tut="datos" title="${esc(g.id)}"><span>gen ${gen}</span><span>${g.blocks.length} bloques</span><span>${S.params === null ? 'pesos: —' : `${S.params.toLocaleString('es-ES')} pesos`}</span>${net && net.stats && Number.isFinite(net.stats.games) ? `<span>${net.stats.games} partidas</span>` : ''}${net && net.isQueen ? '<span class="tag queen">reina</span>' : ''}${net && net.training ? '<span class="tag busy">entrenando</span>' : ''}</p>
+      <button type="button" class="ed-status ${st.cls}" data-tut="estado" data-ptab="avisos" title="Ver qué le falta y los avisos">${esc(st.text)}</button>
+      ${S.dirty ? '<span class="dirty" data-tut="sin-guardar" title="Guarda para que juegue así">cambios sin guardar</span>' : ''}
+      <span class="zoom" data-tut="zoom" role="group" aria-label="Zoom"><button type="button" data-zoom="-1" aria-label="Alejar">−</button><span class="mono" id="edZoom">${Math.round(S.zoom * 100)} %</span><button type="button" data-zoom="1" aria-label="Acercar">+</button><button type="button" data-zoom="fit" data-tut="encajar" aria-pressed="${S.fit}" title="Que la red entera quepa en el lienzo">Encajar</button><button type="button" data-act="tidy" data-tut="ordenar" title="Vuelve a colocar los bloques por columnas">Ordenar</button></span>
+      ${guide}`);
   }
 
   // ---------- lienzo ----------
@@ -368,17 +376,16 @@ export function mountEditor(root, { catalog, toast }) {
       patch(b, `<div class="board-empty"><h2>Elige una red o crea una</h2><p>A la izquierda tienes las plantillas: <b>Desde cero</b> si quieres montarla tú, bloque a bloque, o una ya montada para cambiarla.</p><p class="dim">Aquí verás sus bloques unidos por cables, de los ojos (lo que ve) a las manos (lo que hace).</p></div>`);
       return;
     }
-    if (!S.genome.blocks.length) { patch(b, S.coach && S.coach.on ? '<div class="board-empty coach-only" data-key="start"><p class="dim">Aquí irá tu red, de izquierda a derecha: lo que ve → cómo piensa → lo que hace. Sigue la guía.</p></div>' : startHTML()); renderCoach(); return; }
+    if (!S.genome.blocks.length) { patch(b, tut && tut.active() ? '<div class="board-empty coach-only" data-key="start"><p class="dim">Aquí irá tu red, de izquierda a derecha: lo que ve → cómo piensa → lo que hace.</p></div>' : startHTML()); renderWireTools(); return; }
     const keep = { left: b.scrollLeft, top: b.scrollTop };
     const L = layout();
     // encajar: la red entera cabe en el lienzo, a lo ancho y a lo alto (entre 55 % y 100 %); si ni así, lo que sobra se
     // recorre con la rueda (sesión 9: a 1280×800 un cuarto de Tortuga quedaba escondido bajo el panel)
-    const coachW = S.coach && S.coach.on ? Math.min(360, b.clientWidth * 0.4) : 0; // la guía tapa ese trozo del lienzo
-    if (S.fit) S.zoom = Math.max(0.55, Math.min(1, (b.clientWidth - 16 - coachW) / (L.width + 12), (b.clientHeight - 12) / (L.height + 8)));
+    if (S.fit) S.zoom = Math.max(0.55, Math.min(1, (b.clientWidth - 16) / (L.width + 12), (b.clientHeight - 12) / (L.height + 8)));
     const z = S.zoom;
     const zl = $('edTools').querySelector('#edZoom');
     if (zl) zl.textContent = `${Math.round(z * 100)} %`;
-    const heads = L.cols.map((c) => { const t = colTitle(L, c.c); return `<div class="colhead g-${t.key}" data-key="h:${c.c}" style="left:${c.x}px"><b>${esc(t.t[0])}</b><small>${esc(t.t[1])}</small></div>`; }).join('');
+    const heads = L.cols.map((c) => { const t = colTitle(L, c.c); return `<div class="colhead g-${t.key}" data-key="h:${c.c}" data-tut="columnas" style="left:${c.x}px"><b>${esc(t.t[0])}</b><small>${esc(t.t[1])}</small></div>`; }).join('');
     const nodes = S.genome.blocks.map((blk) => nodeHTML(blk, L.nodes[blk.id])).join('');
     const flags = S.genome.blocks.map((blk) => flagHTML(blk, L.nodes[blk.id])).join('');
     const missing = Hn.readiness(S.genome, catalog).filter((x) => x.required && !x.ok);
@@ -387,115 +394,23 @@ export function mountEditor(root, { catalog, toast }) {
         <svg class="wires" data-key="svg" width="${L.width}" height="${L.height}" aria-hidden="true">${wiresSVG(L)}<path id="edTmpWire" data-key="tmp" class="wire tmp" d=""/></svg>
         ${nodes}${flags}
       </div>
-      ${S.coach && S.coach.on ? '' : missing.length ? `<aside class="needs" data-key="needs" aria-label="Lo que le falta para poder jugar"><b>Para poder jugar le falta:</b><ul>${missing.map((x) => `<li>${esc(x.need)} ${readyButtons(x)}</li>`).join('')}</ul></aside>` : ''}`);
+      ${missing.length ? `<aside class="needs" data-key="needs" data-tut="le-falta" aria-label="Lo que le falta para poder jugar"><b>Para poder jugar le falta:</b><ul>${missing.map((x) => `<li>${esc(x.need)} ${readyButtons(x)}</li>`).join('')}</ul></aside>` : ''}`);
     b.scrollLeft = keep.left; b.scrollTop = keep.top;
     renderWireTools();
-    renderCoach();
-  }
-  function renderCoach() {
-    const el = $('edCoach'), on = !!(S.coach && S.coach.on && S.genome);
-    el.hidden = !on;
-    patch(el, on ? coachHTML() : '');
-    coachMark();
   }
   function readyButtons(x) {
     return `${(x.add || []).map((t) => `<button type="button" class="mini" data-add="${esc(t)}">Añadir ${esc((M.entryOf(catalog, t) || { name: t }).name)}</button>`).join(' ')}${x.wire ? ` <button type="button" class="mini" data-wireup="${esc(x.wire[0])}|${esc(x.wire[1])}">Unir ${esc(x.wire[0])} → ${esc(x.wire[1])}</button>` : ''}`;
   }
-  // ---------- guía «Tu primera red» (coach.js): una tarjeta sobre el lienzo que pregunta, pide una cosa y explica lo que
-  // ha cambiado con los números del banco. Se guarda por red (y el avance, en el mundo, para el tutorial de P10) ----------
-  function coachSave() {
-    if (!S.netId || !S.coach) return;
-    store.set(`gw.coach.${S.netId}`, S.coach);
-    if (S.world && S.world.meta) {
-      const tutorial = { ...(S.world.meta.tutorial || {}), primeraRed: { net: S.netId, done: S.coach.marked, bet: S.coach.bet, on: S.coach.on } };
-      S.world.meta = { ...S.world.meta, tutorial };
-      api(`/api/worlds/${S.world.n}/meta`, 'PUT', { tutorial }).catch(() => {});
-    }
-  }
-  function coachStart() { S.coach = { on: true, marked: [], bet: null, probed: false, hint: false }; coachSave(); render(); }
-  function coachCtx() {
+  // lo que dice el banco de la decisión de ahora (para los textos del tutorial, con números reales)
+  function benchFacts() {
     const g = S.genome, d = S.bench.now && S.bench.now.ok ? S.bench.now.decision : null;
+    if (!g) return {};
     const cand = g.blocks.find((b) => b.type === 'eye.candidates' || b.type === 'eye.simulator');
-    const ch = g.blocks.find((b) => b.type === 'hand.choose');
-    const think = ch && g.wires.filter((w) => w.to === ch.id).map((w) => g.blocks.find((b) => b.id === w.from)).find((b) => b && b.type === 'dense');
     return {
-      readiness: Hn.readiness(g, catalog), scene: S.bench.scene, bet: S.coach && S.coach.bet,
-      saved: !S.dirty && !!S.saved && S.saved.blocks.length > 0, probed: !!(S.coach && S.coach.probed),
       cands: d && d.phase !== 'move' && Array.isArray(d.candidates) ? d.candidates.length : (g.imagination && g.imagination.n) || null,
       candDim: cand && S.dims && S.dims[cand.id] ? S.dims[cand.id].dim : null,
       pick: d && d.phase !== 'move' ? Bn.pick(d) : null,
-      think: think && think.params ? think.params.units : null,
     };
-  }
-  // la guía en este momento; si un paso acaba de cumplirse, lo apunta
-  function coachNow() {
-    const x = coachCtx(), st = Co.coachState(S.genome, x, S.coach.marked);
-    if (st.doneKeys.length !== S.coach.marked.length) { S.coach.marked = st.doneKeys; S.coach.hint = false; coachSave(); }
-    return { st, x };
-  }
-  function coachHTML() {
-    if (!S.coach || !S.coach.on || !S.genome) return '';
-    const { st, x } = coachNow(), N = Co.STEPS.length;
-    const prev = st.i > 0 ? Co.STEPS[st.i - 1] : null;
-    const dots = Co.STEPS.map((k, j) => `<i class="${j < st.i ? 'ok' : j === st.i ? 'now' : ''}" title="${esc(k.title)}"></i>`).join('');
-    const after = prev ? `<div class="coach-after"><b>✓ ${esc(prev.title)}</b><p>${esc(prev.after(x))}</p></div>` : '';
-    if (st.finished) {
-      return `<aside class="coach done" data-key="coach" aria-label="Guía: tu primera red" aria-live="polite"><header><b>Tu primera red</b><span class="dots">${dots}</span><button type="button" class="x" data-coach="close" aria-label="Cerrar la guía">✕</button></header>
-        ${after}<p class="coach-end">Has montado una red entera sabiendo qué hace cada pieza. Ahora es tuya: cambia lo que quieras (la Guía sigue arriba, en la barra).</p>
-        <p class="row"><button type="button" class="primary mini" data-coach="close">Cerrar la guía</button><button type="button" class="mini" data-coach="restart">Empezar de nuevo</button></p></aside>`;
-    }
-    const k = st.step, help = Co.helpOffered(st.i) || S.coach.hint;
-    const bet = k.bet ? `<p class="coach-bet row"><button type="button" class="mini" data-coach="bet:si">Sí, apunta</button><button type="button" class="mini" data-coach="bet:no">No, es al azar</button><button type="button" class="mini" data-coach="bet:nose">Ni idea</button></p>` : '';
-    return `<aside class="coach" data-key="coach" aria-label="Guía: tu primera red" aria-live="polite"><header><b>Tu primera red</b><span class="mono">paso ${st.i + 1} de ${N}</span><span class="dots">${dots}</span><button type="button" class="x" data-coach="close" aria-label="Cerrar la guía">✕</button></header>
-      ${after}<h3>${esc(k.title)}</h3><p class="ask">${esc(k.ask)}</p><p class="todo">👉 ${esc(k.todo)}</p>${bet}
-      <p class="row">${k.help && help ? '<button type="button" class="mini" data-coach="help" title="Lo hace por ti; mira qué cambia">Hazlo por mí</button>' : ''}${!help && k.help ? '<button type="button" class="mini" data-coach="hint">No lo encuentro</button>' : ''}</p></aside>`;
-  }
-  // ilumina lo que pide el paso (en los primeros, siempre; después, solo si se pide la pista)
-  function coachMark() {
-    for (const el of root.querySelectorAll('.coach-target')) el.classList.remove('coach-target');
-    if (!S.coach || !S.coach.on || !S.genome) return;
-    const st = Co.coachState(S.genome, coachCtx(), S.coach.marked);
-    if (!st.step || !(Co.helpOffered(st.i) || S.coach.hint)) return;
-    const g = S.genome, id = (t) => (g.blocks.find((b) => b.type === t) || {}).id;
-    let el = null;
-    if (st.step.target === 'port') { const c = id('eye.candidates') || id('eye.simulator'); el = c && root.querySelector(`[data-node="${CSS.escape(c)}"] .port.out`); }
-    else if (st.step.target === 'wire') { const ch = id('hand.choose'); const i = g.wires.findIndex((w) => w.to === ch && ['eye.candidates', 'eye.simulator'].includes((g.blocks.find((b) => b.id === w.from) || {}).type)); el = i >= 0 && root.querySelector(`svg.wires path.wire[data-key="w:${i}"]`); }
-    else el = root.querySelector(st.step.target);
-    if (!el) return;
-    el.classList.add('coach-target');
-    // lo que pide un paso nuevo se trae a la vista una vez (a 1280 × 800, Candidatos quedaba cortado al pie del raíl)
-    const shownKey = `${st.step.key}:${S.coach.hint}`;
-    if (coachShown === shownKey) return;
-    coachShown = shownKey;
-    const box = el.closest('#edRail, #edBench, #edBoard');
-    if (box) {
-      const r = el.getBoundingClientRect(), b = box.getBoundingClientRect();
-      if (r.bottom > b.bottom - 8) box.scrollTop += r.bottom - b.bottom + 48;
-      else if (r.top < b.top + 8) box.scrollTop -= b.top - r.top + 48;
-    }
-  }
-  // "Hazlo por mí": el mismo cambio que harías tú, de una vez (se deshace con Ctrl+Z)
-  function coachHelp() {
-    const st = Co.coachState(S.genome, coachCtx(), S.coach.marked), h = st.step && st.step.help;
-    if (!h) return;
-    if (h.scene) { S.bench.scene = h.scene; scheduleBench(0); render(); return; }
-    let g = S.genome;
-    const id = (t) => (g.blocks.find((b) => b.type === t) || {}).id;
-    const thinkId = () => { const ch = id('hand.choose'); const w = g.wires.find((x) => x.to === ch && (g.blocks.find((z) => z.id === x.from) || {}).type === 'dense'); return w && w.from; };
-    const wire = (a, b) => {
-      const A = id(a), B = b === 'dense' ? thinkId() : id(b);
-      if (!A || !B || g.wires.some((w) => w.from === A && w.to === B)) return;
-      const r = M.connect(g, A, B);
-      if (!r.error) g = r.genome;
-    };
-    for (const t of h.add || []) if (!id(t)) g = M.addBlock(g, t, catalog).genome;
-    if (h.wire) wire(h.wire[0], h.wire[1]);
-    if (h.wire2) wire(h.wire2[0], h.wire2[1]);
-    if (h.insert) {
-      const ch = id('hand.choose'), i = g.wires.findIndex((w) => w.to === ch && ['eye.candidates', 'eye.simulator'].includes((g.blocks.find((b) => b.id === w.from) || {}).type));
-      if (i >= 0) g = M.insertOnWire(g, i, h.insert, catalog).genome;
-    }
-    if (g !== S.genome) commit(g, { select: null, label: `Guía: ${st.step.title.toLowerCase()}` });
   }
 
   // red sin bloques: por dónde empezar, explicado
@@ -506,7 +421,7 @@ export function mountEditor(root, { catalog, toast }) {
       <p>Una red va de izquierda a derecha, como la señal: <b class="c-eyes">Ojos</b> (qué ve) → <b class="c-instinct">Instinto</b> y <b class="c-memory">Memoria</b> (cómo piensa y qué recuerda) → <b class="c-hands">Manos</b> y <b class="c-feet">Pies</b> (qué hace). Para poder jugar necesita, como mínimo, estas tres cosas:</p>
       <ol>${r.filter((x) => x.required).map((x) => `<li class="${x.ok ? 'ok' : ''}"><b>${esc(x.text)}</b><span>${esc(x.need)}</span>${x.ok ? '<i>hecho</i>' : readyButtons(x)}</li>`).join('')}</ol>
       <p class="dim">También puedes añadir cualquier bloque desde la lista de la izquierda y unirlo arrastrando desde su punto de salida (el círculo de la derecha) hasta otro bloque.</p>
-      <p><button type="button" class="primary" data-coach="open">Guía paso a paso</button> <span class="dim">nueve pasos: qué hace cada pieza, viéndolo en el banco de pruebas</span></p></div>`;
+      <p><button type="button" class="primary" data-act="guide">Tutorial paso a paso</button> <span class="dim">8 capítulos cortos: cada pieza del editor, haciéndola tú</span></p></div>`;
   }
   function nodeHTML(blk, p) {
     const e = M.entryOf(catalog, blk.type) || { name: blk.type, icon: '?', group: 'instinct', params: [] };
@@ -519,13 +434,13 @@ export function mountEditor(root, { catalog, toast }) {
     const role = Hn.roleOf(catalog, S.genome, blk, S.dims);
     const lk = S.link ? (S.link.from === blk.id ? ' link-from' : S.link.ok.has(blk.id) ? ' link-ok' : ' link-no') : '';
     const lkWhy = S.link && S.link.why.get(blk.id);
-    return `<button type="button" class="node g-${e.group}${sel ? ' sel' : ''}${err ? ' err' : ''}${warn ? ' warn' : ''}${lk}" data-key="n:${esc(blk.id)}" data-node="${esc(blk.id)}" style="left:${p.x}px;top:${p.y}px" aria-label="${esc(e.name)} ${esc(blk.id)}: ${esc(role)}${err ? ', con error' : warn ? ', con aviso' : ''}" ${lkWhy ? `title="${esc(lkWhy)}"` : ''}>
-      ${e.group === 'eyes' ? '' : `<span class="port in" data-portin="${esc(blk.id)}" aria-hidden="true" title="Arrastra desde aquí para enchufar (o, si ya tiene cable, para desenchufarlo). Alt + clic quita todos sus cables"></span>`}
+    return `<button type="button" data-tut="tarjeta" class="node g-${e.group}${sel ? ' sel' : ''}${err ? ' err' : ''}${warn ? ' warn' : ''}${lk}" data-key="n:${esc(blk.id)}" data-node="${esc(blk.id)}" style="left:${p.x}px;top:${p.y}px" aria-label="${esc(e.name)} ${esc(blk.id)}: ${esc(role)}${err ? ', con error' : warn ? ', con aviso' : ''}" ${lkWhy ? `title="${esc(lkWhy)}"` : ''}>
+      ${e.group === 'eyes' ? '' : `<span class="port in" data-tut="puntos" data-portin="${esc(blk.id)}" aria-hidden="true" title="Arrastra desde aquí para enchufar (o, si ya tiene cable, para desenchufarlo). Alt + clic quita todos sus cables"></span>`}
       <span class="ico" aria-hidden="true">${esc(e.icon)}</span>
       <span class="nm">${esc(e.name)}${esc(val)} <span class="mono id">${esc(blk.id)}</span>${frozen ? ' <span class="frz" title="Congelado: no aprende">❄</span>' : ''}</span>
       <span class="role">${esc(role)}</span>
-      <span class="dots" aria-hidden="true">${dotsHTML(blk.id)}</span>
-      ${e.group === 'hands' || e.group === 'feet' ? '' : `<span class="port out" data-port="${esc(blk.id)}" aria-hidden="true" title="Arrastra hasta otro bloque para unirlos. Alt + clic quita todos sus cables"></span>`}
+      <span class="dots" data-tut="neuronas" aria-hidden="true">${dotsHTML(blk.id)}</span>
+      ${e.group === 'hands' || e.group === 'feet' ? '' : `<span class="port out" data-tut="puntos" data-port="${esc(blk.id)}" aria-hidden="true" title="Arrastra hasta otro bloque para unirlos. Alt + clic quita todos sus cables"></span>`}
     </button>`;
   }
   // neuronas del bloque: un punto por neurona (hasta 16), encendido según su valor en la escena del banco
@@ -541,7 +456,7 @@ export function mountEditor(root, { catalog, toast }) {
     const x = errs[0];
     const hint = Hn.hintFor(S.genome, catalog, x);
     const fx = Hn.fixes(S.genome, catalog, S.check).filter((f) => f.key.endsWith(`:${blk.id}`) || (Number.isInteger(x.wire) && f.key.endsWith(`:${x.wire}`)));
-    return `<div class="flag" data-key="f:${esc(blk.id)}" style="left:${p.x}px;top:${p.y + CARD.h + 6}px" role="note">${esc(x.message)}${hint ? `<span class="hintline">👉 ${esc(hint)}</span>` : ''}${fx.map((f, i) => `<button type="button" class="mini fix" data-fix="${esc(f.key)}">${esc(f.label)}</button>`).join('')}${errs.length > 1 ? `<span class="more">y ${errs.length - 1} más en Avisos</span>` : ''}</div>`;
+    return `<div class="flag" data-key="f:${esc(blk.id)}" data-tut="aviso-bloque" style="left:${p.x}px;top:${p.y + CARD.h + 6}px" role="note">${esc(x.message)}${hint ? `<span class="hintline">👉 ${esc(hint)}</span>` : ''}${fx.map((f, i) => `<button type="button" class="mini fix" data-fix="${esc(f.key)}">${esc(f.label)}</button>`).join('')}${errs.length > 1 ? `<span class="more">y ${errs.length - 1} más en Avisos</span>` : ''}</div>`;
   }
   // un cable largo no pasa por debajo de otra tarjeta (sesión 9: parecía que entraba en ella y salía por el otro lado):
   // si la curva la cruza, la rodea por arriba o por abajo, por el lado más cercano y sin meterse en otra
@@ -593,7 +508,7 @@ export function mountEditor(root, { catalog, toast }) {
       // nervios: la señal real del bloque de salida en la escena del banco (más señal, pulso más vivo y más rápido)
       const s = S.bench.sig && S.bench.sig[w.from];
       const nerve = s && !bad ? `<path class="nerve" data-key="nv:${i}" d="${d}" style="--lv:${s.level.toFixed(2)};animation-duration:${(2.6 - 1.9 * s.level).toFixed(2)}s"/>` : '';
-      return `<path data-key="w:${i}" class="wire g-${groupOf(w.from)} s-${S.streams[w.from] || 'ctx'}${sel ? ' sel' : ''}${bad ? ' bad' : ''}${held}${hov}${ins}" d="${d}"/>${held ? '' : nerve}<path data-key="hw:${i}" class="hit" data-wire="${i}" d="${d}"><title>${esc(w.from)} → ${esc(w.to)}: lleva ${esc(STREAM[S.streams[w.from]] || '—')}${s ? ` · señal ${pct(s.level)} del bloque más activo` : ''}</title></path>`;
+      return `<path data-key="w:${i}" class="wire g-${groupOf(w.from)} s-${S.streams[w.from] || 'ctx'}${sel ? ' sel' : ''}${bad ? ' bad' : ''}${held}${hov}${ins}" d="${d}"/>${held ? '' : nerve}<path data-key="hw:${i}" class="hit" data-tut="cable" data-wire="${i}" d="${d}"><title>${esc(w.from)} → ${esc(w.to)}: lleva ${esc(STREAM[S.streams[w.from]] || '—')}${s ? ` · señal ${pct(s.level)} del bloque más activo` : ''}</title></path>`;
     }).join('');
   }
   function redrawWires() {
@@ -610,7 +525,7 @@ export function mountEditor(root, { catalog, toast }) {
     const bd = $('edBoard'), path = i !== null && S.genome && bd.querySelector(`svg.wires path.hit[data-wire="${i}"]`);
     if (!path) { el.hidden = true; return; }
     const w = S.genome.wires[i];
-    patch(el, `<button type="button" class="wt-x" data-unwire="${i}" title="Quita el cable ${esc(w.from)} → ${esc(w.to)} (también: Supr con el cable elegido, o arrastra su punta fuera de ${esc(w.to)})">✕<span class="t"> Desenchufar</span></button><button type="button" class="wire-plus" data-wireplus="${i}" title="Mete un bloque en medio: ${esc(w.from)} → nuevo → ${esc(w.to)}">＋<span class="t"> Añadir capa</span></button>`);
+    patch(el, `<button type="button" class="wt-x" data-tut="cable-x" data-unwire="${i}" title="Quita el cable ${esc(w.from)} → ${esc(w.to)} (también: Supr con el cable elegido, o arrastra su punta fuera de ${esc(w.to)})">✕<span class="t"> Desenchufar</span></button><button type="button" class="wire-plus" data-tut="cable-mas" data-wireplus="${i}" title="Mete un bloque en medio: ${esc(w.from)} → nuevo → ${esc(w.to)}">＋<span class="t"> Añadir capa</span></button>`);
     el.hidden = false;
     // el primer sitio del cable (la mitad, y si no, hacia los lados), encima o debajo, donde no tapen ninguna tarjeta
     const B = bd.getBoundingClientRect(), R = root.getBoundingClientRect(), m = path.getScreenCTM(), len = path.getTotalLength();
@@ -644,7 +559,7 @@ export function mountEditor(root, { catalog, toast }) {
     const opts = Hn.insertOptions(S.genome, catalog, index, S.level);
     const ok = opts.filter((o) => o.ok), no = opts.filter((o) => !o.ok);
     const btn = (o) => `<button type="button" class="pal-item g-${o.group}" data-insert="${esc(o.type)}" data-index="${index}" title="${esc(`${w.from} → ${o.name} → ${w.to}`)}"><span class="ico" aria-hidden="true">${esc(o.icon)}</span><span class="pn">${esc(o.name)}</span></button>`;
-    return `<section class="insert" id="edInsert"><h3>＋ Añadir una capa en este cable</h3>
+    return `<section class="insert" id="edInsert" data-tut="insertar"><h3>＋ Añadir una capa en este cable</h3>
       <p class="explain">Mete un bloque entre ${esc(w.from)} y ${esc(w.to)}: la señal pasará por él (${esc(w.from)} → nuevo → ${esc(w.to)}). Por ejemplo, un 🧠 Instinto entre Candidatos y Elegir hace que la red <i>piense</i> cada tiro antes de puntuarlo.</p>
       ${ok.length ? `<div class="ins-list">${ok.map(btn).join('')}</div>` : '<p class="hint">Aquí no cabe ningún bloque de en medio.</p>'}
       ${no.length ? `<details class="ins-no"><summary>${no.length} no caben aquí (por qué)</summary><ul>${no.map((o) => `<li><b>${esc(o.icon)} ${esc(o.name)}</b>: ${esc(o.why)}</li>`).join('')}</ul></details>` : ''}</section>`;
@@ -716,7 +631,7 @@ export function mountEditor(root, { catalog, toast }) {
     const maxN = Math.max(1, ...H.bins.map((x) => x.n));
     const nm = (id) => { const b = S.genome.blocks.find((x) => x.id === id); return b ? `${(M.entryOf(catalog, b.type) || {}).name || b.type} ${id}` : id; };
     return `<div class="capa">
-      <section class="capa-cfg"><h3>Configuración de la capa seleccionada</h3>
+      <section class="capa-cfg" data-tut="capa-ajustes"><h3>Configuración de la capa seleccionada</h3>
         <p class="capa-id"><span class="ico" aria-hidden="true">${esc(e.icon)}</span> <b>${esc(e.name)}</b> <span class="mono dim">${esc(blk.id)}</span>
           ${same.length ? `<label class="swap">Tipo <select data-swap="${esc(blk.id)}"><option value="${esc(blk.type)}" selected>${esc(e.name)}</option>${same.map((x) => `<option value="${esc(x.type)}">${esc(x.name)}</option>`).join('')}</select></label>` : ''}</p>
         <div class="capa-ctls">${shown.map((p) => control(p, (blk.params || {})[p.key], `data-bparam="${esc(p.key)}" data-block="${esc(blk.id)}"`, true)).join('') || '<p class="hint">Este bloque no tiene ajustes: lo que hace depende solo de lo que le llega.</p>'}</div>
@@ -726,14 +641,14 @@ export function mountEditor(root, { catalog, toast }) {
           ${noFrom.length ? `<details class="cant"><summary>${noFrom.length} bloque${noFrom.length === 1 ? '' : 's'} no pueden unirse aquí (por qué)</summary><ul>${noFrom.map((o) => `<li><b>${esc(nm(o.id))}</b>: ${esc(o.why)}${o.hint ? ` <span class="eg">${esc(o.hint)}</span>` : ''}</li>`).join('')}</ul></details>` : ''}</div>`}
         <div class="capa-acts"><button type="button" data-act="remove" data-id="${esc(blk.id)}">Quitar bloque</button></div>
       </section>
-      <section class="capa-what"><h3>¿Qué hace esta capa?</h3>
+      <section class="capa-what" data-tut="capa-que"><h3>¿Qué hace esta capa?</h3>
         <p class="explain big">${esc(e.explain)}</p>${e.example ? `<p class="eg">${esc(e.example)}</p>` : ''}
         <p class="flow">${isEyeBlk ? 'Mira el tablero' : `Recibe ${ins.length ? ins.map((w) => `<button type="button" class="link" data-goto="${esc(w.from)}">${esc(w.from)}</button>`).join(', ') : 'nada todavía'}`} y da ${esc(d ? `${STREAM[d.stream]} (${d.dim} números${d.stream === 'cand' ? ' por tiro imaginado' : d.stream === 'move' ? ' por sitio' : ''})` : STREAM[S.streams[blk.id]] || '—')}${outs.length ? ` a ${outs.map((w) => `<button type="button" class="link" data-goto="${esc(w.to)}">${esc(w.to)}</button>`).join(', ')}` : ' a nadie todavía'}.</p>
         <p class="role-big">En corto: <b>${esc(Hn.roleOf(catalog, S.genome, blk, S.dims))}</b>.</p>
         ${s ? `<p class="dim">En la escena del banco («${esc(benchScene().name)}») se activa al <b>${pct(s.level)}</b> del bloque más activo (media |valor| ${f2(s.mean)}).</p>` : ''}
         <ul class="issues">${(S.issues.byBlock[blk.id] || []).map(issueRow).join('')}</ul>
       </section>
-      <section class="capa-w"><h3>Sus pesos</h3>
+      <section class="capa-w" data-tut="capa-pesos"><h3>Sus pesos</h3>
         ${H.total ? `<svg class="histo" viewBox="0 0 ${H.bins.length * 10} 60" role="img" aria-label="Reparto de sus ${H.total} pesos">${H.bins.map((x, i) => `<rect x="${i * 10 + 1}" y="${60 - Math.max(x.n ? 2 : 0, (54 * x.n) / maxN)}" width="8" height="${Math.max(x.n ? 2 : 0, (54 * x.n) / maxN)}" class="${i === (H.bins.length - 1) / 2 ? 'zero' : x.hi <= 0 ? 'neg' : 'pos'}"><title>${f2(x.lo)} a ${f2(x.hi)}: ${x.n}</title></rect>`).join('')}</svg>
           <p class="dim histo-axis"><span>−${f2(H.maxAbs)}</span><span>0</span><span>+${f2(H.maxAbs)}</span></p>
           <p class="dim">${H.total.toLocaleString('es-ES')} pesos${H.zeros ? `, <b class="zero-t">${H.zeros} a cero</b>` : ''}. Barras naranjas: negativos; cian: positivos; la del medio, los que están cerca de 0.</p>
@@ -743,7 +658,7 @@ export function mountEditor(root, { catalog, toast }) {
   // sin bloque elegido: qué es esta red, qué le falta y qué le recomendamos
   function netSummary() {
     const r = Hn.readiness(S.genome, catalog);
-    return `<div class="capa"><section class="capa-cfg"><h3>Tu red, en una lista</h3>
+    return `<div class="capa"><section class="capa-cfg" data-tut="resumen"><h3>Tu red, en una lista</h3>
       <ul class="ready">${r.map((x) => `<li class="${x.ok ? 'ok' : x.required ? 'bad' : 'meh'}"><b>${x.ok ? '✔' : x.required ? '✘' : '·'} ${esc(x.text)}</b>${x.ok ? '' : `<span>${esc(x.need)}</span> ${readyButtons(x)}`}</li>`).join('')}</ul></section>
       <section class="capa-what"><h3>¿Qué hace cada capa?</h3><p class="explain big">Pulsa un bloque del lienzo: aquí verás qué hace, con un ejemplo, qué recibe y a quién se lo da, y abajo a la izquierda podrás ajustarlo.</p>
         <p class="dim">Con el teclado: Tab hasta un bloque, Intro para elegirlo, flechas para moverlo (Mayús: más lejos), Supr para quitarlo, Ctrl+Z para deshacer.</p></section></div>`;
@@ -782,7 +697,7 @@ export function mountEditor(root, { catalog, toast }) {
       learning: learningTab,
       imagination: imaginationTab,
     }[S.genesTab]();
-    return `<div class="subtabs" role="tablist" aria-label="Genes">${GENES.map(([k, t]) => `<button type="button" role="tab" data-genes="${k}" aria-selected="${S.genesTab === k}">${esc(t)}</button>`).join('')}</div><div class="genes">${body}</div>`;
+    return `<div class="subtabs" role="tablist" aria-label="Genes">${GENES.map(([k, t]) => `<button type="button" role="tab" data-genes="${k}" data-tut="gen-${k}" aria-selected="${S.genesTab === k}">${esc(t)}</button>`).join('')}</div><div class="genes" data-tut="genes-cuerpo">${body}</div>`;
   }
   // lo que ve cada ojo en la escena del banco, número a número y con su nombre
   function veTab() {
@@ -861,7 +776,7 @@ export function mountEditor(root, { catalog, toast }) {
     const r = Hn.readiness(S.genome, catalog);
     const server = S.server && S.server.error ? `<h3>El servidor no la guardó</h3><p class="bad">${esc(S.server.error)}</p><ul class="issues">${(S.server.errors || []).map((x) => issueRow({ ...x, kind: 'error' })).join('')}</ul>` : '';
     return `<div class="vcols"><section><h3>¿Puede jugar?</h3><ul class="ready">${r.map((x) => `<li class="${x.ok ? 'ok' : x.required ? 'bad' : 'meh'}"><b>${x.ok ? '✔' : x.required ? '✘' : '·'} ${esc(x.text)}</b>${x.ok ? '' : `<span>${esc(x.need)}</span> ${readyButtons(x)}`}</li>`).join('')}</ul></section>
-      <section>${server}<h3>Errores y avisos</h3>${fx.length ? `<div class="fixes"><b>Arreglar con un clic</b> <small class="dim">(solo cuando hay una única forma de arreglarlo)</small>${fx.map((f) => `<button type="button" class="mini fix" data-fix="${esc(f.key)}">${esc(f.label)}</button>`).join('')}</div>` : ''}
+      <section>${server}<h3>Errores y avisos</h3>${fx.length ? `<div class="fixes" data-tut="arreglar"><b>Arreglar con un clic</b> <small class="dim">(solo cuando hay una única forma de arreglarlo)</small>${fx.map((f) => `<button type="button" class="mini fix" data-fix="${esc(f.key)}">${esc(f.label)}</button>`).join('')}</div>` : ''}
         ${all.length ? `<ul class="issues">${all.map(issueRow).join('')}</ul>` : '<p class="empty good">Sin errores ni avisos.</p>'}
         ${fresh.length ? `<h3>Pesos nuevos al guardar</h3><p>Estos bloques cambiaron de forma y empezarán con pesos nuevos: lo que habían aprendido se pierde. ${fresh.map((b) => `<button type="button" class="link" data-goto="${esc(b.id)}">${esc(b.id)}</button>`).join(', ')}.</p>` : ''}</section></div>`;
   }
@@ -870,7 +785,7 @@ export function mountEditor(root, { catalog, toast }) {
     if (!S.genome) { patch(p, ''); return; }
     const nIss = S.check.errors.length + S.check.warnings.length + (S.forPlay.ok ? 0 : 1);
     const body = S.folded ? '' : { capa: capaTab, genes: genesTab, ve: veTab, versiones: versionesTab, avisos: avisosTab }[S.panelTab]();
-    patch(p, `<div class="tabs" role="tablist" data-key="tabs">${PTABS.map(([k, t]) => `<button role="tab" type="button" data-ptab="${k}" aria-selected="${!S.folded && S.panelTab === k}" class="${k === 'avisos' && S.check.errors.length ? 'has-err' : ''}">${esc(k === 'avisos' && nIss ? `${t} (${nIss})` : t)}</button>`).join('')}<p class="legend2" data-key="legend" aria-label="Qué lleva cada cable"><span class="lg s-ctx" title="Una vez por soldado y turno">contexto</span><span class="lg s-cand" title="Una fila por cada tiro imaginado">candidatos</span><span class="lg s-move" title="Una fila por cada sitio adonde moverse">destinos</span>${S.bench.sig ? '<span class="lg nv" title="Un pulso corre por cada cable: más vivo cuanta más señal pasa en la escena del banco">señal real</span>' : ''}</p><button type="button" class="fold" data-act="fold" aria-expanded="${!S.folded}" title="${S.folded ? 'Abre el panel' : 'Pliega el panel para dar todo el sitio al lienzo'}">${S.folded ? '▴ Abrir' : '▾ Plegar'}</button></div>${S.folded ? '' : `<div class="panel-body" data-key="body-${S.panelTab}">${body}</div>`}`);
+    patch(p, `<div class="tabs" role="tablist" data-key="tabs">${PTABS.map(([k, t]) => `<button role="tab" type="button" data-ptab="${k}" data-tut="tab-${k}" aria-selected="${!S.folded && S.panelTab === k}" class="${k === 'avisos' && S.check.errors.length ? 'has-err' : ''}">${esc(k === 'avisos' && nIss ? `${t} (${nIss})` : t)}</button>`).join('')}<p class="legend2" data-key="legend" data-tut="leyenda" aria-label="Qué lleva cada cable"><span class="lg s-ctx" title="Una vez por soldado y turno">contexto</span><span class="lg s-cand" title="Una fila por cada tiro imaginado">candidatos</span><span class="lg s-move" title="Una fila por cada sitio adonde moverse">destinos</span>${S.bench.sig ? '<span class="lg nv" title="Un pulso corre por cada cable: más vivo cuanta más señal pasa en la escena del banco">señal real</span>' : ''}</p><button type="button" class="fold" data-act="fold" data-tut="plegar" aria-expanded="${!S.folded}" title="${S.folded ? 'Abre el panel' : 'Pliega el panel para dar todo el sitio al lienzo'}">${S.folded ? '▴ Abrir' : '▾ Plegar'}</button></div>${S.folded ? '' : `<div class="panel-body" data-key="body-${S.panelTab}">${body}</div>`}`);
   }
 
   // ---------- banco de pruebas (a la derecha, abajo): la red decide aquí mismo ----------
@@ -886,6 +801,7 @@ export function mountEditor(root, { catalog, toast }) {
     S.bench.pick = S.bench.now.ok ? Bn.pick(S.bench.now.decision) : null;
     renderBench(); renderBoard();
     if (S.panelTab === 've' || (S.panelTab === 'capa' && S.sel)) renderPanel();
+    tutUpdate();
   }
   const X = (x) => (x + 25) * 10, Y = (y) => (15 - y) * 10;
   function benchSVG(sc, res) {
@@ -904,7 +820,7 @@ export function mountEditor(root, { catalog, toast }) {
       lines = d.moves.map((m) => `<circle cx="${X(m.to.x)}" cy="${Y(m.to.y)}" r="${3 + 9 * Math.min(1, m.p * 2)}" class="b-mv${m.i === d.chosenMove ? ' on' : ''}${m.impossible ? ' no' : ''}"><title>${m.stay ? 'quedarse' : `ir a (${f2(m.to.x)}, ${f2(m.to.y)})`} · p ${f2(m.p)}${m.impossible ? ` · imposible (${esc(m.why)})` : ''}</title></circle>`).join('');
     }
     const sol = sc.scene.soldiers.map((x) => `<g data-key="s:${esc(x.id)}" class="b-s ${x.team}${x.id === sc.scene.soldierId ? ' me' : ''}" data-soldier="${esc(x.id)}"><circle cx="${X(x.x)}" cy="${Y(x.y)}" r="${x.id === sc.scene.soldierId ? 8 : 6}"/><text x="${X(x.x)}" y="${Y(x.y) - 11}">${esc(x.id === sc.scene.soldierId ? 'tu red' : x.id)}</text></g>`).join('');
-    return `<svg viewBox="0 0 500 300" class="bench-svg${sc.key === 'mia' ? ' editable' : ''}" id="benchSvg" role="img" aria-label="Escena: ${esc(sc.name)}"><rect x="0" y="0" width="500" height="300" class="b-plane"/><line x1="250" y1="0" x2="250" y2="300" class="b-axis"/><line x1="0" y1="150" x2="500" y2="150" class="b-axis"/>${obs}${lines}${sol}</svg>`;
+    return `<svg viewBox="0 0 500 300" data-tut="escena" class="bench-svg${sc.key === 'mia' ? ' editable' : ''}" id="benchSvg" role="img" aria-label="Escena: ${esc(sc.name)}"><rect x="0" y="0" width="500" height="300" class="b-plane"/><line x1="250" y1="0" x2="250" y2="300" class="b-axis"/><line x1="0" y1="150" x2="500" y2="150" class="b-axis"/>${obs}${lines}${sol}</svg>`;
   }
   function renderBench() {
     const el = $('edBench');
@@ -915,17 +831,17 @@ export function mountEditor(root, { catalog, toast }) {
     const same = now && now.ok && sv && sv.ok ? Bn.sameChoice(sv.decision, now.decision) : null;
     const desc = (x) => (!x ? '—' : x.kind === 'move' ? `${x.stay ? 'quedarse quieta' : `moverse a (${f2(x.to.x)}, ${f2(x.to.y)})`} · probabilidad <b class="mono">${f2(x.p)}</b>` : `el tiro <span class="mono">#${x.i}</span>, ${esc(FAMILY_A[x.family] || `de la familia ${x.family}`)} <span class="mono">${esc(x.mode === 'ode2' ? `y'' = ${prettyExpr(x.expr)} · ${Math.round(x.angle ?? 0)}°` : x.mode === 'ode1' ? `y' = ${prettyExpr(x.expr)}` : `y = ${prettyExpr(x.expr)}`)}</span> · probabilidad <b class="mono">${f2(x.p)}</b>, certeza <b class="mono">${f2(x.certainty)}</b>`);
     const att = now && now.ok && now.decision.attribution ? now.decision.attribution.filter((r) => r.share >= 0.005).sort((x, y) => y.share - x.share) : [];
-    const tools = sc.key === 'mia' ? `<div class="b-tools" role="group" aria-label="Editar tu escena"><button type="button" class="mini" data-bench="enemy">+ enemigo</button><button type="button" class="mini" data-bench="ally">+ aliada</button><button type="button" class="mini" data-bench="rock">+ roca</button>${B.picked ? `<button type="button" class="mini danger" data-bench="del">Quitar ${esc(B.picked.kind === 'rock' ? 'la roca' : B.picked.id)}</button>` : ''}</div>` : '';
-    patch(el, `<header><h3>Banco de pruebas</h3><button type="button" class="primary mini" data-act="probe" title="Una partida de verdad (x10) contra otra red, aquí mismo">Probar ya</button></header>
-      <div class="b-scenes" role="radiogroup" aria-label="Escena">${[...Bn.BENCH_SCENES, { key: 'mia', name: 'Tu escena' }].map((x) => `<button type="button" role="radio" aria-checked="${B.scene === x.key}" data-scene="${x.key}" title="${esc(x.explain || 'Tu propia escena: empieza como la que tengas elegida y la cambias arrastrando.')}">${esc(x.name)}</button>`).join('')}</div>
+    const tools = sc.key === 'mia' ? `<div class="b-tools" data-tut="tu-escena" role="group" aria-label="Editar tu escena"><button type="button" class="mini" data-bench="enemy">+ enemigo</button><button type="button" class="mini" data-bench="ally">+ aliada</button><button type="button" class="mini" data-bench="rock">+ roca</button>${B.picked ? `<button type="button" class="mini danger" data-bench="del">Quitar ${esc(B.picked.kind === 'rock' ? 'la roca' : B.picked.id)}</button>` : ''}</div>` : '';
+    patch(el, `<header><h3>Banco de pruebas</h3><button type="button" class="primary mini" data-act="probe" data-tut="probar" title="Una partida de verdad (x10) contra otra red, aquí mismo">Probar ya</button></header>
+      <div class="b-scenes" data-tut="escenas" role="radiogroup" aria-label="Escena">${[...Bn.BENCH_SCENES, { key: 'mia', name: 'Tu escena' }].map((x) => `<button type="button" role="radio" aria-checked="${B.scene === x.key}" data-scene="${x.key}"${x.key === 'mia' ? ' data-tut="tu-escena"' : ''} title="${esc(x.explain || 'Tu propia escena: empieza como la que tengas elegida y la cambias arrastrando.')}">${esc(x.name)}</button>`).join('')}</div>
       ${benchSVG(sc, now)}${tools}
       <p class="b-explain">${esc(sc.explain)}</p>
-      <div class="b-row"><span class="seg2" role="radiogroup" aria-label="Qué decide"><button type="button" role="radio" data-phase="shoot" aria-checked="${B.phase === 'shoot'}">Disparar</button><button type="button" role="radio" data-phase="move" aria-checked="${B.phase === 'move'}">Moverse</button></span>
-        <label class="seed">Semilla <input class="numin mono" type="number" min="0" step="1" value="${esc(B.seed)}" data-bseed title="La misma semilla sortea igual: si la elección cambia, es por tus cambios"></label></div>
+      <div class="b-row"><span class="seg2" data-tut="fase" role="radiogroup" aria-label="Qué decide"><button type="button" role="radio" data-phase="shoot" aria-checked="${B.phase === 'shoot'}">Disparar</button><button type="button" role="radio" data-phase="move" aria-checked="${B.phase === 'move'}">Moverse</button></span>
+        <label class="seed" data-tut="semilla">Semilla <input class="numin mono" type="number" min="0" step="1" value="${esc(B.seed)}" data-bseed title="La misma semilla sortea igual: si la elección cambia, es por tus cambios"></label></div>
       <div class="b-out" aria-live="polite">${!now ? '<p class="dim">Calculando…</p>' : !now.ok ? `<p class="warn-text">${esc(now.error)}</p>` : `
-        <p><b>${S.dirty && b ? 'Con tus cambios' : 'Tu red'}</b>: ${desc(a)}</p>
+        <p data-tut="decision"><b>${S.dirty && b ? 'Con tus cambios' : 'Tu red'}</b>: ${desc(a)}</p>
         ${S.dirty && b ? `<p class="dim"><b>La guardada</b>: ${desc(b)}</p><p class="${same ? 'dim' : 'good'}">${same ? 'Tus cambios no cambian lo que escoge aquí.' : '¡Tus cambios cambian lo que escoge aquí!'}</p>` : ''}
-        ${att.length ? `<div class="attr"><span class="dim">Se fijó sobre todo en:</span>${att.slice(0, 4).map((r) => `<span class="ab"><i style="width:${Math.round(r.share * 100)}%"></i><b>${esc(r.name)}</b> ${pct(r.share)}</span>`).join('')}</div>` : ''}
+        ${att.length ? `<div class="attr" data-tut="se-fijo"><span class="dim">Se fijó sobre todo en:</span>${att.slice(0, 4).map((r) => `<span class="ab"><i style="width:${Math.round(r.share * 100)}%"></i><b>${esc(r.name)}</b> ${pct(r.share)}</span>`).join('')}</div>` : ''}
         <p class="dim small">Sin entrenar, una red escoge casi al azar: la certeza lo dice (cerca de 0 = duda). Curvas tenues: los tiros que imagina; en blanco, el escogido.</p>`}</div>`);
   }
   // editar tu escena: arrastrar soldados y rocas, doble clic para una roca, rueda para su tamaño
@@ -946,14 +862,15 @@ export function mountEditor(root, { catalog, toast }) {
     if (!bdrag) return;
     const p = benchPoint(ev);
     S.bench.custom = bdrag.kind === 'soldier' ? Bn.moveSoldier(S.bench.custom, bdrag.id, p.x, p.y) : Bn.moveObstacle(S.bench.custom, bdrag.i, p.x, p.y);
+    bdrag.moved = true;
     scheduleBench(30);
   });
-  root.addEventListener('pointerup', () => { if (bdrag) { bdrag = null; renderBench(); } });
+  root.addEventListener('pointerup', () => { if (bdrag) { if (bdrag.moved) bump('bench'); bdrag = null; renderBench(); tutUpdate(); } });
   root.addEventListener('dblclick', (ev) => {
     const svg = ev.target.closest && ev.target.closest('#benchSvg.editable');
     if (!svg || ev.target.closest('[data-soldier],[data-rock]')) return;
     const p = benchPoint(ev);
-    S.bench.custom = Bn.addRock(S.bench.custom, p.x, p.y); scheduleBench(0);
+    S.bench.custom = Bn.addRock(S.bench.custom, p.x, p.y); bump('bench'); scheduleBench(0);
   });
   root.addEventListener('wheel', (ev) => {
     const rk = ev.target.closest && ev.target.closest('#benchSvg.editable [data-rock]');
@@ -1012,7 +929,7 @@ export function mountEditor(root, { catalog, toast }) {
     return busy;
   }
   async function probeOpen(rival0 = null) {
-    if (S.coach && S.coach.on && !S.coach.probed) { S.coach.probed = true; coachSave(); renderCoach(); }
+    bump('probe');
     const busy = await probeBusy();
     const rivals = S.nets.filter((n) => n.id !== S.netId && !busy.has(n.id));
     const q = rivals.find((n) => n.id === rival0) || rivals.find((n) => n.isQueen) || rivals.find((n) => n.id === 'vidente-1') || rivals[0];
@@ -1061,6 +978,7 @@ export function mountEditor(root, { catalog, toast }) {
   async function restoreVersion(n) {
     const r = await api(`/api/lab/nets/${encodeURIComponent(S.netId)}/versions/${n}/restore`, 'POST', {});
     if (!r.ok) { toast(reasonOf(r), 'error'); return; }
+    bump('restore');
     await open(S.netId, { force: true });
     S.panelTab = 'versiones'; S.versions.list = null; renderPanel();
     toast(`Vuelta a la versión ${n}. La de antes quedó guardada como versión ${r.body.savedAs}.`);
@@ -1097,6 +1015,7 @@ export function mountEditor(root, { catalog, toast }) {
     mark(S.hoverWire, false); mark(i, true);
     S.hoverWire = i;
     renderWireTools();
+    tutUpdate();
   }
   const WIRE_ZONE = 'path.hit[data-wire], #edWireTools';
   root.addEventListener('pointerover', (ev) => {
@@ -1128,16 +1047,6 @@ export function mountEditor(root, { catalog, toast }) {
     if (t.dataset.open) { S.menu = false; open(t.dataset.open); return; }
     if (t.dataset.tpl) { S.tplOpen = S.tplOpen === t.dataset.tpl ? null : t.dataset.tpl; renderRail(); const f = root.querySelector('.tpl-form input'); if (f) f.select(); return; }
     if (t.dataset.add) { if (!S.genome) return; addBlock(t.dataset.add); return; }
-    if (t.dataset.coach) {
-      const c = t.dataset.coach;
-      if (c === 'open') { if (!S.genome) return; if (!S.coach) coachStart(); else { S.coach.on = !S.coach.on; coachSave(); render(); } return; }
-      if (c === 'close') { if (S.coach) { S.coach.on = false; coachSave(); render(); } return; }
-      if (c === 'restart') { coachStart(); return; }
-      if (c === 'hint') { S.coach.hint = true; renderBoard(); return; }
-      if (c === 'help') { coachHelp(); return; }
-      if (c.startsWith('bet:')) { S.coach.bet = c.slice(4); coachSave(); renderBoard(); return; }
-      return;
-    }
     if (t.dataset.insert) {
       const r = M.insertOnWire(S.genome, Number(t.dataset.index), t.dataset.insert, catalog);
       if (r.error) { toast(r.error, 'error'); return; }
@@ -1149,7 +1058,7 @@ export function mountEditor(root, { catalog, toast }) {
     if (t.dataset.unwire !== undefined) { unwire(Number(t.dataset.unwire)); return; }
     if (t.dataset.wireplus) { const wi = Number(t.dataset.wireplus); if (!(S.sel && S.sel.kind === 'wire' && S.sel.index === wi)) { S.sel = { kind: 'wire', index: wi }; renderBoard(); } S.panelTab = 'capa'; if (S.folded) fold(false); else renderPanel(); setTimeout(() => { const el = $('edInsert'); if (el) { el.scrollIntoView({ block: 'nearest' }); el.querySelector('button')?.focus(); } }, 60); return; }
     if (t.dataset.wireup) { const [a, b] = t.dataset.wireup.split('|'); const r = M.connect(S.genome, a, b); if (r.error) { toast(r.error, 'error'); return; } commit(r.genome); return; }
-    if (t.dataset.fix) { const f = Hn.fixes(S.genome, catalog, S.check).find((x) => x.key === t.dataset.fix); if (f) { commit(f.apply(S.genome), { label: f.label }); toast(`Arreglado: ${f.label}.`); } return; }
+    if (t.dataset.fix) { const f = Hn.fixes(S.genome, catalog, S.check).find((x) => x.key === t.dataset.fix); if (f) { bump('fix'); commit(f.apply(S.genome), { label: f.label }); toast(`Arreglado: ${f.label}.`); } return; }
     if (t.dataset.node) {
       if (suppressClick) { suppressClick = false; return; }
       select({ kind: 'block', id: t.dataset.node });
@@ -1163,7 +1072,7 @@ export function mountEditor(root, { catalog, toast }) {
     if (t.dataset.vback) { S.confirm = { kind: 'restore', n: Number(t.dataset.vback) }; showModal(); return; }
     if (t.dataset.scene) {
       if (t.dataset.scene === 'mia') useCustom();
-      S.bench.scene = t.dataset.scene; S.bench.picked = null; scheduleBench(0); renderBench(); return;
+      S.bench.scene = t.dataset.scene; S.bench.picked = null; bump('scene'); scheduleBench(0); renderBench(); return;
     }
     if (t.dataset.phase) { S.bench.phase = t.dataset.phase; scheduleBench(0); return; }
     if (t.dataset.bench) {
@@ -1172,7 +1081,7 @@ export function mountEditor(root, { catalog, toast }) {
       else if (t.dataset.bench === 'ally') b.custom = Bn.addSoldier(b.custom, 'left');
       else if (t.dataset.bench === 'rock') b.custom = Bn.addRock(b.custom, 0, 0);
       else if (t.dataset.bench === 'del' && b.picked) { b.custom = b.picked.kind === 'rock' ? Bn.removeRock(b.custom, b.picked.i) : Bn.removeSoldier(b.custom, b.picked.id); b.picked = null; }
-      scheduleBench(0); return;
+      bump('bench'); scheduleBench(0); return;
     }
     if (t.dataset.modal) {
       const kind = t.dataset.modal, pending = S.pending, conf = S.confirm;
@@ -1187,6 +1096,7 @@ export function mountEditor(root, { catalog, toast }) {
     }
     switch (t.dataset.act) {
       case 'save': save(); break;
+      case 'guide': tutGuide(); break;
       case 'undo': undo(); break;
       case 'redo': redo(); break;
       case 'menu': S.menu = !S.menu; renderHead(); break;
@@ -1203,7 +1113,8 @@ export function mountEditor(root, { catalog, toast }) {
       default: break;
     }
   };
-  root.addEventListener('click', onClick);
+  const onClickT = async (ev) => { await onClick(ev); tutUpdate(); };
+  root.addEventListener('click', onClickT);
 
   root.addEventListener('submit', (ev) => {
     const f = ev.target.closest('form[data-create]');
@@ -1236,6 +1147,7 @@ export function mountEditor(root, { catalog, toast }) {
       const cur = M.getPath(S.genome, path);
       const raw = el.type === 'checkbox' ? el.checked : el.value;
       const v = param ? M.coerce(param, raw, cur) : raw;
+      if (!partial) bump(`gene:${path.split('.')[0]}`);
       commit(M.setPath(S.genome, path, v), { partial, key: path, label: `${param && param.name ? param.name : path}: ${num(cur)} → ${num(v)}` });
       syncTwins(el);
       return;
@@ -1269,7 +1181,7 @@ export function mountEditor(root, { catalog, toast }) {
   root.addEventListener('input', onInput);
   const onChange = (ev) => {
     const el = ev.target;
-    if (el.dataset.bseed !== undefined) { S.bench.seed = Math.max(0, Math.round(Number(el.value) || 0)); scheduleBench(0); return; }
+    if (el.dataset.bseed !== undefined) { S.bench.seed = Math.max(0, Math.round(Number(el.value) || 0)); bump('seed'); scheduleBench(0); return; }
     if (el.dataset.prival !== undefined) { S.probe.rival = el.value; return; }
     if (el.dataset.import !== undefined && el.files && el.files[0]) { S.menu = false; importFile(el.files[0]); el.value = ''; return; }
     if (el.dataset.connect) {
@@ -1289,7 +1201,7 @@ export function mountEditor(root, { catalog, toast }) {
     if (el.id === 'edName') { renderRail(); return; }
     onControl(ev, false);
   };
-  root.addEventListener('change', onChange);
+  root.addEventListener('change', (ev) => { onChange(ev); tutUpdate(); });
 
   // teclado: Ctrl+Z / Ctrl+Y deshacer y rehacer; en el lienzo, Supr quita, flechas mueven (Mayús: más lejos), Esc suelta
   const onKey = (ev) => {
@@ -1336,6 +1248,7 @@ export function mountEditor(root, { catalog, toast }) {
       if (ev.altKey) {
         const r = P.unplugAll(S.genome, catalog, where.id, where.port);
         if (!r.removed.length) { toast('Ese punto no tiene cables.'); return; }
+        bump('unwire');
         commit(r.genome, { select: null, label: r.text });
         toast(r.text, 'info', { label: 'Deshacer', run: undo });
         return;
@@ -1452,7 +1365,9 @@ export function mountEditor(root, { catalog, toast }) {
       const r = P.drop(S.genome, catalog, L.held, { node: L.hot }, L.tg);
       if (r.action === 'nada') { if (r.why) toast(r.why, 'error'); renderBoard(); return; }
       const sel = r.action === 'remove' ? null : { kind: 'block', id: L.held.kind === 'to' ? L.held.to : L.hot };
+      if (r.action === 'remove') bump('unwire'); else bump('plug');
       commit(r.genome, { select: sel, label: r.label });
+      if (r.action === 'connect' || r.action === 'move') drawIn($('edBoard').querySelector(`svg.wires path.wire[data-key="w:${S.genome.wires.length - 1}"]`));
       toast(r.text, 'info', r.action === 'remove' || r.action === 'move' ? { label: 'Deshacer', run: undo } : null);
       return;
     }
@@ -1474,6 +1389,98 @@ export function mountEditor(root, { catalog, toast }) {
   window.addEventListener('beforeunload', (ev) => { if (S.dirty) { ev.preventDefault(); ev.returnValue = ''; } });
   window.addEventListener('resize', () => { if (S.fit && S.genome && !root.closest('[hidden]')) renderBoard(); });
 
+  // ---------- tutorial (spec/12 §4): el editor en penumbra que se va encendiendo ----------
+  // el editor le da al tutorial lo que sabe (tutUi), hace sus «Hazlo por mí» (tutHelp), los cambios del Sistema en los
+  // retos (tutSetup) y lo que necesita cada capítulo (tutEnsure); el avance se guarda en meta.tutorial.crear del mundo
+  function tutUi() {
+    return {
+      netId: S.netId, tplOpen: S.tplOpen, scene: S.bench.scene, seed: S.bench.seed, phase: S.bench.phase, panelTab: S.panelTab, genesTab: S.genesTab,
+      hoverWire: S.hoverWire, insertOpen: !!(S.sel && S.sel.kind === 'wire' && S.panelTab === 'capa' && !S.folded),
+      saved: !S.dirty && !!S.saved && S.saved.blocks.length > 0, dirty: S.dirty, folded: S.folded, ev: S.ev, probeOpen: !!S.probe,
+      path: S.world && S.world.meta ? S.world.meta.path : null, errors: S.check ? S.check.errors.length : 0, canPlay: !!(S.forPlay && S.forPlay.ok),
+      ...benchFacts(),
+    };
+  }
+  function tutUpdate() { if (tut) tut.update(); }
+  let tutSaveT = null;
+  function tutSave(p) {
+    S.tut = p;
+    if (!S.world || !S.world.meta) return;
+    const tutorial = { ...(S.world.meta.tutorial || {}), crear: p };
+    S.world.meta = { ...S.world.meta, tutorial };
+    clearTimeout(tutSaveT);
+    const put = () => api(`/api/worlds/${S.world.n}/meta`, 'PUT', { tutorial }).catch(() => {});
+    if (p && !p.on) put(); else tutSaveT = setTimeout(put, 400); // al acabar o saltar, al momento
+  }
+  async function tutHelp(h) {
+    if (!h) return;
+    if (h.create) { await createBlank('Mi red', { quiet: true }); return; }
+    if (h.panelTab) { S.panelTab = h.panelTab; if (S.folded) fold(false); }
+    if (h.genesTab) { S.panelTab = 'genes'; S.genesTab = h.genesTab; if (S.folded) fold(false); }
+    if (h.scene) { if (h.scene === 'mia') useCustom(); S.bench.scene = h.scene; bump('scene'); }
+    if (h.benchMove && S.bench.custom) {
+      const c = S.bench.custom, me = c.soldiers.find((x) => x.id === c.soldierId), e = c.soldiers.find((x) => me && x.team !== me.team);
+      if (e) { S.bench.custom = Bn.moveSoldier(c, e.id, e.x - 4, e.y + 3); bump('bench'); }
+    }
+    if (h.seed) { S.bench.seed = (Number(S.bench.seed) || 0) + h.seed; bump('seed'); }
+    if (h.phase) S.bench.phase = h.phase;
+    if (h.scene || h.seed || h.phase || h.benchMove) scheduleBench(0);
+    if (h.undo) undo();
+    if (h.save) await save();
+    if (h.fix) { const f = Hn.fixes(S.genome, catalog, S.check)[0]; if (f) { bump('fix'); commit(f.apply(S.genome), { label: f.label }); toast(`Arreglado: ${f.label}.`); } }
+    if (h.restore) {
+      const r = await api(`/api/lab/nets/${encodeURIComponent(S.netId)}/versions`);
+      const n = r.ok && r.body.versions.length ? Math.max(...r.body.versions.map((v) => v.n)) : null;
+      if (n) await restoreVersion(n);
+    }
+    const g = TC.applyGenome(S.genome, h, catalog);
+    if (g && g !== S.genome) {
+      if (h.unwire || h.unwireInto) bump('unwire');
+      if (h.gpath) bump(`gene:${h.gpath.path.split('.')[0]}`);
+      const added = g.blocks.find((b) => !S.genome.blocks.some((x) => x.id === b.id));
+      if (added) S.panelTab = 'capa';
+      commit(g, { select: added ? { kind: 'block', id: added.id } : S.sel, label: 'Hecho por el Sistema' });
+      if (added) popIn($('edBoard').querySelector(`[data-node="${CSS.escape(added.id)}"]`));
+    }
+    if (h.hover) { let i = TC.wireIndex(S.genome, h.hover[0], h.hover[1]); if (i < 0) i = TC.wireIndex(S.genome, 'think', h.hover[1]); if (i >= 0) hoverWire(i); }
+    render();
+  }
+  async function tutSetup(s) {
+    const g = TC.applyGenome(S.genome, s, catalog);
+    if (g && g !== S.genome) commit(g, { select: null, label: 'Cambiado por el Sistema' });
+    if (s.resetHistory) { S.hist = Hi.createHistory(S.genome); renderHead(); }
+    if (s.save) await save();
+  }
+  async function tutEnsure(ci) {
+    if (ci < 1) return;
+    if (!S.genome) await createBlank('Mi red', { quiet: true });
+    if (!S.genome) return;
+    const g = TC.ensureFor(ci, S.genome, catalog);
+    if (g !== S.genome) commit(g, { select: null, label: 'Preparado por el Sistema para este capítulo' });
+  }
+  function tutFinish(kind) {
+    S.hoverWire = null;
+    render();
+    if (kind === 'done') toast('Tutorial acabado: ya conoces cada parte del editor. Lo siguiente es entrenar tu red (etapa 2). El botón «Guía» lo repite cuando quieras.');
+    else toast('Tutorial saltado: te pierdes cómo se enchufa, se deshace y se prueba cada pieza. Vuelve donde lo dejaste con el botón «Guía» (arriba a la derecha del lienzo).');
+  }
+  // el botón Guía: retoma donde lo dejaste; si ya lo acabaste, empieza otra vez
+  function tutGuide() {
+    if (!tut || tut.active()) return;
+    const p = S.tut;
+    if (p && !p.finished) tut.resume(); else tut.start(p && p.finished ? 0 : TC.startAt(S.world && S.world.meta ? S.world.meta.path : null));
+    render();
+  }
+  tut = mountTutorial({
+    chapters: TC.CHAPTERS, root,
+    ctx: () => TC.buildCtx(S.genome, tutUi(), catalog),
+    help: tutHelp, setup: tutSetup, ensure: tutEnsure, save: tutSave, finish: tutFinish,
+    // además de lo iluminado, siempre responden: el aviso (con «Deshacer»), el diálogo del editor, la ficha y los diálogos
+    allowed: (el) => !!(el.closest && el.closest('#toast, .ed-modal:not([hidden]), .ficha, dialog[open]')),
+    clip: '#edRail, #edBoard, #edBench, .panel-body, .ed-panel, .vtable-wrap',
+    onChange: () => { renderTools(); if (S.genome && !S.genome.blocks.length) renderBoard(); },
+  });
+
   return {
     async start(netId) {
       const t = await api('/api/lab/templates');
@@ -1485,16 +1492,24 @@ export function mountEditor(root, { catalog, toast }) {
         if (m.ok) { S.world = { n: w.body.active, meta: m.body }; const lv = Object.keys(LEVEL_WORLD).find((k) => LEVEL_WORLD[k] === m.body.level); if (lv) { S.level = lv; store.set(LS.level, lv); } }
       }
       await loadNets();
+      const meta = S.world && S.world.meta, saved = meta && meta.tutorial && meta.tutorial.crear;
+      const want = saved && saved.v === 1 && saved.on && !saved.finished && saved.data && saved.data.net;
+      if (want && S.nets.some((n) => n.id === want)) netId = want;
       if (netId && S.nets.some((n) => n.id === netId)) await open(netId, { force: true });
       else render();
+      // un mundo recién creado (solo tiene su rival de práctica) empieza el tutorial; uno a medias lo retoma
+      if (saved && saved.v === 1) { S.tut = saved; if (saved.on && !saved.finished) tut.resume(saved); }
+      else if (meta && !(meta.tutorial || {}).primeraRed && S.nets.every((n) => (meta.practice || []).includes(n.id))) tut.start(TC.startAt(meta.path));
+      render();
     },
     open,
     // la etapa le presta su cabecera (a la derecha del título, como en el mockup) para el nombre y los botones
     slot(el) {
-      if (S.slotEl !== el && el) { el.addEventListener('click', onClick); el.addEventListener('input', onInput); el.addEventListener('change', onChange); el.addEventListener('keydown', onKey); }
+      if (S.slotEl !== el && el) { el.addEventListener('click', onClickT); el.addEventListener('input', onInput); el.addEventListener('change', onChange); el.addEventListener('keydown', onKey); }
       S.slotEl = el; renderHead();
     },
     stop() { if (S.probe) probeClose(); },
+    tutorial: () => tut,
     get state() { return S; },
   };
 }

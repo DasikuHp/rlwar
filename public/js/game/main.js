@@ -149,7 +149,7 @@ function openNewDialog() {
         <label class="field" style="flex:1">Nombre del mundo<input id="nName" maxlength="40" value="Mundo ${free[0].n}"></label></div>
       <p class="g-note">Cada partida es un mundo entero: sus redes, su trono, sus dinastías y sus duelos. Empieza con una copia de <b>Vidente 1</b>, la rival de práctica.</p>
       <div class="paths" role="radiogroup" aria-label="Cómo empiezas">${PATHS.map((p, i) => `<label><input type="radio" name="path" value="${p.v}"${i === 0 ? ' checked' : ''}><b>${p.name}</b><span>${esc(p.help)}</span></label>`).join('')}</div>
-      <p class="g-note">El tutorial de cada camino llega en una fase posterior; de momento empiezas en el editor, con la vista que elijas (se cambia cuando quieras).</p>
+      <p class="g-note">Empiezas con el tutorial del editor: 8 capítulos cortos en los que montas tu primera red pieza a pieza. «Ya sé algo» empieza en el capítulo 3; se puede saltar entero o por capítulos, y el botón «Guía» lo retoma.</p>
       <p class="err" id="nErr"></p>
       <div class="row"><button type="submit" class="primary">Crear y empezar</button></div>
     </form>`;
@@ -245,7 +245,7 @@ async function showStage(r) {
   $('stageHead').innerHTML = `<div class="g-num" data-stage="${st.key}">${st.n}.</div>
     <div class="g-title"><h1>${st.key === 'trono' ? 'Resultados, <em>trono</em> y análisis' : esc(st.title)}</h1><p>${esc(st.sub)}</p></div>
     <div class="g-side"><div class="g-motto">Functions shape victory</div><div class="g-slot" id="stageSlot"></div></div>
-    <nav class="g-tabs" aria-label="Pestañas de la etapa">${st.tabs.length > 1 ? st.tabs.map((t) => `<a href="${hrefOf({ stage: st.key, tab: t.key })}"${t.key === r.tab ? ' aria-current="page"' : ''}>${esc(t.name)}</a>`).join('') : ''}</nav>`;
+    <nav class="g-tabs" aria-label="Pestañas de la etapa">${st.tabs.length > 1 ? st.tabs.map((t) => `<a href="${hrefOf({ stage: st.key, tab: t.key })}"${st.key === 'crear' ? ` data-tut="tab-${t.key}"` : ''}${t.key === r.tab ? ' aria-current="page"' : ''}>${esc(t.name)}</a>`).join('') : ''}</nav>`;
   const key = `${r.stage}/${r.tab}`;
   for (const el of $('view').children) el.hidden = el.dataset.view !== key;
   const el = viewEl(key);
